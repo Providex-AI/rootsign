@@ -112,6 +112,47 @@ class TestExcludedFieldsDoNotAffectHash:
         )
 
 
+class TestEnsureAsciiInvariant:
+    """The canonical serialization MUST use ensure_ascii=True so that hashes
+    are byte-identical across reimplementations (Phase 1 SDK, verify CLI,
+    Phase 2 dashboard). The non-ASCII golden vector also guards this, but
+    these tests fail with a much clearer error message if the flag is flipped.
+    """
+
+    def test_non_ascii_tool_name_escapes_to_unicode_codepoints(self):
+        import hashlib
+        import json
+
+        action = _base_action()
+        action["tool_name"] = "envío_correo_中文_🎯"
+
+        # Reproduce the canonical step the production function takes — but
+        # surface the intermediate JSON so we can assert on its form.
+        canonical = {
+            "action_id": str(action["action_id"]),
+            "session_id": str(action["session_id"]),
+            "tool_name": action["tool_name"],
+            "input_hash": action["input_hash"],
+            "output_hash": action["output_hash"] or "",
+            "prev_action_hash": action["prev_action_hash"] or "",
+            "timestamp": action["timestamp"].isoformat(),
+            "sequence_number": action["sequence_number"],
+        }
+        serialized = json.dumps(canonical, sort_keys=True, ensure_ascii=True)
+
+        # The raw non-ASCII characters MUST NOT appear in the canonical JSON.
+        assert "í" not in serialized, "ensure_ascii=True regression: 'í' leaked through"
+        assert "中" not in serialized, "ensure_ascii=True regression: '中' leaked through"
+        assert "🎯" not in serialized, "ensure_ascii=True regression: emoji leaked through"
+        # The escape sequence MUST appear instead (literal backslash-u-codepoint).
+        assert "\\u00ed" in serialized, "expected \\u00ed escape for 'í'"
+        assert "\\u4e2d" in serialized, "expected \\u4e2d escape for '中'"
+
+        # And the production hash must agree with the same serialization byte-for-byte.
+        expected = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+        assert compute_action_self_hash(action) == expected
+
+
 class TestRepresentationInvariants:
     def test_datetime_and_iso_string_produce_same_hash(self):
         """JSON-loaded vectors store timestamps as ISO strings, runtime uses datetime.

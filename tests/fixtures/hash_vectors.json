@@ -41,6 +41,20 @@
         "sequence_number": 3
       },
       "expected_self_hash": "89cbf6270ad4b1bbbe8fe4bcec4f9838b22d669711e43e3dca2aefdb3ada97c9"
+    },
+    {
+      "description": "non-ASCII tool_name \u2014 guards the ensure_ascii=True invariant",
+      "input": {
+        "action_id": "550e8400-e29b-41d4-a716-446655440004",
+        "session_id": "550e8400-e29b-41d4-a716-446655440001",
+        "tool_name": "env\u00edo_correo_\u4e2d\u6587_\ud83c\udfaf",
+        "input_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+        "output_hash": "5555555555555555555555555555555555555555555555555555555555555555",
+        "prev_action_hash": "89cbf6270ad4b1bbbe8fe4bcec4f9838b22d669711e43e3dca2aefdb3ada97c9",
+        "timestamp": "2026-05-01T10:00:15+00:00",
+        "sequence_number": 4
+      },
+      "expected_self_hash": "3ae678c1ea15c43436cdb5878f464c9d8780395e114e154eca6a5918b2b4b102"
     }
   ]
 }

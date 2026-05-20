@@ -60,6 +60,24 @@ VECTORS_SRC: list[dict] = [
             "sequence_number": 3,
         },
     },
+    {
+        # Non-ASCII canary — locks the `ensure_ascii=True` invariant in.
+        # Without this vector, flipping ensure_ascii to False is invisible to
+        # the test suite because every other vector is pure ASCII.
+        "description": "non-ASCII tool_name — guards the ensure_ascii=True invariant",
+        "input": {
+            "action_id": UUID("550e8400-e29b-41d4-a716-446655440004"),
+            "session_id": UUID("550e8400-e29b-41d4-a716-446655440001"),
+            "tool_name": "envío_correo_中文_🎯",
+            "input_hash": "4444444444444444444444444444444444444444444444444444444444444444",
+            "output_hash": "5555555555555555555555555555555555555555555555555555555555555555",
+            "prev_action_hash": (
+                "89cbf6270ad4b1bbbe8fe4bcec4f9838b22d669711e43e3dca2aefdb3ada97c9"
+            ),
+            "timestamp": datetime(2026, 5, 1, 10, 0, 15, tzinfo=timezone.utc),
+            "sequence_number": 4,
+        },
+    },
 ]
 
 
