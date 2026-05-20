@@ -1,0 +1,46 @@
+{
+  "vectors": [
+    {
+      "description": "first action in session \u2014 null prev_action_hash",
+      "input": {
+        "action_id": "550e8400-e29b-41d4-a716-446655440000",
+        "session_id": "550e8400-e29b-41d4-a716-446655440001",
+        "tool_name": "send_email",
+        "input_hash": "abc123def456abc123def456abc123def456abc123def456abc123def456abc1",
+        "output_hash": "def456abc123def456abc123def456abc123def456abc123def456abc123def4",
+        "prev_action_hash": null,
+        "timestamp": "2026-05-01T10:00:00+00:00",
+        "sequence_number": 1
+      },
+      "expected_self_hash": "9feaf921f62124bc85fe448dc010494f953fb4271e45f8d26303937f4d65e18d"
+    },
+    {
+      "description": "middle of chain \u2014 prev_action_hash points to previous self_hash",
+      "input": {
+        "action_id": "550e8400-e29b-41d4-a716-446655440002",
+        "session_id": "550e8400-e29b-41d4-a716-446655440001",
+        "tool_name": "query_database",
+        "input_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "output_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "prev_action_hash": "9feaf921f62124bc85fe448dc010494f953fb4271e45f8d26303937f4d65e18d",
+        "timestamp": "2026-05-01T10:00:05+00:00",
+        "sequence_number": 2
+      },
+      "expected_self_hash": "61a82794f7a0c40a6dc258c5d1a2868c5fd0424eb36594175a166247ec027e8b"
+    },
+    {
+      "description": "void action \u2014 null output_hash (e.g. side-effect tool returned nothing)",
+      "input": {
+        "action_id": "550e8400-e29b-41d4-a716-446655440003",
+        "session_id": "550e8400-e29b-41d4-a716-446655440001",
+        "tool_name": "rotate_secret",
+        "input_hash": "3333333333333333333333333333333333333333333333333333333333333333",
+        "output_hash": null,
+        "prev_action_hash": "0000000000000000000000000000000000000000000000000000000000000001",
+        "timestamp": "2026-05-01T10:00:10+00:00",
+        "sequence_number": 3
+      },
+      "expected_self_hash": "89cbf6270ad4b1bbbe8fe4bcec4f9838b22d669711e43e3dca2aefdb3ada97c9"
+    }
+  ]
+}

@@ -1,0 +1,166 @@
+"""Pytest config — function-scoped test engine with NullPool, per-test rollback.
+
+The test database is initialized via `alembic upgrade head -x db=test` (NOT
+Base.metadata.create_all) so the `actions` table becomes a real TimescaleDB
+hypertable. Each test runs inside a SAVEPOINT that is rolled back on teardown,
+leaving the schema intact for the next test.
+
+NullPool + a function-scoped engine avoids the classic asyncpg "Future attached
+to a different loop" error caused by SQLAlchemy reusing pooled connections
+across pytest-asyncio's per-test event loops.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+import subprocess
+import sys
+from collections.abc import AsyncIterator
+from pathlib import Path
+
+import pytest
+import pytest_asyncio
+from sqlalchemy import event, text
+from sqlalchemy.ext.asyncio import (
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
+from sqlalchemy.pool import NullPool
+
+from providex.config import settings
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _strip_driver(sqla_url: str) -> str:
+    """Strip the `+driver` portion to get a plain libpq DSN for psycopg2.connect."""
+    return re.sub(r"^postgresql\+[^:]+://", "postgresql://", sqla_url)
+
+
+def _ensure_test_database() -> None:
+    """Create the test database from the maintenance DB if it doesn't exist."""
+    import psycopg2
+    from psycopg2 import sql
+
+    maint_dsn = _strip_driver(settings.DATABASE_URL_SYNC)
+    conn = psycopg2.connect(maint_dsn)
+    conn.autocommit = True
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM pg_database WHERE datname='providex_test'")
+            if cur.fetchone() is None:
+                cur.execute(
+                    sql.SQL("CREATE DATABASE {} OWNER providex").format(
+                        sql.Identifier("providex_test")
+                    )
+                )
+    finally:
+        conn.close()
+
+    test_dsn = _strip_driver(settings.TEST_DATABASE_URL_SYNC)
+    conn = psycopg2.connect(test_dsn)
+    conn.autocommit = True
+    try:
+        with conn.cursor() as cur:
+            cur.execute("CREATE EXTENSION IF NOT EXISTS timescaledb")
+    finally:
+        conn.close()
+
+
+def _run_alembic_on_test_db() -> None:
+    env = os.environ.copy()
+    subprocess.run(
+        [sys.executable, "-m", "alembic", "-x", "db=test", "upgrade", "head"],
+        cwd=REPO_ROOT,
+        env=env,
+        check=True,
+    )
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _bootstrap_test_db():
+    """Bootstrap the test DB once per session."""
+    try:
+        _ensure_test_database()
+        _run_alembic_on_test_db()
+    except Exception as e:  # noqa: BLE001
+        print(f"[conftest] Test DB bootstrap failed: {e}", file=sys.stderr)
+        raise
+
+
+@pytest_asyncio.fixture
+async def test_engine():
+    """Function-scoped async engine using NullPool.
+
+    NullPool is necessary because pytest-asyncio creates a new event loop per
+    test by default, and asyncpg Future objects are tied to the loop that
+    created them. NullPool ensures we open a fresh connection per test.
+    """
+    engine = create_async_engine(
+        settings.TEST_DATABASE_URL, poolclass=NullPool, future=True
+    )
+    try:
+        yield engine
+    finally:
+        await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def db(test_engine) -> AsyncIterator[AsyncSession]:
+    """Per-test AsyncSession with SAVEPOINT-based rollback.
+
+    Pattern: open a transaction on a connection, attach a SAVEPOINT, and
+    reopen one each time the session commits. The outer rollback at teardown
+    discards everything the test wrote.
+    """
+    connection = await test_engine.connect()
+    transaction = await connection.begin()
+    async_session_factory = async_sessionmaker(
+        bind=connection,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        autoflush=False,
+    )
+    session = async_session_factory()
+    await connection.begin_nested()
+
+    @event.listens_for(session.sync_session, "after_transaction_end")
+    def _restart_savepoint(sess, trans):  # noqa: ANN001
+        if trans.nested and not trans._parent.nested:
+            connection.sync_connection.begin_nested()
+
+    try:
+        yield session
+    finally:
+        await session.close()
+        await transaction.rollback()
+        await connection.close()
+
+
+@pytest_asyncio.fixture
+async def clean_db(test_engine) -> AsyncIterator[AsyncSession]:
+    """Like `db`, but TRUNCATEs every table on teardown.
+
+    Use this for tests that need to commit (e.g. concurrent-write tests where
+    SAVEPOINTs interfere) or that span multiple sessions.
+    """
+    async_session_factory = async_sessionmaker(
+        bind=test_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        autoflush=False,
+    )
+    session = async_session_factory()
+    try:
+        yield session
+    finally:
+        await session.close()
+        async with test_engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "TRUNCATE TABLE approvals, actions, decisions, sessions, "
+                    "incidents, policies, agents RESTART IDENTITY CASCADE"
+                )
+            )

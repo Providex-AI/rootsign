@@ -1,0 +1,22 @@
+services:
+  db:
+    image: timescale/timescaledb:latest-pg16
+    container_name: providex-timescaledb
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: providex
+      POSTGRES_PASSWORD: providex
+      POSTGRES_DB: providex_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - providex_pgdata:/var/lib/postgresql/data
+      - ./scripts/init_test_db.sql:/docker-entrypoint-initdb.d/01_init_test_db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U providex -d providex_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  providex_pgdata:
