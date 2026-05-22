@@ -30,6 +30,10 @@ class ApprovalCreate(BaseModel):
     decision_reason: str | None = Field(default=None, max_length=2000)
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     response_latency_ms: int | None = Field(default=None, ge=0)
+    # NULL for standalone approvals. When the approval resolves a prior
+    # escalation, points at that escalation's approval_id. Depth validation
+    # (only 2 levels in Phase 0) lives in CRUDApproval, not here.
+    parent_approval_id: UUID | None = None
 
 
 class Approval(ApprovalCreate):

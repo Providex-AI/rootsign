@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
-from sqlalchemy import CheckConstraint, DateTime, Index, Integer, String
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, String
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -35,10 +35,21 @@ class Approval(Base):
         DateTime(timezone=True), nullable=False, default=_utcnow
     )
     response_latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Self-FK forming the escalation chain of custody. NULL for standalone
+    # approvals; for an Approval that resolves an escalation, points at the
+    # earlier escalated Approval. The 2-level rule (no escalating an
+    # escalation) is enforced in CRUDApproval, NOT via a SQL CHECK — see
+    # feedback_req03_decisions in agent memory for the rationale.
+    parent_approval_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("approvals.approval_id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
     __table_args__ = (
         Index("ix_approvals_action_id", "action_id"),
         Index("ix_approvals_decision_timestamp", "decision", "timestamp"),
+        Index("ix_approvals_parent_approval_id", "parent_approval_id"),
         CheckConstraint(
             "approver_type IN ("
             "'human','automated_policy','timeout_auto_approved','timeout_auto_rejected')",
