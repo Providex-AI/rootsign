@@ -67,3 +67,15 @@ exclude_lines = [
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+[tool.pyright]
+# Point basedpyright / pyright at the uv-managed virtualenv so it can resolve
+# pytest, sqlalchemy, etc. Both basedpyright (used by Cursor/VS Code) and
+# upstream pyright honor this section.
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.12"
+include = ["providex", "tests", "scripts"]
+exclude = [".venv", "alembic/versions"]
+reportMissingImports = "warning"
+reportUnusedImport = "warning"

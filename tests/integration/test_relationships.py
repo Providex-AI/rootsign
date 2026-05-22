@@ -9,16 +9,14 @@ from __future__ import annotations
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from providex import crud
-from providex.models.action import Action
+from providex.models.agent import Agent
 from providex.models.session import ProvidexSession
 from providex.schemas import (
-    ActionAuthorizationStatus,
-    ActionCreate,
     AgentCreate,
     AgentEnvironment,
     AgentFramework,
@@ -31,7 +29,7 @@ from providex.schemas import (
 pytestmark = pytest.mark.integration
 
 
-async def _agent(db: AsyncSession) -> "Agent":  # noqa: F821
+async def _agent(db: AsyncSession) -> Agent:
     return await crud.agent.create(
         db,
         obj_in=AgentCreate(

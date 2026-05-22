@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import select, text, update
+from sqlalchemy import text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 
@@ -28,7 +28,6 @@ from providex.schemas import (
     ApprovalCreate,
     ApprovalDecision,
     ApproverType,
-    DecisionCreate,
     SessionCreate,
     SessionStatus,
 )
