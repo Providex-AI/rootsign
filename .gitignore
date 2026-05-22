@@ -23,7 +23,11 @@ coverage.xml
 .env
 .env.local
 .idea/
-.vscode/
+# .vscode: gitignore everything except shared workspace files
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/tasks.json
 *.swp
 *.swo
 .DS_Store
