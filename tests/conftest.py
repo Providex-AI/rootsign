@@ -164,3 +164,73 @@ async def clean_db(test_engine) -> AsyncIterator[AsyncSession]:
                     "incidents, policies, agents RESTART IDENTITY CASCADE"
                 )
             )
+
+
+# ---------------------------------------------------------------------------
+# SDK-layer fixtures (Sprint 1+)
+# ---------------------------------------------------------------------------
+
+
+@pytest_asyncio.fixture
+async def ingest_client(db):
+    """LocalIngestClient bound to the per-test `db` session.
+
+    The client owns its own IdempotencyStore — see the Phase 0 IngestHandler
+    signature resolution in feedback_phase1_sprint01_decisions memory.
+    """
+    from rootsign.sdk.client import LocalIngestClient
+
+    return LocalIngestClient(db=db)
+
+
+@pytest_asyncio.fixture
+async def registered_agent(db):
+    """Pre-registered Agent so SDK tests don't repeat the boilerplate."""
+    from uuid import uuid4
+
+    from rootsign.crud import agent as agent_crud
+    from rootsign.schemas import (
+        AgentCreate,
+        AgentEnvironment,
+        AgentFramework,
+        AgentRiskTier,
+    )
+
+    return await agent_crud.create(
+        db,
+        obj_in=AgentCreate(
+            name=f"sdk-agent-{uuid4().hex[:8]}",
+            owner="test-team",
+            environment=AgentEnvironment.PRODUCTION,
+            risk_tier=AgentRiskTier.MEDIUM,
+            framework=AgentFramework.LANGGRAPH,
+        ),
+    )
+
+
+def _make_envelope(event_type, agent_id, session_id, payload):
+    """Build an IngestEnvelope dict for SDK and integration tests.
+
+    Mirrors the helper in tests/integration/test_ingest.py — kept here so
+    SDK-layer tests don't have to import from the Phase 0 suite.
+    """
+    from datetime import datetime, timezone
+    from uuid import uuid4
+
+    return {
+        "schema_version": "1.0",
+        "sdk_version": "0.1.0.dev0",
+        "event_type": event_type,
+        "event_id": str(uuid4()),
+        "emitted_at": datetime.now(timezone.utc).isoformat(),
+        "agent_id": str(agent_id),
+        "session_id": str(session_id),
+        "payload": payload,
+    }
+
+
+@pytest.fixture
+def make_envelope_fixture():
+    """Inject the envelope helper as a fixture for SDK tests that prefer it
+    over importing the underscore-private function."""
+    return _make_envelope

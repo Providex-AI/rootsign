@@ -1,0 +1,56 @@
+"""SDK-user-facing settings for the RootSign Python SDK.
+
+These are the env vars an application developer sets when wiring @rootsign.trace
+into their agent. They are distinct from the operator/infra settings in
+`rootsign/config.py` (DATABASE_URL et al.), which describe the storage backend
+the local-transport path connects to.
+
+Env var prefix: ROOTSIGN_  (e.g. ROOTSIGN_BACKEND=cloud).
+
+All fields have safe defaults; an unconfigured installation runs against the
+bundled docker-compose db using the local transport.
+"""
+
+from __future__ import annotations
+
+from typing import Literal
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class SDKSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="ROOTSIGN_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    # Transport selector. 'local' uses LocalIngestClient (Phase 1 default);
+    # 'cloud' would route through HttpIngestClient, which is stubbed until
+    # Phase 2 (calling .handle() raises NotImplementedError). See ADR-002.
+    BACKEND: Literal["local", "cloud"] = "local"
+
+    # Hosted ingest endpoint (Phase 2). Default points at the Providex AI
+    # cloud — RootSign products are hosted under getprovidex.com.
+    CLOUD_URL: str = "https://ingest.getprovidex.com/v1"
+    API_KEY: str = ""
+
+    # When True, the decorator also emits DECISION_RECORD envelopes before
+    # each ACTION_RECORD. Off by default because Decision payloads tend to
+    # contain the largest, most PII-dense data the agent produces.
+    CAPTURE_DECISIONS: bool = False
+
+    # WAL buffer for events that fail ingest. Drained on the next successful
+    # handle(). Phase 1 ships manual replay; an auto-replay loop lands in
+    # Sprint 3 alongside the `rootsign verify` CLI.
+    WAL_PATH: str = "~/.rootsign/wal"
+
+    # Retry policy for HttpIngestClient (Phase 2 — unused while the cloud
+    # transport is stubbed). Exponential backoff with cap.
+    MAX_RETRIES: int = 3
+    RETRY_BASE_DELAY: float = 0.1
+    RETRY_MAX_DELAY: float = 5.0
+
+
+sdk_settings = SDKSettings()
