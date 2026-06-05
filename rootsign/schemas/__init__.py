@@ -1,16 +1,16 @@
-"""Pydantic v2 schemas for Providex Phase 0 entities.
+"""Pydantic v2 schemas for RootSign Phase 0 entities.
 
-Per spec, the Pydantic schema for sessions is named `Session` (not `ProvidexSession`)
+Per spec, the Pydantic schema for sessions is named `Session` (not `AgentSession`)
 — the SQLAlchemy clash only affects ORM models, not schemas.
 """
 
-from providex.schemas.action import (
+from rootsign.schemas.action import (
     Action,
     ActionAuthorizationStatus,
     ActionCreate,
     ActionUpdate,
 )
-from providex.schemas.agent import (
+from rootsign.schemas.agent import (
     Agent,
     AgentCreate,
     AgentEnvironment,
@@ -18,14 +18,14 @@ from providex.schemas.agent import (
     AgentRiskTier,
     AgentUpdate,
 )
-from providex.schemas.approval import (
+from rootsign.schemas.approval import (
     Approval,
     ApprovalCreate,
     ApprovalDecision,
     ApproverType,
 )
-from providex.schemas.decision import Decision, DecisionCreate, DecisionUpdate
-from providex.schemas.incident import (
+from rootsign.schemas.decision import Decision, DecisionCreate, DecisionUpdate
+from rootsign.schemas.incident import (
     Incident,
     IncidentCreate,
     IncidentSeverity,
@@ -33,14 +33,14 @@ from providex.schemas.incident import (
     IncidentTrigger,
     IncidentUpdate,
 )
-from providex.schemas.policy import (
+from rootsign.schemas.policy import (
     Policy,
     PolicyCreate,
     PolicyEnforcement,
     PolicyScope,
     PolicyUpdate,
 )
-from providex.schemas.session import (
+from rootsign.schemas.session import (
     Session,
     SessionCreate,
     SessionStatus,

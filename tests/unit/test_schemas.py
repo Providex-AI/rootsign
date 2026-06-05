@@ -11,7 +11,7 @@ from uuid import UUID, uuid4
 import pytest
 from pydantic import ValidationError
 
-from providex.schemas import (
+from rootsign.schemas import (
     Action,
     ActionAuthorizationStatus,
     ActionCreate,
@@ -266,7 +266,7 @@ class TestIncidentSchema:
 # AC-1.1 — full surface import
 class TestImports:
     def test_all_schemas_importable(self):
-        import providex.schemas as s
+        import rootsign.schemas as s
 
         for name in [
             "Agent",
@@ -277,18 +277,18 @@ class TestImports:
             "Approval",
             "Incident",
         ]:
-            assert hasattr(s, name), f"providex.schemas.{name} missing"
+            assert hasattr(s, name), f"rootsign.schemas.{name} missing"
 
     def test_all_models_importable(self):
-        import providex.models as m
+        import rootsign.models as m
 
         for name in [
             "Agent",
-            "ProvidexSession",
+            "AgentSession",
             "Action",
             "Decision",
             "Policy",
             "Approval",
             "Incident",
         ]:
-            assert hasattr(m, name), f"providex.models.{name} missing"
+            assert hasattr(m, name), f"rootsign.models.{name} missing"

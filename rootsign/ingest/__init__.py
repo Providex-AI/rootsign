@@ -1,8 +1,8 @@
 """Ingest layer — SDK ↔ store wire protocol (Phase 0 Requirement 0.3)."""
 
-from providex.ingest.handler import IngestHandler
-from providex.ingest.idempotency import IdempotencyStore
-from providex.ingest.schemas import (
+from rootsign.ingest.handler import IngestHandler
+from rootsign.ingest.idempotency import IdempotencyStore
+from rootsign.ingest.schemas import (
     ErrorCode,
     EventType,
     IngestEnvelope,

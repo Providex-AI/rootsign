@@ -29,7 +29,7 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import NullPool
 
-from providex.config import settings
+from rootsign.config import settings
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -49,11 +49,11 @@ def _ensure_test_database() -> None:
     conn.autocommit = True
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT 1 FROM pg_database WHERE datname='providex_test'")
+            cur.execute("SELECT 1 FROM pg_database WHERE datname='rootsign_test'")
             if cur.fetchone() is None:
                 cur.execute(
-                    sql.SQL("CREATE DATABASE {} OWNER providex").format(
-                        sql.Identifier("providex_test")
+                    sql.SQL("CREATE DATABASE {} OWNER rootsign").format(
+                        sql.Identifier("rootsign_test")
                     )
                 )
     finally:

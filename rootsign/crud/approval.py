@@ -20,16 +20,16 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from providex.crud.base import CRUDBase
-from providex.errors import (
+from rootsign.crud.base import CRUDBase
+from rootsign.errors import (
     ActionAlreadyResolvedError,
     ActionNotFoundError,
     ApprovalParentNotFoundError,
     IngestValidationError,
 )
-from providex.models.action import Action
-from providex.models.approval import Approval
-from providex.schemas.approval import ApprovalCreate, ApprovalDecision
+from rootsign.models.action import Action
+from rootsign.models.approval import Approval
+from rootsign.schemas.approval import ApprovalCreate, ApprovalDecision
 
 # Mapping from Approval.decision to the resulting Action.authorization_status.
 # `escalated` keeps the action in 'pending' until the resolving Approval arrives.

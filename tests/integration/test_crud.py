@@ -15,10 +15,10 @@ from sqlalchemy import text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 
-from providex import crud
-from providex.models.action import Action
-from providex.models.session import ProvidexSession
-from providex.schemas import (
+from rootsign import crud
+from rootsign.models.action import Action
+from rootsign.models.session import AgentSession
+from rootsign.schemas import (
     ActionAuthorizationStatus,
     ActionCreate,
     AgentCreate,
@@ -48,7 +48,7 @@ async def _make_agent(db) -> "Agent":  # noqa: F821
     )
 
 
-async def _make_session(db, agent_id: UUID) -> ProvidexSession:
+async def _make_session(db, agent_id: UUID) -> AgentSession:
     return await crud.session.create(
         db,
         obj_in=SessionCreate(agent_id=agent_id, status=SessionStatus.RUNNING),
@@ -299,8 +299,8 @@ class TestConcurrentInserts:
         s = await _make_session(db, agent.agent_id)
         with pytest.raises(IntegrityError):
             await db.execute(
-                update(ProvidexSession)
-                .where(ProvidexSession.session_id == s.session_id)
+                update(AgentSession)
+                .where(AgentSession.session_id == s.session_id)
                 .values(action_count=-1)
             )
             await db.flush()

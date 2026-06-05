@@ -1,6 +1,6 @@
 """Alembic env. Uses the SYNC psycopg2 URL because Alembic is sync.
 
-Importing `providex.models` registers all 7 ORM models on `Base.metadata`,
+Importing `rootsign.models` registers all 7 ORM models on `Base.metadata`,
 which Alembic uses for autogenerate diff support.
 """
 
@@ -14,9 +14,9 @@ from sqlalchemy import engine_from_config, pool
 from alembic import context
 
 # Import side effect: register all models on Base.metadata.
-from providex import models  # noqa: F401
-from providex.config import settings
-from providex.database import Base
+from rootsign import models  # noqa: F401
+from rootsign.config import settings
+from rootsign.database import Base
 
 config = context.config
 

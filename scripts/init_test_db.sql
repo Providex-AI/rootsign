@@ -1,5 +1,5 @@
-CREATE DATABASE providex_test OWNER providex;
-\connect providex_test
+CREATE DATABASE rootsign_test OWNER rootsign;
+\connect rootsign_test
 CREATE EXTENSION IF NOT EXISTS timescaledb;
-\connect providex_dev
+\connect rootsign_dev
 CREATE EXTENSION IF NOT EXISTS timescaledb;

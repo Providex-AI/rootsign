@@ -15,7 +15,7 @@ from uuid import UUID
 
 import pytest
 
-from providex.hashing import compute_action_self_hash
+from rootsign.hashing import compute_action_self_hash
 
 FIXTURE_PATH = Path(__file__).resolve().parent.parent / "fixtures" / "hash_vectors.json"
 VECTORS = json.loads(FIXTURE_PATH.read_text())["vectors"]

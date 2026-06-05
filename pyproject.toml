@@ -1,11 +1,20 @@
 [project]
-name = "providex-core"
-version = "0.1.0"
-description = "Providex AI — canonical data model and storage layer (Phase 0)"
+name = "rootsign"
+version = "0.1.0.dev0"
+description = "RootSign — tamper-evident provenance logging for AI agents (powered by Providex AI)"
 readme = "AGENTS.md"
 requires-python = ">=3.11,<3.15"
-authors = [{ name = "Providex AI" }]
-license = { text = "Proprietary" }
+authors = [{ name = "Providex AI Inc." }]
+license = { text = "Apache-2.0" }
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries",
+]
 dependencies = [
     "pydantic>=2.7,<3.0",
     "pydantic-settings>=2.2,<3.0",
@@ -30,14 +39,14 @@ dev = [
 ]
 
 [project.scripts]
-providex-core = "providex.cli:app"
+rootsign-admin = "rootsign.cli:app"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["providex"]
+packages = ["rootsign"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -54,10 +63,11 @@ filterwarnings = [
 
 [tool.coverage.run]
 branch = true
-source = ["providex"]
-omit = ["providex/cli.py"]
+source = ["rootsign"]
+omit = ["rootsign/cli.py"]
 
 [tool.coverage.report]
+fail_under = 85
 exclude_lines = [
     "pragma: no cover",
     "raise NotImplementedError",
@@ -75,7 +85,7 @@ target-version = "py311"
 venvPath = "."
 venv = ".venv"
 pythonVersion = "3.12"
-include = ["providex", "tests", "scripts"]
+include = ["rootsign", "tests", "scripts"]
 exclude = [".venv", "alembic/versions"]
 reportMissingImports = "warning"
 reportUnusedImport = "warning"

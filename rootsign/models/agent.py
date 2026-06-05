@@ -5,7 +5,7 @@ from sqlalchemy import Boolean, CheckConstraint, DateTime, Index, String, Unique
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from providex.database import Base
+from rootsign.database import Base
 
 
 def _utcnow() -> datetime:

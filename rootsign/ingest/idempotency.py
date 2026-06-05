@@ -20,7 +20,7 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from providex.ingest.schemas import IngestResponse
+from rootsign.ingest.schemas import IngestResponse
 
 TTL = timedelta(hours=24)
 

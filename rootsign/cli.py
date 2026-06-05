@@ -1,9 +1,9 @@
-"""providex-core CLI — minimal operator surface for Phase 0.
+"""rootsign-admin CLI — minimal operator surface for Phase 0.
 
 Commands:
-  providex-core init           — alembic upgrade head
-  providex-core init --reset   — drop the schema, then upgrade head
-  providex-core status         — table row counts
+  rootsign-admin init           — alembic upgrade head
+  rootsign-admin init --reset   — drop the schema, then upgrade head
+  rootsign-admin status         — table row counts
 """
 
 from __future__ import annotations
@@ -17,11 +17,11 @@ from pathlib import Path
 import psycopg2
 import typer
 
-from providex.config import settings
+from rootsign.config import settings
 
 app = typer.Typer(
-    name="providex-core",
-    help="Providex AI Phase 0 — schema and storage operations.",
+    name="rootsign-admin",
+    help="RootSign Phase 0 — schema and storage operations (powered by Providex AI).",
     add_completion=False,
     no_args_is_help=True,
 )
@@ -48,7 +48,7 @@ def _drop_public_schema() -> None:
     try:
         with conn.cursor() as cur:
             cur.execute("DROP SCHEMA IF EXISTS public CASCADE")
-            cur.execute("CREATE SCHEMA public AUTHORIZATION providex")
+            cur.execute("CREATE SCHEMA public AUTHORIZATION rootsign")
             cur.execute("GRANT ALL ON SCHEMA public TO public")
             cur.execute("CREATE EXTENSION IF NOT EXISTS timescaledb")
     finally:
@@ -74,7 +74,7 @@ def init(
 
 @app.command()
 def status() -> None:
-    """Print row counts for every Providex table."""
+    """Print row counts for every RootSign table."""
     dsn = _strip_driver(settings.DATABASE_URL_SYNC)
     conn = psycopg2.connect(dsn)
     try:

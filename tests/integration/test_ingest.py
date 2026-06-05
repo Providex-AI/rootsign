@@ -14,13 +14,13 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import select
 
-from providex import crud
-from providex.ingest import IdempotencyStore, IngestHandler
-from providex.ingest.schemas import ErrorCode
-from providex.models.action import Action
-from providex.models.approval import Approval
-from providex.models.session import ProvidexSession
-from providex.schemas import (
+from rootsign import crud
+from rootsign.ingest import IdempotencyStore, IngestHandler
+from rootsign.ingest.schemas import ErrorCode
+from rootsign.models.action import Action
+from rootsign.models.approval import Approval
+from rootsign.models.session import AgentSession
+from rootsign.schemas import (
     AgentCreate,
     AgentEnvironment,
     AgentFramework,
@@ -127,7 +127,7 @@ class TestAC31_SessionOpen:
         assert r.status == "accepted"
         assert r.entity_id == session_id
 
-        session = await db.get(ProvidexSession, session_id)
+        session = await db.get(AgentSession, session_id)
         assert session is not None
         assert session.status == "running"
         assert session.action_count == 0
@@ -293,7 +293,7 @@ class TestAC36_DecisionCountIncrement:
         )
         assert r.status == "accepted"
 
-        session = await db.get(ProvidexSession, session_id)
+        session = await db.get(AgentSession, session_id)
         await db.refresh(session)
         assert session.decision_count == 1
 
@@ -367,7 +367,7 @@ class TestAC38_SessionClose:
         )
         assert r.status == "accepted"
 
-        session = await db.get(ProvidexSession, session_id)
+        session = await db.get(AgentSession, session_id)
         await db.refresh(session)
         assert session.status == "completed"
         assert session.end_time is not None
@@ -463,7 +463,7 @@ class TestAC311_CloseReconciliation:
             )
         )
 
-        with caplog.at_level(logging.WARNING, logger="providex.ingest"):
+        with caplog.at_level(logging.WARNING, logger="rootsign.ingest"):
             r = await handler.handle(
                 envelope(
                     event_type="SESSION_CLOSE",

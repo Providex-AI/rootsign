@@ -5,17 +5,17 @@ from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, St
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from providex.database import Base
+from rootsign.database import Base
 
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-class ProvidexSession(Base):
+class AgentSession(Base):
     """One logical workflow run linking user, agent, and objective.
 
-    Named ProvidexSession (not Session) to avoid collision with SQLAlchemy's Session.
+    Named AgentSession (not Session) to avoid collision with SQLAlchemy's Session.
     """
 
     __tablename__ = "sessions"

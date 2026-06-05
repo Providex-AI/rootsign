@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID
 
-from providex.hashing import compute_action_self_hash
+from rootsign.hashing import compute_action_self_hash
 
 VECTORS_SRC: list[dict] = [
     {

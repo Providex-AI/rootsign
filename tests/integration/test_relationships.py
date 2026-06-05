@@ -13,10 +13,10 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from providex import crud
-from providex.models.agent import Agent
-from providex.models.session import ProvidexSession
-from providex.schemas import (
+from rootsign import crud
+from rootsign.models.agent import Agent
+from rootsign.models.session import AgentSession
+from rootsign.schemas import (
     AgentCreate,
     AgentEnvironment,
     AgentFramework,
@@ -69,7 +69,7 @@ class TestAgentUniqueness:
 
 class TestSessionFK:
     async def test_session_requires_valid_agent(self, db: AsyncSession):
-        s = ProvidexSession(
+        s = AgentSession(
             session_id=uuid4(),
             agent_id=uuid4(),  # no such agent
             status="running",

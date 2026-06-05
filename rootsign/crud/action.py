@@ -13,11 +13,11 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from providex.crud.base import CRUDBase
-from providex.hashing import compute_action_self_hash
-from providex.models.action import Action
-from providex.models.session import ProvidexSession
-from providex.schemas.action import ActionCreate
+from rootsign.crud.base import CRUDBase
+from rootsign.hashing import compute_action_self_hash
+from rootsign.models.action import Action
+from rootsign.models.session import AgentSession
+from rootsign.schemas.action import ActionCreate
 
 
 class CRUDAction(CRUDBase[Action, ActionCreate]):
@@ -26,7 +26,7 @@ class CRUDAction(CRUDBase[Action, ActionCreate]):
         db: AsyncSession,
         *,
         obj_in: ActionCreate,
-        session_obj: ProvidexSession | None = None,
+        session_obj: AgentSession | None = None,
     ) -> Action:
         """Insert an Action while extending the session hash chain.
 
@@ -45,8 +45,8 @@ class CRUDAction(CRUDBase[Action, ActionCreate]):
 
         # 1. Row-lock the session — serializes concurrent writers.
         locked_session = await db.execute(
-            select(ProvidexSession)
-            .where(ProvidexSession.session_id == session_id)
+            select(AgentSession)
+            .where(AgentSession.session_id == session_id)
             .with_for_update()
         )
         session_row = locked_session.scalar_one()

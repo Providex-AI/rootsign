@@ -16,8 +16,8 @@ from uuid import uuid4
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from providex import crud
-from providex.schemas import (
+from rootsign import crud
+from rootsign.schemas import (
     ActionAuthorizationStatus,
     ActionCreate,
     AgentCreate,

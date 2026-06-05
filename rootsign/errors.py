@@ -2,8 +2,8 @@
 
 These exceptions are raised by the CRUD layer when an ingest-side invariant
 fails, and caught by IngestHandler.handle() which maps them to the
-corresponding error_code in IngestResponse. Living in providex/ root rather
-than providex/ingest/ keeps the dependency direction clean (crud doesn't
+corresponding error_code in IngestResponse. Living in rootsign/ root rather
+than rootsign/ingest/ keeps the dependency direction clean (crud doesn't
 import from ingest).
 
 Add a new subclass here when adding a new error code to the registry in

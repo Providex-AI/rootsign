@@ -421,52 +421,6 @@ wheels = [
 ]
 
 [[package]]
-name = "providex-core"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "alembic" },
-    { name = "asyncpg" },
-    { name = "greenlet" },
-    { name = "psycopg2-binary" },
-    { name = "pydantic" },
-    { name = "pydantic-settings" },
-    { name = "python-dotenv" },
-    { name = "sqlalchemy" },
-    { name = "typer" },
-]
-
-[package.optional-dependencies]
-dev = [
-    { name = "ruff" },
-]
-test = [
-    { name = "anyio" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "pytest-cov" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "alembic", specifier = ">=1.13,<2.0" },
-    { name = "anyio", marker = "extra == 'test'", specifier = ">=4.0,<5.0" },
-    { name = "asyncpg", specifier = ">=0.29,<1.0" },
-    { name = "greenlet", specifier = ">=3.0,<4.0" },
-    { name = "psycopg2-binary", specifier = ">=2.9,<3.0" },
-    { name = "pydantic", specifier = ">=2.7,<3.0" },
-    { name = "pydantic-settings", specifier = ">=2.2,<3.0" },
-    { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0,<9.0" },
-    { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.23,<1.0" },
-    { name = "pytest-cov", marker = "extra == 'test'", specifier = ">=5.0,<7.0" },
-    { name = "python-dotenv", specifier = ">=1.0,<2.0" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.5,<1.0" },
-    { name = "sqlalchemy", specifier = ">=2.0,<3.0" },
-    { name = "typer", specifier = ">=0.12,<1.0" },
-]
-provides-extras = ["test", "dev"]
-
-[[package]]
 name = "psycopg2-binary"
 version = "2.9.12"
 source = { registry = "https://pypi.org/simple" }
@@ -721,6 +675,52 @@ sdist = { url = "https://files.pythonhosted.org/packages/c0/8f/0722ca900cc807c13
 wheels = [
     { url = "https://files.pythonhosted.org/packages/82/3b/64d4899d73f91ba49a8c18a8ff3f0ea8f1c1d75481760df8c68ef5235bf5/rich-15.0.0-py3-none-any.whl", hash = "sha256:33bd4ef74232fb73fe9279a257718407f169c09b78a87ad3d296f548e27de0bb", size = 310654, upload-time = "2026-04-12T08:24:02.83Z" },
 ]
+
+[[package]]
+name = "rootsign"
+version = "0.1.0.dev0"
+source = { editable = "." }
+dependencies = [
+    { name = "alembic" },
+    { name = "asyncpg" },
+    { name = "greenlet" },
+    { name = "psycopg2-binary" },
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+    { name = "python-dotenv" },
+    { name = "sqlalchemy" },
+    { name = "typer" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "ruff" },
+]
+test = [
+    { name = "anyio" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-cov" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "alembic", specifier = ">=1.13,<2.0" },
+    { name = "anyio", marker = "extra == 'test'", specifier = ">=4.0,<5.0" },
+    { name = "asyncpg", specifier = ">=0.29,<1.0" },
+    { name = "greenlet", specifier = ">=3.0,<4.0" },
+    { name = "psycopg2-binary", specifier = ">=2.9,<3.0" },
+    { name = "pydantic", specifier = ">=2.7,<3.0" },
+    { name = "pydantic-settings", specifier = ">=2.2,<3.0" },
+    { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0,<9.0" },
+    { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.23,<1.0" },
+    { name = "pytest-cov", marker = "extra == 'test'", specifier = ">=5.0,<7.0" },
+    { name = "python-dotenv", specifier = ">=1.0,<2.0" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.5,<1.0" },
+    { name = "sqlalchemy", specifier = ">=2.0,<3.0" },
+    { name = "typer", specifier = ">=0.12,<1.0" },
+]
+provides-extras = ["test", "dev"]
 
 [[package]]
 name = "ruff"

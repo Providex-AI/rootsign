@@ -21,16 +21,16 @@ from uuid import UUID
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from providex import crud
-from providex.errors import (
+from rootsign import crud
+from rootsign.errors import (
     IngestError,
     SessionAlreadyExistsError,
     SessionClosedError,
     SessionNotFoundError,
     UnknownAgentError,
 )
-from providex.ingest.idempotency import IdempotencyStore
-from providex.ingest.schemas import (
+from rootsign.ingest.idempotency import IdempotencyStore
+from rootsign.ingest.schemas import (
     PAYLOAD_SCHEMAS,
     ActionRecordPayload,
     ApprovalRecordPayload,
@@ -42,14 +42,14 @@ from providex.ingest.schemas import (
     SessionClosePayload,
     SessionOpenPayload,
 )
-from providex.models.agent import Agent
-from providex.models.session import ProvidexSession
-from providex.schemas.action import ActionCreate
-from providex.schemas.approval import ApprovalCreate
-from providex.schemas.decision import DecisionCreate
-from providex.schemas.session import SessionCreate, SessionStatus
+from rootsign.models.agent import Agent
+from rootsign.models.session import AgentSession
+from rootsign.schemas.action import ActionCreate
+from rootsign.schemas.approval import ApprovalCreate
+from rootsign.schemas.decision import DecisionCreate
+from rootsign.schemas.session import SessionCreate, SessionStatus
 
-logger = logging.getLogger("providex.ingest")
+logger = logging.getLogger("rootsign.ingest")
 
 SUPPORTED_SCHEMA_MAJOR = "1"
 
@@ -161,7 +161,7 @@ class IngestHandler:
 
         # Session must NOT already exist (idempotency above handles the
         # duplicate event_id case)
-        existing = await self.db.get(ProvidexSession, env.session_id)
+        existing = await self.db.get(AgentSession, env.session_id)
         if existing is not None:
             raise SessionAlreadyExistsError(
                 f"session_id={env.session_id} already exists"
@@ -306,8 +306,8 @@ class IngestHandler:
     # Helpers
     # -----------------------------------------------------------------------
 
-    async def _require_running_session(self, session_id: UUID) -> ProvidexSession:
-        session = await self.db.get(ProvidexSession, session_id)
+    async def _require_running_session(self, session_id: UUID) -> AgentSession:
+        session = await self.db.get(AgentSession, session_id)
         if session is None:
             raise SessionNotFoundError(f"session_id={session_id} not found")
         if session.status != "running":

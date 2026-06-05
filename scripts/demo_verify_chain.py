@@ -1,6 +1,6 @@
 """End-to-end demo of AC-2.6: hash chain detects tampering.
 
-  1. Resets providex_dev to a clean schema
+  1. Resets rootsign_dev to a clean schema
   2. Creates an agent + session + 5 actions via create_with_hash
   3. Runs verify_chain → expects valid=True, record_count=5
   4. Corrupts action #3's self_hash directly via SQL
@@ -18,10 +18,10 @@ from pathlib import Path
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from providex import crud
-from providex.config import settings
-from providex.models.action import Action
-from providex.schemas import (
+from rootsign import crud
+from rootsign.config import settings
+from rootsign.models.action import Action
+from rootsign.schemas import (
     ActionAuthorizationStatus,
     ActionCreate,
     AgentCreate,
@@ -36,9 +36,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def _reset_dev_db() -> None:
-    print("Resetting providex_dev (init --reset)...")
+    print("Resetting rootsign_dev (init --reset)...")
     subprocess.run(
-        [str(REPO_ROOT / ".venv/bin/providex-core"), "init", "--reset"],
+        [str(REPO_ROOT / ".venv/bin/rootsign-admin"), "init", "--reset"],
         cwd=REPO_ROOT,
         check=True,
         stdout=subprocess.DEVNULL,
