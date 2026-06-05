@@ -1,0 +1,10 @@
+RootSign
+Copyright 2026 Providex AI Inc.
+
+RootSign is a Providex AI product — tamper-evident provenance logging
+for AI agents (the agent capture layer of the Providex AI Agent
+Accountability Platform).
+
+This product includes software with the following dependencies:
+[placeholder — update with actual dep list after pyproject.toml is finalised
+ for Sprint 1 (langgraph/crewai/autogen optional extras + httpx + anyio).]

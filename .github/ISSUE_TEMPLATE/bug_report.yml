@@ -1,0 +1,33 @@
+name: Bug report
+description: Something is not working as described in the spec
+labels: [bug, needs-triage]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the bug. Include the exact error message.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: Shortest code that reproduces the issue.
+      render: python
+    validations:
+      required: true
+  - type: dropdown
+    id: framework
+    attributes:
+      label: Agent framework
+      options: [LangGraph, CrewAI, AutoGen, Custom, Not applicable]
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      placeholder: rootsign==0.1.0, langgraph==0.2.1, python==3.11
+    validations:
+      required: true

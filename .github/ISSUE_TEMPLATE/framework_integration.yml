@@ -1,0 +1,26 @@
+name: Framework integration request
+description: Request support for a new agent framework
+labels: [framework-integration, enhancement]
+body:
+  - type: input
+    id: framework
+    attributes:
+      label: Framework name and link
+      placeholder: 'LlamaIndex — https://github.com/run-llama/llama_index'
+    validations:
+      required: true
+  - type: textarea
+    id: tool_call
+    attributes:
+      label: How does this framework call tools?
+      description: Paste a minimal example of a tool call in this framework.
+      render: python
+    validations:
+      required: true
+  - type: checkboxes
+    id: willing
+    attributes:
+      label: Contribution
+      options:
+        - label: I am willing to implement this integration
+        - label: I can provide a real pipeline for contract testing

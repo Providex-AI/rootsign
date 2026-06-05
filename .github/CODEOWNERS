@@ -1,0 +1,9 @@
+# RootSign CODEOWNERS
+# These owners are automatically requested for review on PRs.
+
+*                   @oabolade
+/rootsign/          @oabolade
+/tests/             @oabolade
+/docs/adr/          @oabolade
+/alembic/           @oabolade
+/.github/           @oabolade

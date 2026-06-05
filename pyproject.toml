@@ -2,7 +2,7 @@
 name = "rootsign"
 version = "0.1.0.dev0"
 description = "RootSign — tamper-evident provenance logging for AI agents (powered by Providex AI)"
-readme = "AGENTS.md"
+readme = "README.md"
 requires-python = ">=3.11,<3.15"
 authors = [{ name = "Providex AI Inc." }]
 license = { text = "Apache-2.0" }
