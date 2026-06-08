@@ -48,3 +48,24 @@ class TestSequenceIncrement:
         assert await a.next_sequence() == 1
         assert await a.next_sequence() == 2
         assert await b.next_sequence() == 1
+
+
+class TestMarkSessionOpen:
+    async def test_first_call_returns_true(self):
+        ctx = SessionContext(agent_id=AGENT_ID)
+        assert ctx.session_open_emitted is False
+        assert await ctx.mark_session_open() is True
+        assert ctx.session_open_emitted is True
+
+    async def test_subsequent_calls_return_false(self):
+        ctx = SessionContext(agent_id=AGENT_ID)
+        await ctx.mark_session_open()
+        assert await ctx.mark_session_open() is False
+        assert await ctx.mark_session_open() is False
+
+    async def test_concurrent_calls_only_one_true(self):
+        """Fire many `mark_session_open` calls concurrently — exactly one wins."""
+        ctx = SessionContext(agent_id=AGENT_ID)
+        results = await asyncio.gather(*[ctx.mark_session_open() for _ in range(20)])
+        assert sum(1 for r in results if r is True) == 1
+        assert ctx.session_open_emitted is True

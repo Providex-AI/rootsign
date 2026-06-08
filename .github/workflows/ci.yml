@@ -98,13 +98,11 @@ jobs:
         run: pytest tests/integration/ -v
 
   framework-contract-langgraph:
-    # ADR-003: framework contract tests are mandatory once an integration
-    # ships. Sprint 1 carries empty stubs, so this job is allowed to fail
-    # until Sprint 2 fills tests/contract/langgraph/. Remove the
-    # continue-on-error flag when the first real contract test lands.
+    # ADR-003 / Sprint 2: framework contract tests are MANDATORY — this job
+    # must pass on every PR before merge. Sprint 2 filled the contract suite
+    # in tests/contract/langgraph/ (see ADR-004 for the interception design).
     name: LangGraph contract (langgraph ~=${{ matrix.langgraph-version }})
     runs-on: ubuntu-latest
-    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
@@ -117,6 +115,4 @@ jobs:
       - name: Install with langgraph extra
         run: pip install -e '.[dev,langgraph]' "langgraph~=${{ matrix.langgraph-version }}"
       - name: Contract tests
-        # Empty stubs in Sprint 1 — Sprint 2 fills these. The job exists now
-        # so the contract test gate is visible on day 1 of LangGraph work.
-        run: pytest tests/contract/langgraph/ -v || true
+        run: pytest tests/contract/langgraph/ -v

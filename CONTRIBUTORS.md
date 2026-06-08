@@ -8,4 +8,4 @@ Thank you to everyone who has contributed to RootSign.
 
 ## Contributors
 
-*Your name here — open a PR!*
+*Your name here (@your-github-handle) — one line description of what you worked on*

@@ -1,3 +1,61 @@
-"""Providex AI — canonical data model and storage layer (Phase 0)."""
+"""RootSign — tamper-evident provenance logging for AI agents (Providex AI).
 
-__version__ = "0.1.0"
+Top-level public surface — the only names users should import directly. The
+internal layout (`rootsign.sdk.*`, `rootsign.ingest.*`, `rootsign.crud.*`)
+remains accessible but is not part of the stable contract.
+"""
+
+from rootsign.schemas.agent import (
+    AgentEnvironment,
+    AgentFramework,
+    AgentRiskTier,
+)
+from rootsign.sdk.client import (
+    HttpIngestClient,
+    IngestClient,
+    LocalIngestClient,
+    get_ingest_client,
+)
+from rootsign.sdk.context import SessionContext
+from rootsign.sdk.decorator import trace
+from rootsign.sdk.frameworks.langgraph import LangGraphTracer
+from rootsign.sdk.redaction import RedactionConfig
+from rootsign.sdk.registration import register_agent
+from rootsign.sdk.session import session
+
+__version__ = "0.1.0.dev0"
+
+
+def wrap_tools(
+    tools: list,
+    *,
+    ctx: SessionContext,
+    client: IngestClient,
+    redaction_config: RedactionConfig | None = None,
+) -> list:
+    """Convenience wrapper — instrument a list of LangGraph tools.
+
+    Drop-in replacement for the input list of `ToolNode([...])`. See
+    ADR-004 for the wrapping strategy.
+    """
+    return LangGraphTracer.wrap_tools(
+        tools, ctx=ctx, client=client, redaction_config=redaction_config
+    )
+
+
+__all__ = [
+    "AgentEnvironment",
+    "AgentFramework",
+    "AgentRiskTier",
+    "HttpIngestClient",
+    "IngestClient",
+    "LangGraphTracer",
+    "LocalIngestClient",
+    "RedactionConfig",
+    "SessionContext",
+    "get_ingest_client",
+    "register_agent",
+    "session",
+    "trace",
+    "wrap_tools",
+]

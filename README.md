@@ -24,23 +24,80 @@ Compliance-grade audit trails. Zero changes to your agent code.
 | Phase | Scope | Status |
 |---|---|---|
 | 0 | Data model + storage + ingest handler | ✅ Complete |
-| 1 | Python SDK (`@rootsign.trace`, LangGraph integration, CLI) | 🚧 In progress |
+| 1 | Python SDK (`@rootsign.trace`, LangGraph integration, CLI) | 🚧 Sprint 2 (LangGraph) complete; `rootsign verify` CLI in Sprint 3 |
 | 2 | Hosted ingest backend + compliance dashboard | Planned |
 | 3 | Policy enforcement + incident workflow | Planned |
 | 4 | Cross-platform governance | Planned |
 
-## Quickstart (Phase 0 — developers only)
+## Quickstart — LangGraph
+
+### 1. Install
 
 ```bash
-git clone https://github.com/Providex-AI/rootsign
-cd rootsign
-pip install -e '.[dev]'
-docker-compose up -d db           # PostgreSQL 16 + TimescaleDB
-rootsign-admin init               # alembic upgrade head
-pytest tests/ -v                  # 93 tests in ~2s
+pip install rootsign[langgraph]
 ```
 
-The user-facing `@rootsign.trace` decorator API will land in Sprint 2. See [AGENTS_Phase1_Sprint01.md](AGENTS_Phase1_Sprint01.md) for the current sprint plan.
+Start PostgreSQL + TimescaleDB locally and apply the schema:
+
+```bash
+docker-compose up -d db
+rootsign-admin init       # alembic upgrade head
+```
+
+### 2. Register your agent (one-time setup)
+
+```python
+import asyncio
+from rootsign import register_agent, AgentEnvironment, AgentRiskTier, AgentFramework
+
+agent = asyncio.run(register_agent(
+    name="my-invoice-agent",
+    owner="platform-team",
+    environment=AgentEnvironment.PRODUCTION,
+    risk_tier=AgentRiskTier.HIGH,
+    framework=AgentFramework.LANGGRAPH,
+))
+print(agent.agent_id)
+```
+
+### 3. Instrument your tools
+
+```python
+import rootsign
+from rootsign import LocalIngestClient
+from rootsign.database import AsyncSessionLocal
+from langchain_core.tools import tool
+from langgraph.prebuilt import ToolNode
+
+# Your existing tools — no changes needed.
+@tool
+def send_invoice(customer_id: str, amount: float) -> str:
+    """Send an invoice to a customer."""
+    return "sent"
+
+async def run_graph(agent_id):
+    async with AsyncSessionLocal() as db:
+        client = LocalIngestClient(db=db)
+        async with rootsign.session(agent_id=agent_id, client=client) as ctx:
+            tools = rootsign.wrap_tools([send_invoice], ctx=ctx, client=client)
+            tool_node = ToolNode(tools)
+            # ... build and run your graph as normal
+        await db.commit()
+```
+
+That's it. Every tool call now produces a tamper-evident `Action` record on the hash chain.
+
+### 4. Verify the chain
+
+```python
+from rootsign.crud import action as action_crud
+result = await action_crud.verify_chain(db, session_id=session_id)
+assert result["valid"] is True
+```
+
+> **Coming soon (Sprint 3):** a `rootsign verify <session_id>` CLI that prints the same result with a single shell command.
+
+See [docs/framework-support.md](docs/framework-support.md) for the LangGraph version matrix and integration notes.
 
 ## Contributing
 

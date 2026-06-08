@@ -74,7 +74,9 @@ filterwarnings = [
 [tool.coverage.run]
 branch = true
 source = ["rootsign"]
-omit = ["rootsign/cli.py"]
+# rootsign/cli.py — admin CLI is exercised only by integration scripts.
+# rootsign/sdk/cli.py — `rootsign verify` is a Sprint 3 stub; covered then.
+omit = ["rootsign/cli.py", "rootsign/sdk/cli.py"]
 
 [tool.coverage.report]
 fail_under = 85
