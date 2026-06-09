@@ -81,7 +81,16 @@ def _run_alembic_on_test_db() -> None:
 
 @pytest.fixture(scope="session", autouse=True)
 def _bootstrap_test_db():
-    """Bootstrap the test DB once per session."""
+    """Bootstrap the test DB once per session.
+
+    Set `ROOTSIGN_SKIP_DB_BOOTSTRAP=1` to skip this entirely — used by the
+    `framework-contract-langgraph` CI job, where contract tests are
+    deliberately DB-free (mock IngestClient) and the runner has no Postgres
+    service attached. Skipping here avoids a connection-refused error at
+    session start that would otherwise abort the whole collection.
+    """
+    if os.environ.get("ROOTSIGN_SKIP_DB_BOOTSTRAP") == "1":
+        return
     try:
         _ensure_test_database()
         _run_alembic_on_test_db()

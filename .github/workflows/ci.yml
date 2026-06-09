@@ -101,12 +101,19 @@ jobs:
     # ADR-003 / Sprint 2: framework contract tests are MANDATORY — this job
     # must pass on every PR before merge. Sprint 2 filled the contract suite
     # in tests/contract/langgraph/ (see ADR-004 for the interception design).
+    #
+    # Contract tests use a mock IngestClient and never touch the DB, so this
+    # job intentionally runs WITHOUT a Postgres service. The
+    # ROOTSIGN_SKIP_DB_BOOTSTRAP env var tells the session-autouse fixture
+    # in tests/conftest.py to skip alembic / DB connect at session start.
     name: LangGraph contract (langgraph ~=${{ matrix.langgraph-version }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         langgraph-version: ['0.1', '0.2']
+    env:
+      ROOTSIGN_SKIP_DB_BOOTSTRAP: '1'
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
