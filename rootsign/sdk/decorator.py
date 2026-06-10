@@ -1,10 +1,12 @@
 """@rootsign.trace — wraps a tool call and emits an ACTION_RECORD per call.
 
-Sprint 2 lands the full implementation. The decorator routes by callable
-shape:
+The decorator routes by callable shape:
 
   * LangChain `BaseTool` → `LangGraphTracer.wrap_tool` (ADR-004). The wrapped
     tool stays a `BaseTool` so it's a drop-in for `ToolNode([...])`.
+  * CrewAI tool (duck-typed `.name: str` + `._run: callable`) →
+    `CrewAITracer.wrap_tool` (ADR-005). Checked AFTER LangChain because
+    LangChain's `StructuredTool` also satisfies the CrewAI shape.
   * Plain async/sync callable → the framework-agnostic wrapper retained from
     Sprint 1 — same envelope shape, same failure-isolation rule.
 
@@ -80,6 +82,21 @@ def trace(
             from rootsign.sdk.frameworks.langgraph import LangGraphTracer
 
             return LangGraphTracer.wrap_tool(
+                func,
+                ctx=session_context,
+                client=ingest_client,
+                redaction_config=redaction_config,
+            )
+
+        # CrewAI tools — duck-typed AFTER the LangChain check because
+        # LangChain's StructuredTool also has .name (str) and ._run
+        # (callable). See ADR-005.
+        from rootsign.sdk.frameworks.crewai import _is_crewai_tool
+
+        if _is_crewai_tool(func):
+            from rootsign.sdk.frameworks.crewai import CrewAITracer
+
+            return CrewAITracer.wrap_tool(
                 func,
                 ctx=session_context,
                 client=ingest_client,

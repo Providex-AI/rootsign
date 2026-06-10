@@ -123,3 +123,25 @@ jobs:
         run: pip install -e '.[dev,langgraph]' "langgraph~=${{ matrix.langgraph-version }}"
       - name: Contract tests
         run: pytest tests/contract/langgraph/ -v
+
+  framework-contract-crewai:
+    # ADR-005 / Sprint 3: framework contract tests for CrewAI are MANDATORY —
+    # this job must pass on every PR before merge. Same pattern as the
+    # langgraph job above: mock IngestClient, no DB, ROOTSIGN_SKIP_DB_BOOTSTRAP.
+    name: CrewAI contract (crewai ~=${{ matrix.crewai-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        crewai-version: ['0.28', '0.40']
+    env:
+      ROOTSIGN_SKIP_DB_BOOTSTRAP: '1'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install with crewai extra
+        run: pip install -e '.[dev,crewai]' "crewai~=${{ matrix.crewai-version }}"
+      - name: Contract tests
+        run: pytest tests/contract/crewai/ -v

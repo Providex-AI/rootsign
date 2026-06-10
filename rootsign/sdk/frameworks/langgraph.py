@@ -16,10 +16,10 @@ or routes through a fresh worker thread.
 
 from __future__ import annotations
 
-import asyncio
 import logging
-import threading
 from typing import TYPE_CHECKING, Any
+
+from rootsign.sdk._async_bridge import _run_sync
 
 if TYPE_CHECKING:
     from rootsign.sdk.client import IngestClient
@@ -27,43 +27,6 @@ if TYPE_CHECKING:
     from rootsign.sdk.redaction import RedactionConfig
 
 logger = logging.getLogger("rootsign.sdk.langgraph")
-
-
-def _run_sync(coro: Any) -> Any:
-    """Execute *coro* and return its result, regardless of caller loop state.
-
-    Sprint 2 correctness fix (see ADR-004): the spec's original
-    `loop.run_until_complete` pattern raises `RuntimeError: This event loop is
-    already running` whenever the sync `invoke()` path is reached from inside
-    an async LangGraph node. We detect both cases:
-
-      * No running loop on this thread → `asyncio.run`.
-      * Running loop on this thread    → run in a fresh worker thread that
-        owns its own loop, then join.
-
-    The worker-thread path is best-effort. Callers in an async context who
-    need shared state bound to the caller's loop (e.g. an `AsyncSession`)
-    should prefer `await tool.ainvoke(...)`.
-    """
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(coro)
-
-    container: dict[str, Any] = {}
-
-    def _worker() -> None:
-        try:
-            container["result"] = asyncio.run(coro)
-        except BaseException as exc:  # noqa: BLE001 — re-raised on join
-            container["error"] = exc
-
-    t = threading.Thread(target=_worker, daemon=True)
-    t.start()
-    t.join()
-    if "error" in container:
-        raise container["error"]
-    return container["result"]
 
 
 class LangGraphTracer:

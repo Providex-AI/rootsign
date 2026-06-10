@@ -1,8 +1,13 @@
-"""rootsign — user-facing CLI (Phase 1 scaffold).
+"""rootsign — user-facing CLI.
 
-Subcommands land progressively across Sprint 1 → Sprint 3. The decorator and
-WAL-replay tooling are the first to ship; `rootsign verify` arrives in Sprint 3
-alongside the full hash-chain CLI surface.
+Subcommands:
+
+* `rootsign version` — print the installed package version.
+* `rootsign verify <session_id>` — verify the tamper-evident hash chain for
+  a session stored in the configured Postgres. Exit 0 = VALID, exit 1 =
+  TAMPERED or error. See Sprint Plan §3.3 and ADR-001/ADR-005.
+* `rootsign verify --local <path.jsonl>` — verify a session stored offline
+  in a JSONL file. No DB required.
 
 For schema/storage operations (init/status/reset), use the operator CLI:
     rootsign-admin --help
@@ -10,7 +15,17 @@ For schema/storage operations (init/status/reset), use the operator CLI:
 
 from __future__ import annotations
 
+import asyncio
+from pathlib import Path
+from typing import Optional
+from uuid import UUID
+
 import typer
+
+# Module-level so tests can monkeypatch it to bind to the test engine.
+# Production code goes through `_verify_remote`, which calls this factory
+# to open a fresh AsyncSession per invocation.
+from rootsign.database import AsyncSessionLocal  # noqa: E402
 
 app = typer.Typer(
     name="rootsign",
@@ -32,14 +47,96 @@ def version() -> None:
 
 
 @app.command()
-def verify(session_id: str = typer.Argument(..., help="Session UUID to verify.")) -> None:
-    """Verify the hash chain of a recorded session. (Stub — lands in Sprint 3.)"""
+def verify(
+    session_id: Optional[str] = typer.Argument(
+        None, help="Session ID to verify (UUID)."
+    ),
+    local: Optional[Path] = typer.Option(
+        None,
+        "--local",
+        "-l",
+        help="Path to a local JSONL session file (no DB required).",
+    ),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        "-v",
+        help="Show per-record hashes for debugging.",
+    ),
+) -> None:
+    """Verify the tamper-evident hash chain for a session.
+
+    Examples:
+
+        rootsign verify 550e8400-e29b-41d4-a716-446655440001
+
+        rootsign verify --local ~/.rootsign/sessions/my_session.jsonl
+    """
+    if local is not None:
+        _verify_local(local, verbose)
+        return
+    if session_id is not None:
+        _verify_remote(UUID(session_id), verbose)
+        return
+    typer.echo("Error: provide a session_id or --local path", err=True)
+    raise typer.Exit(code=1)
+
+
+def _verify_local(path: Path, verbose: bool) -> None:
+    from rootsign.sdk.chain import verify_session_local
+
+    result = verify_session_local(str(path))
+    _print_result(result, verbose=verbose)
+    raise typer.Exit(code=0 if result.valid else 1)
+
+
+def _verify_remote(session_id: UUID, verbose: bool) -> None:
+    # Imported at module level (below) so tests can monkeypatch the symbol
+    # to point at a test engine. See tests/integration/test_verify_cli.py.
+    from rootsign.sdk.chain import verify_session
+
+    async def _run():
+        async with AsyncSessionLocal() as db:
+            return await verify_session(session_id, db)
+
+    result = asyncio.run(_run())
+    _print_result(result, verbose=verbose)
+    raise typer.Exit(code=0 if result.valid else 1)
+
+
+def _print_result(result, *, verbose: bool) -> None:
+    if result.valid:
+        typer.echo(
+            typer.style(
+                f"VALID ✓  —  {result.record_count} records, chain intact",
+                fg=typer.colors.GREEN,
+                bold=True,
+            )
+        )
+        typer.echo(f"  Session:  {result.session_id}")
+        if verbose and result.record_count > 0:
+            # Verbose detail is only meaningful for local JSONL verification
+            # right now — the DB path returns aggregate verdict only. Skip
+            # the per-record breakdown gracefully when unavailable.
+            typer.echo("  (per-record detail not yet implemented for DB path)")
+        return
+
     typer.echo(
-        f"`rootsign verify {session_id}` is not implemented yet — "
-        "the full hash-chain CLI ships in Sprint 3 alongside the WAL drain. "
-        "Use `rootsign.crud.action.verify_chain(...)` from Python for now."
+        typer.style(
+            f"TAMPERED ✗  —  chain broken at record #{result.first_invalid_sequence}",
+            fg=typer.colors.RED,
+            bold=True,
+        )
     )
-    raise typer.Exit(code=2)
+    if result.error:
+        typer.echo(f"  Detail:   {result.error}")
+    typer.echo(f"  Session:  {result.session_id}")
+    typer.echo(
+        typer.style(
+            "WARNING: This session log may have been tampered with.",
+            fg=typer.colors.YELLOW,
+        )
+    )
 
 
 if __name__ == "__main__":

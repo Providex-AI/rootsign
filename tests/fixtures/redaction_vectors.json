@@ -1,0 +1,47 @@
+{
+  "description": "Golden vectors proving redaction runs BEFORE hashing and that the StandardPIIConfig family redacts the documented PII patterns. Each vector pins a (config, input) -> redacted_output mapping. Any drift breaks the test, which is the point — ADR-006 makes this a binding contract.",
+  "vectors": [
+    {
+      "description": "Email redaction in top-level field via StandardPIIConfig",
+      "config": "StandardPIIConfig",
+      "input": {"email": "user@example.com", "name": "Alice"},
+      "expected_after_redaction": {"email": "[REDACTED]", "name": "Alice"}
+    },
+    {
+      "description": "Nested email via dot-path rule",
+      "config": {"user.email": ".*@.*"},
+      "input": {"user": {"email": "user@example.com"}},
+      "expected_after_redaction": {"user": {"email": "[REDACTED]"}}
+    },
+    {
+      "description": "Non-matching field passes through unchanged",
+      "config": {"ssn": "\\d{3}-\\d{2}-\\d{4}"},
+      "input": {"name": "Alice", "age": 30},
+      "expected_after_redaction": {"name": "Alice", "age": 30}
+    },
+    {
+      "description": "SSN pattern in StandardPIIConfig",
+      "config": "StandardPIIConfig",
+      "input": {"ssn": "123-45-6789", "name": "Bob"},
+      "expected_after_redaction": {"ssn": "[REDACTED]", "name": "Bob"}
+    },
+    {
+      "description": "FinancialPIIConfig redacts IBAN-shaped value",
+      "config": "FinancialPIIConfig",
+      "input": {"iban": "DE89370400440532013000", "balance": 1000},
+      "expected_after_redaction": {"iban": "[REDACTED]", "balance": 1000}
+    },
+    {
+      "description": "HealthcarePIIConfig redacts MRN-shaped value",
+      "config": "HealthcarePIIConfig",
+      "input": {"mrn": "MRN12345678", "diagnosis": "stable"},
+      "expected_after_redaction": {"mrn": "[REDACTED]", "diagnosis": "stable"}
+    },
+    {
+      "description": "List of emails redacted item-by-item under email path",
+      "config": "StandardPIIConfig",
+      "input": {"email": ["a@b.com", "c@d.com"]},
+      "expected_after_redaction": {"email": ["[REDACTED]", "[REDACTED]"]}
+    }
+  ]
+}
