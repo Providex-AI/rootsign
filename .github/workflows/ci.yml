@@ -128,12 +128,18 @@ jobs:
     # ADR-005 / Sprint 3: framework contract tests for CrewAI are MANDATORY —
     # this job must pass on every PR before merge. Same pattern as the
     # langgraph job above: mock IngestClient, no DB, ROOTSIGN_SKIP_DB_BOOTSTRAP.
+    #
+    # Sprint 4 (S4-TASK 10): added '1.0' to lock the duck-typing strategy
+    # against the 1.x line ahead of the Show HN post. Local run against
+    # crewai 1.6.1 had all 13 contract tests green — the ADR-005
+    # heuristic (name + _run callable) survives 1.x's BaseTool refactor
+    # because we never imported the class, only the shape.
     name: CrewAI contract (crewai ~=${{ matrix.crewai-version }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        crewai-version: ['0.28', '0.40']
+        crewai-version: ['0.28', '0.40', '1.0']
     env:
       ROOTSIGN_SKIP_DB_BOOTSTRAP: '1'
     steps:

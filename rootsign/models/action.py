@@ -68,7 +68,8 @@ class Action(Base):
         Index("ix_actions_authorization_status", "authorization_status"),
         CheckConstraint(
             "authorization_status IN ("
-            "'auto_authorized','human_approved','human_rejected','pending','bypassed')",
+            "'auto_authorized','human_approved','human_rejected',"
+            "'pending','bypassed','timed_out')",
             name="ck_actions_authorization_status",
         ),
         CheckConstraint("sequence_number >= 1", name="ck_actions_seq_positive"),

@@ -5,6 +5,12 @@ internal layout (`rootsign.sdk.*`, `rootsign.ingest.*`, `rootsign.crud.*`)
 remains accessible but is not part of the stable contract.
 """
 
+from rootsign.errors import (
+    EscalationDepthExceededError,
+    HiTLRejectedError,
+    HiTLTimeoutError,
+    RootSignError,
+)
 from rootsign.schemas.agent import (
     AgentEnvironment,
     AgentFramework,
@@ -75,13 +81,17 @@ __all__ = [
     "AgentFramework",
     "AgentRiskTier",
     "CrewAITracer",
+    "EscalationDepthExceededError",
     "FinancialPIIConfig",
     "HealthcarePIIConfig",
+    "HiTLRejectedError",
+    "HiTLTimeoutError",
     "HttpIngestClient",
     "IngestClient",
     "LangGraphTracer",
     "LocalIngestClient",
     "RedactionConfig",
+    "RootSignError",
     "SessionContext",
     "StandardPIIConfig",
     "VerifyResult",

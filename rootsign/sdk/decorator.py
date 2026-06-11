@@ -24,9 +24,9 @@ import logging
 from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
-from rootsign.ingest.schemas import EventType
+from rootsign.ingest.schemas import EventType, IngestResponse
 from rootsign.sdk.client import IngestClient
 from rootsign.sdk.context import SessionContext
 from rootsign.sdk.hashing import compute_payload_hash
@@ -57,6 +57,10 @@ def trace(
     session_context: SessionContext,
     tool_name: str | None = None,
     redaction_config: RedactionConfig | None = None,
+    require_approval: bool = False,
+    approval_context_builder: Callable[[str, dict[str, Any]], dict] | None = None,
+    poll_interval_seconds: float = 2.0,
+    timeout_seconds: float = 300.0,
 ) -> Callable[[Any], Any]:
     """Decorator factory. Wraps a callable to emit an ACTION_RECORD per call.
 
@@ -71,6 +75,22 @@ def trace(
             LangGraph relies on the original `tool.name`.
         redaction_config: Applied to input args + output before hashing /
             persisting. None ⇒ no redaction.
+        require_approval: When True, the tool will not execute until a
+            human approves via `rootsign approve <id>` (or the timeout
+            fires). The ACTION_RECORD is inserted with
+            `authorization_status='pending'` BEFORE the wait; verify_chain
+            still sees a complete chain regardless of approval timing
+            (ADR-007). Currently supported only for plain async callables —
+            the LangGraph/CrewAI paths raise NotImplementedError so users
+            get a clear "wrap the underlying tool function" hint rather
+            than silently degrading to auto-authorized.
+        approval_context_builder: Callable(tool_name, input_payload) → dict
+            building the context the operator sees via
+            `rootsign approve --list`. Default is
+            ``{"tool_name": ..., "input_summary": str(input)[:500]}``.
+        poll_interval_seconds: HiTLCheckpoint poll cadence. Default 2.0s.
+        timeout_seconds: HiTL deadline. After this, the action transitions
+            to `timed_out` and `HiTLTimeoutError` is raised. Default 300s.
 
     Keyword-only signature: matches the Sprint 1 surface so existing call
     sites and tests continue to work unchanged.
@@ -78,6 +98,12 @@ def trace(
 
     def decorator(func: Any) -> Any:
         if _is_langchain_tool(func):
+            if require_approval:
+                raise NotImplementedError(
+                    "@rootsign.trace(require_approval=True) does not yet wrap "
+                    "LangChain BaseTool — wrap the underlying function and "
+                    "expose it as a tool from there. Tracking issue: Phase 2."
+                )
             # Lazy import — only touched when langchain_core is present.
             from rootsign.sdk.frameworks.langgraph import LangGraphTracer
 
@@ -94,6 +120,12 @@ def trace(
         from rootsign.sdk.frameworks.crewai import _is_crewai_tool
 
         if _is_crewai_tool(func):
+            if require_approval:
+                raise NotImplementedError(
+                    "@rootsign.trace(require_approval=True) does not yet wrap "
+                    "CrewAI tools — wrap the underlying function and expose "
+                    "it as a tool from there. Tracking issue: Phase 2."
+                )
             from rootsign.sdk.frameworks.crewai import CrewAITracer
 
             return CrewAITracer.wrap_tool(
@@ -105,6 +137,25 @@ def trace(
 
         # Plain-callable path (backward compat with Sprint 1 smoke test).
         _tool_name = tool_name or getattr(func, "__name__", "unknown_tool")
+
+        if require_approval:
+
+            @functools.wraps(func)
+            async def hitl_wrapper(*args: Any, **kwargs: Any) -> Any:
+                return await _emit_hitl_action(
+                    func=func,
+                    args=args,
+                    kwargs=kwargs,
+                    tool_name=_tool_name,
+                    client=ingest_client,
+                    ctx=session_context,
+                    redaction_config=redaction_config,
+                    approval_context_builder=approval_context_builder,
+                    poll_interval_seconds=poll_interval_seconds,
+                    timeout_seconds=timeout_seconds,
+                )
+
+            return hitl_wrapper
 
         @functools.wraps(func)
         async def wrapper(*args: Any, **kwargs: Any) -> Any:
@@ -197,8 +248,19 @@ async def _try_ingest(
     redacted_input: Any,
     redacted_output: Any,
     timestamp: datetime,
-) -> None:
-    """Best-effort ingest — never raises (ADR-002 failure isolation rule)."""
+    authorization_status: str = "auto_authorized",
+) -> IngestResponse | None:
+    """Best-effort ingest — never raises (ADR-002 failure isolation rule).
+
+    Returns the `IngestResponse` (which carries `entity_id` = action_id) on
+    success, or None when the ingest failed. The original plain-trace path
+    discards the return value; the HiTL path uses `entity_id` to bind the
+    HiTLCheckpoint to the inserted row.
+
+    `authorization_status` defaults to 'auto_authorized' so existing call
+    sites keep their semantics. The HiTL wrapper passes 'pending' to
+    publish the ACTION_RECORD before the human-decision wait.
+    """
     try:
         sequence_number = await ctx.next_sequence()
         envelope = {
@@ -218,10 +280,206 @@ async def _try_ingest(
                 if isinstance(redacted_output, dict)
                 else None,
                 "timestamp": timestamp.isoformat(),
-                "authorization_status": "auto_authorized",
+                "authorization_status": authorization_status,
+            },
+        }
+        response = await client.handle(envelope)
+        logger.debug(
+            "ACTION_RECORD emitted tool=%s seq=%d status=%s",
+            tool_name,
+            sequence_number,
+            authorization_status,
+        )
+        return response
+    except Exception as ingest_err:  # noqa: BLE001 — see failure isolation rule
+        logger.warning("rootsign ingest failed for tool %s: %s", tool_name, ingest_err)
+        return None
+
+
+async def _emit_hitl_action(
+    *,
+    func: Callable[..., Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    tool_name: str,
+    client: IngestClient,
+    ctx: SessionContext,
+    redaction_config: RedactionConfig | None,
+    approval_context_builder: Callable[[str, dict[str, Any]], dict] | None,
+    poll_interval_seconds: float,
+    timeout_seconds: float,
+) -> Any:
+    """HiTL-gated tool execution. Spec §S4-TASK 6.
+
+    Flow:
+      1. Hash + redact the input.
+      2. Build the `context_presented` dict the operator will see in
+         `rootsign approve --list` — caller-supplied builder or default.
+      3. Insert an ACTION_RECORD via the IngestClient with
+         `authorization_status='pending'` and `output_hash=None`. The
+         IngestResponse carries the assigned `action_id` (entity_id).
+      4. Wait on `HiTLCheckpoint` bound to that action_id +
+         action_timestamp. Uses `AsyncSessionLocal` as the per-cycle
+         session factory so the loop is isolated from the caller's
+         session.
+      5. On `HiTLRejectedError` / `HiTLTimeoutError`: propagate. The
+         tool is NEVER executed in those paths — that's the whole point
+         of the gate.
+      6. On approval: run the tool synchronously and return its result.
+
+    What this does NOT do (v0.1.0 limitation, documented in ADR-007):
+      * The output is returned to the caller but NOT written back into
+        the Action row's `output_hash` / `output_redacted` columns —
+        those stay NULL for HiTL actions. The hash chain is computed at
+        insert time and stays valid; updating output post-hoc would
+        invalidate `self_hash`. Output capture for HiTL is a Phase 2 RPC.
+      * The wrapper does NOT emit a follow-up APPROVAL_RECORD envelope.
+        The CLI's direct DB write (via `create_with_chain_link`) is the
+        single source of truth. Re-emitting would hit the
+        `ActionAlreadyResolvedError` guard and log a noisy warning for
+        no semantic gain.
+    """
+    # Lazy imports — HiTL is a Sprint 4 surface and pulling these at
+    # module load would pessimize cold start for non-HiTL users.
+    from rootsign.database import AsyncSessionLocal
+    from rootsign.sdk.hitl import HiTLCheckpoint
+
+    # 1. Hash + redact input
+    input_payload: dict[str, Any] = {"args": list(args), "kwargs": dict(kwargs)}
+    redacted_input = (
+        redaction_config.redact(input_payload) if redaction_config else input_payload
+    )
+    input_hash = compute_payload_hash(redacted_input)
+    timestamp = datetime.now(timezone.utc)
+
+    # 2. Build context_presented
+    if approval_context_builder is not None:
+        context_presented = approval_context_builder(tool_name, input_payload)
+    else:
+        # Cap the summary at 500 chars so a multi-MB JSON payload doesn't
+        # become unreadable in the CLI listing. Operators wanting the
+        # full payload can fetch input_redacted directly.
+        context_presented = {
+            "tool_name": tool_name,
+            "input_summary": str(input_payload)[:500],
+        }
+
+    # 3. Submit pending ACTION_RECORD — must succeed; HiTL cannot proceed
+    #    without a row to poll on. Unlike the auto_authorized path which
+    #    treats ingest as best-effort, here a failed envelope means there
+    #    is no DB row to vote on, so the wait would deadlock for
+    #    `timeout_seconds`. Raise immediately so the caller can retry or
+    #    fall back to auto-authorized.
+    response = await _try_ingest(
+        client=client,
+        ctx=ctx,
+        tool_name=tool_name,
+        input_hash=input_hash,
+        output_hash=None,
+        redacted_input=redacted_input,
+        redacted_output=None,
+        timestamp=timestamp,
+        authorization_status="pending",
+    )
+    if response is None or response.entity_id is None:
+        raise RuntimeError(
+            f"rootsign: failed to submit pending ACTION_RECORD for tool "
+            f"{tool_name!r}; HiTL gate cannot proceed without an action_id. "
+            "Check IngestClient connectivity and SESSION_OPEN status."
+        )
+    action_id = response.entity_id
+
+    # 4. Wait for resolution. The checkpoint opens its own session per
+    #    poll cycle from AsyncSessionLocal — not the caller's session.
+    checkpoint = HiTLCheckpoint(
+        action_id=action_id,
+        action_timestamp=timestamp,
+        session_factory=AsyncSessionLocal,
+        poll_interval_seconds=poll_interval_seconds,
+        timeout_seconds=timeout_seconds,
+    )
+    # 5. HiTLRejectedError / HiTLTimeoutError propagate out. The CLI has
+    #    already written the corresponding APPROVAL_RECORD (or the
+    #    checkpoint's _record_timeout did) so the audit trail is complete.
+    await checkpoint.wait_for_approval(context_presented=context_presented)
+
+    # 6. Approved — execute the tool and return the result.
+    if asyncio.iscoroutinefunction(func):
+        return await func(*args, **kwargs)
+    maybe = func(*args, **kwargs)
+    return await maybe if asyncio.iscoroutine(maybe) else maybe
+
+
+async def _emit_approval_record(
+    *,
+    client: IngestClient,
+    ctx: SessionContext,
+    action_id: UUID,
+    action_timestamp: datetime,  # noqa: ARG001 — see comment below
+    approver_id: str,
+    approver_type: str,
+    context_presented: dict,
+    decision: str,
+    decision_reason: str | None = None,
+    parent_approval_id: UUID | None = None,
+    response_latency_ms: int | None = None,
+) -> None:
+    """Emit an APPROVAL_RECORD via the IngestClient.
+
+    Sibling of `_emit_action_record`. Two intentional differences:
+
+    * **No sequence number.** APPROVAL_RECORD is not part of the hash
+      chain (Sprint 4 Flag 4). The Action chain stays gap-free regardless
+      of whether/how long the human took, so verify_chain still returns
+      VALID on sessions that contain pending or timed-out actions.
+
+    * **`action_timestamp` is accepted but not serialized.** Callers (the
+      `rootsign approve` CLI and `HiTLCheckpoint`) carry it forward for
+      hypertable-safe DB lookups via `CRUDApproval.create_with_chain_link`.
+      Including it on this helper's signature keeps both code paths
+      (envelope emit and direct CRUD insert) symmetrical so we can later
+      add it to `ApprovalRecordPayload` without changing call sites.
+
+    Failure-isolation rule (ADR-002): an ingest failure here is logged at
+    WARNING and swallowed. The HiTL contract is enforced by the DB write
+    in `CRUDApproval.create_with_chain_link`; the envelope is for the
+    cloud backend's eventual-consistency view and must never block the
+    decorated tool from returning. Keyword-only signature throughout
+    (Sprint 4 Flag 1).
+    """
+    try:
+        envelope = {
+            "schema_version": SCHEMA_VERSION,
+            "sdk_version": SDK_VERSION,
+            "event_type": EventType.APPROVAL_RECORD.value,
+            "event_id": str(uuid4()),
+            "emitted_at": datetime.now(timezone.utc).isoformat(),
+            "agent_id": str(ctx.agent_id),
+            "session_id": str(ctx.session_id),
+            "payload": {
+                "action_id": str(action_id),
+                "approver_id": approver_id,
+                "approver_type": approver_type,
+                "context_presented": context_presented,
+                "decision": decision,
+                "decision_reason": decision_reason,
+                "parent_approval_id": (
+                    str(parent_approval_id) if parent_approval_id else None
+                ),
+                "response_latency_ms": response_latency_ms,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             },
         }
         await client.handle(envelope)
-        logger.debug("ACTION_RECORD emitted tool=%s seq=%d", tool_name, sequence_number)
+        logger.debug(
+            "APPROVAL_RECORD emitted action_id=%s decision=%s approver_type=%s",
+            action_id,
+            decision,
+            approver_type,
+        )
     except Exception as ingest_err:  # noqa: BLE001 — see failure isolation rule
-        logger.warning("rootsign ingest failed for tool %s: %s", tool_name, ingest_err)
+        logger.warning(
+            "rootsign: _emit_approval_record failed for action_id=%s: %s",
+            action_id,
+            ingest_err,
+        )

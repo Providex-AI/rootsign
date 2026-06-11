@@ -194,7 +194,15 @@ async def ingest_client(db):
 
 @pytest_asyncio.fixture
 async def registered_agent(db):
-    """Pre-registered Agent so SDK tests don't repeat the boilerplate."""
+    """Pre-registered Agent on the SAVEPOINT-rollback `db` session.
+
+    Use this for tests that stay entirely within one async DB session — the
+    agent is invisible to any process / thread / session that doesn't share
+    this connection (everything is wrapped in a SAVEPOINT and rolled back
+    on teardown). For tests that cross process/session/thread boundaries
+    (CLI invocations, asyncio.to_thread, HiTL poll loops, subprocesses)
+    use `seeded_agent` instead.
+    """
     from uuid import uuid4
 
     from rootsign.crud import agent as agent_crud
@@ -215,6 +223,49 @@ async def registered_agent(db):
             framework=AgentFramework.LANGGRAPH,
         ),
     )
+
+
+@pytest_asyncio.fixture
+async def seeded_agent(clean_db):
+    """Committed Agent on the `clean_db` session — visible across connections.
+
+    Sprint 4 §S4-TASK 8. Counterpart to `registered_agent` for tests that
+    exit the test loop's connection: CLI invocations (`asyncio.to_thread(
+    runner.invoke, ...)`), the HiTL poll loop (opens its own session per
+    cycle from `AsyncSessionLocal`), `test_show_hn_quickstart`. All of
+    those would see ZERO rows if the agent were inside a SAVEPOINT.
+
+    The `clean_db` fixture's TRUNCATE-on-teardown reaps every row this
+    fixture commits — including downstream Sessions, Actions, and
+    Approvals from the test body — so isolation is preserved between
+    tests without a per-row cleanup ritual.
+
+    HIGH risk tier + PRODUCTION environment to match what a realistic
+    HiTL-gated agent would look like. Framework is LANGGRAPH for parity
+    with the Show HN quickstart story.
+    """
+    from uuid import uuid4
+
+    from rootsign.crud import agent as agent_crud
+    from rootsign.schemas import (
+        AgentCreate,
+        AgentEnvironment,
+        AgentFramework,
+        AgentRiskTier,
+    )
+
+    agent = await agent_crud.create(
+        clean_db,
+        obj_in=AgentCreate(
+            name=f"seeded-test-agent-{uuid4().hex[:8]}",
+            owner="test-team",
+            environment=AgentEnvironment.PRODUCTION,
+            risk_tier=AgentRiskTier.HIGH,
+            framework=AgentFramework.LANGGRAPH,
+        ),
+    )
+    await clean_db.commit()
+    return agent
 
 
 def _make_envelope(event_type, agent_id, session_id, payload):
@@ -243,3 +294,9 @@ def make_envelope_fixture():
     """Inject the envelope helper as a fixture for SDK tests that prefer it
     over importing the underscore-private function."""
     return _make_envelope
+
+
+# Public alias — Sprint 4 §S4-TASK 9 (Show HN quickstart test) does
+#     from tests.conftest import make_envelope
+# rather than fixture injection so the test body reads like README code.
+make_envelope = _make_envelope

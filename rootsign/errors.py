@@ -1,19 +1,47 @@
-"""Ingest-layer error hierarchy.
+"""RootSign error hierarchy.
 
-These exceptions are raised by the CRUD layer when an ingest-side invariant
-fails, and caught by IngestHandler.handle() which maps them to the
-corresponding error_code in IngestResponse. Living in rootsign/ root rather
-than rootsign/ingest/ keeps the dependency direction clean (crud doesn't
-import from ingest).
+Two layers live here:
 
-Add a new subclass here when adding a new error code to the registry in
-the Ingestion Spec, Section 5.3.
+* Ingest-side errors (`IngestError` and subclasses) are raised by the CRUD
+  layer when an ingest-side invariant fails, then caught by
+  `IngestHandler.handle()` which maps them to an `error_code` in the
+  `IngestResponse`. Adding a new subclass means adding a new code to the
+  registry in the Ingestion Spec, Section 5.3.
+
+* HiTL / SDK errors (`HiTLTimeoutError`, `HiTLRejectedError`,
+  `EscalationDepthExceededError`) propagate out of `@rootsign.trace(
+  require_approval=True)` to the application code. They are NOT ingest
+  rejections — they're synchronous failures of the human-in-the-loop
+  contract that the caller is expected to handle.
+
+Both layers share the `RootSignError` root so `except RootSignError` is the
+single catch-all when something rootsign-shaped goes wrong.
+
+Living in rootsign/ root (rather than rootsign/ingest/ or rootsign/sdk/)
+keeps the dependency direction clean — crud, sdk, and ingest can all
+import from here without back-edges.
 """
 
 from __future__ import annotations
 
+from uuid import UUID
 
-class IngestError(Exception):
+
+class RootSignError(Exception):
+    """Top of the rootsign error hierarchy.
+
+    Every exception rootsign raises out of public surfaces (CRUD, SDK
+    decorators, CLIs) is a subclass of this. Application code that wants
+    the broadest possible catch-all can use:
+
+        try:
+            await tool.ainvoke(...)
+        except RootSignError:
+            ...
+    """
+
+
+class IngestError(RootSignError):
     """Base class for all ingest-side, application-level rejections.
 
     Subclasses set `error_code` and `retryable` as class attributes so the
@@ -82,3 +110,64 @@ class IngestValidationError(IngestError):
 class HashChainBrokenError(IngestError):
     error_code = "HASH_CHAIN_BROKEN"
     retryable = False
+
+
+# ---------------------------------------------------------------------------
+# HiTL checkpoint errors (Sprint 4)
+#
+# These are raised out of @rootsign.trace(require_approval=True) into the
+# caller's frame. They are not IngestError subclasses because they do not
+# represent ingest rejections — the ACTION_RECORD / APPROVAL_RECORD writes
+# succeed; what failed is the human-in-the-loop contract.
+# ---------------------------------------------------------------------------
+
+
+class HiTLTimeoutError(RootSignError):
+    """The HiTL poll loop timed out before a human responded.
+
+    By the time this is raised, the SDK has already written:
+      * an APPROVAL_RECORD with approver_type='timeout_auto_rejected'
+      * Action.authorization_status='timed_out' (terminal)
+
+    The forensic distinction between "a human said no" (human_rejected) and
+    "nobody responded" (timed_out) is preserved by these two records.
+    """
+
+    def __init__(self, action_id: UUID, timeout_seconds: int | float):
+        super().__init__(
+            f"HiTL approval timed out after {int(timeout_seconds)}s for "
+            f"action {action_id}. Status set to timed_out."
+        )
+        self.action_id = action_id
+        self.timeout_seconds = timeout_seconds
+
+
+class HiTLRejectedError(RootSignError):
+    """A human explicitly rejected the pending action via `rootsign approve --reject`.
+
+    By the time this is raised, the SDK has already written:
+      * an APPROVAL_RECORD with decision='rejected'
+      * Action.authorization_status='human_rejected' (terminal)
+    """
+
+    def __init__(self, action_id: UUID, reason: str | None = None):
+        msg = f"Action {action_id} rejected by approver."
+        if reason:
+            msg += f" Reason: {reason}"
+        super().__init__(msg)
+        self.action_id = action_id
+        self.reason = reason
+
+
+class EscalationDepthExceededError(RootSignError):
+    """A chained escalation arrived where Phase 0 / Phase 1 only allows
+    2-level escalation. Reserved for use by the trace decorator's escalation
+    handling — CRUDApproval still raises IngestValidationError for the
+    ingest-path equivalent because the Ingestion Spec already pins that
+    error_code."""
+
+    def __init__(self, action_id: UUID):
+        super().__init__(
+            f"Escalation depth limit (1) exceeded for action {action_id}"
+        )
+        self.action_id = action_id

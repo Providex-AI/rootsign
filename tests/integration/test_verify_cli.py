@@ -25,24 +25,18 @@ from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 import pytest
-import pytest_asyncio
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 from typer.testing import CliRunner
 
-from rootsign import crud
 from rootsign.config import settings
 from rootsign.crud import action as action_crud
 from rootsign.ingest import IdempotencyStore, IngestHandler
 from rootsign.models.action import Action
-from rootsign.schemas import (
-    AgentCreate,
-    AgentEnvironment,
-    AgentFramework,
-    AgentRiskTier,
-)
 from rootsign.sdk.cli import app
+
+# seeded_agent fixture is shared from tests/conftest.py (Sprint 4 §S4-TASK 8).
 
 runner = CliRunner()
 
@@ -68,24 +62,6 @@ def _action_payload(tool_name: str) -> dict:
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "authorization_status": "auto_authorized",
     }
-
-
-@pytest_asyncio.fixture
-async def seeded_agent(clean_db):
-    """Create an agent inside the *clean_db* connection so subsequent
-    Action FKs in that same connection resolve cleanly. Using `db`'s
-    transactional fixture would leave the agent invisible to clean_db's
-    connection."""
-    return await crud.agent.create(
-        clean_db,
-        obj_in=AgentCreate(
-            name=f"verify-cli-{uuid4().hex[:8]}",
-            owner="test-team",
-            environment=AgentEnvironment.PRODUCTION,
-            risk_tier=AgentRiskTier.MEDIUM,
-            framework=AgentFramework.LANGGRAPH,
-        ),
-    )
 
 
 @pytest.fixture

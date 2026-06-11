@@ -1,23 +1,32 @@
 """CRUD for Approval — owns the approval insert + atomic Action authorization update.
 
-The interesting method is `create_with_action_status_update`. It guards every
-HiTL invariant the spec defines:
-  * Action must exist
-  * Action must not already be in a terminal authorization state
-  * If parent_approval_id is supplied: parent must exist for the SAME action
-    and its decision must be 'escalated'
-  * 2-level escalation only: a decision='escalated' approval may NOT itself
-    have parent_approval_id set (enforced in Python, not SQL — see
-    feedback_req03_decisions for why)
+Two entry points live on `CRUDApproval`:
 
-When all guards pass, it inserts the Approval and updates
-Action.authorization_status in the same flush so the two writes are
-transactionally bound.
+* `create_with_action_status_update` (Phase 0) — driven by the ingest handler.
+  Takes a validated `ApprovalCreate` payload, enforces the full escalation
+  contract (parent_approval_id lookup, 2-level rule, etc.). Scopes the
+  Action lookup by (session_id, action_id) which is sufficient for the
+  ingest path because the envelope always carries the session.
+
+* `create_with_chain_link` (Sprint 4) — driven by the HiTL poll loop and
+  the `rootsign approve` CLI. Takes raw kwargs (no schema). Uses the
+  hypertable-safe lookup key (action_id, action_timestamp) because those
+  callers don't have an envelope to hand and the actions table's composite
+  PK requires the partition column on every unique lookup. Recognises the
+  'timeout_auto_rejected' approver_type and maps it to the new
+  authorization_status='timed_out' terminal state.
+
+Both methods share the "terminal states cannot transition" invariant.
+The widened terminal set (Sprint 4 adds 'timed_out') lives at module scope
+so a future ingest-path timeout would automatically pick it up.
 """
 
 from __future__ import annotations
 
-from sqlalchemy import select
+from datetime import datetime, timezone
+from uuid import UUID, uuid4
+
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from rootsign.crud.base import CRUDBase
@@ -40,7 +49,16 @@ _DECISION_TO_AUTH_STATUS: dict[str, str] = {
 }
 
 # Authorization states that are terminal — no further APPROVAL_RECORD allowed.
-_TERMINAL_AUTH_STATES = frozenset({"human_approved", "human_rejected"})
+# Sprint 4 adds 'timed_out' (poll-loop expiry recorded by HiTLCheckpoint).
+_TERMINAL_AUTH_STATES = frozenset(
+    {"human_approved", "human_rejected", "timed_out"}
+)
+
+# Sentinel approver_type for poll-loop timeouts. When the HiTL checkpoint
+# fails to receive a human decision within timeout_seconds, it records an
+# Approval with this approver_type and the resulting Action status is
+# 'timed_out' regardless of the (rejected) decision field.
+_TIMEOUT_APPROVER_TYPE = "timeout_auto_rejected"
 
 
 class CRUDApproval(CRUDBase[Approval, ApprovalCreate]):
@@ -145,6 +163,125 @@ class CRUDApproval(CRUDBase[Approval, ApprovalCreate]):
         await db.flush()
         await db.refresh(db_approval)
         return db_approval
+
+    async def create_with_chain_link(
+        self,
+        db: AsyncSession,
+        *,
+        action_id: UUID,
+        action_timestamp: datetime,
+        approver_id: str,
+        approver_type: str,
+        context_presented: dict,
+        decision: str,
+        decision_reason: str | None = None,
+        parent_approval_id: UUID | None = None,
+        response_latency_ms: int | None = None,
+    ) -> Approval:
+        """Insert an APPROVAL_RECORD bound to a hypertable Action row.
+
+        Sprint 4 entry point used by `HiTLCheckpoint._record_timeout` and the
+        `rootsign approve` CLI. Differs from `create_with_action_status_update`
+        in three ways:
+
+        1. **Lookup key** — joins on `(action_id, action_timestamp)` rather
+           than `(session_id, action_id)`. The actions table is a TimescaleDB
+           hypertable whose composite primary key is `(action_id, timestamp)`,
+           so any single-row lookup must include the partition column.
+           HiTL/CLI callers reserve `action_timestamp` at submission time
+           and pass it through here.
+
+        2. **Raw kwargs** — no `ApprovalCreate` schema. The HiTL path
+           doesn't have an envelope to validate against, and the CLI takes
+           values straight from the operator.
+
+        3. **Timeout mapping** — when `approver_type == 'timeout_auto_rejected'`
+           the resulting `Action.authorization_status` is `'timed_out'`
+           (a Sprint 4 terminal state), regardless of the `decision` value.
+           This is how the poll loop records an abandoned action.
+
+        Raises:
+            ActionNotFoundError: no Action row matches (action_id,
+                action_timestamp). Either the action was never submitted or
+                the caller passed the wrong timestamp.
+            ActionAlreadyResolvedError: target Action is already in a
+                terminal authorization state ('human_approved',
+                'human_rejected', or 'timed_out'). The HiTL poll loop
+                catches this when a human decision lands during the same
+                window as the timeout fires — see HiTLCheckpoint.
+        """
+        # 1. Hypertable-safe lookup. Both columns required for the actions
+        #    composite PK. Without action_timestamp the planner cannot prune
+        #    chunks and the row would not be unique.
+        stmt = select(Action).where(
+            Action.action_id == action_id,
+            Action.timestamp == action_timestamp,
+        )
+        action = (await db.execute(stmt)).scalar_one_or_none()
+        if action is None:
+            raise ActionNotFoundError(
+                f"action_id={action_id} at timestamp={action_timestamp.isoformat()} "
+                f"not found in hypertable"
+            )
+
+        # 2. Terminal-state guard. The race against a human approval lives
+        #    here: if `rootsign approve <id>` committed milliseconds before
+        #    the poll loop's timeout fires, the Action is already terminal
+        #    and HiTLCheckpoint will catch this error and return the human's
+        #    decision instead of raising HiTLTimeoutError.
+        if action.authorization_status in _TERMINAL_AUTH_STATES:
+            raise ActionAlreadyResolvedError(
+                f"action_id={action_id} is already "
+                f"{action.authorization_status}; cannot record further approvals"
+            )
+
+        # 3. Compute the new authorization_status. The timeout sentinel
+        #    overrides whatever decision value the caller passed — the poll
+        #    loop currently passes decision='rejected' alongside
+        #    approver_type='timeout_auto_rejected' so the Approval row
+        #    satisfies ck_approvals_decision while the Action row reads
+        #    'timed_out' for forensic clarity.
+        if approver_type == _TIMEOUT_APPROVER_TYPE:
+            new_status = "timed_out"
+        else:
+            try:
+                new_status = _DECISION_TO_AUTH_STATUS[decision]
+            except KeyError as exc:
+                raise IngestValidationError(
+                    f"Unknown decision={decision!r}; expected one of "
+                    f"{sorted(_DECISION_TO_AUTH_STATUS)}"
+                ) from exc
+
+        # 4. Insert Approval + update Action atomically. The UPDATE goes
+        #    through `update(Action).where(...)` rather than mutating the
+        #    ORM object because TimescaleDB's hypertable layer rewrites
+        #    these into chunk-targeted statements; raw SQL avoids the
+        #    occasional dialect quirk when SQLAlchemy autoflush emits the
+        #    update without the timestamp column.
+        approval_row = Approval(
+            approval_id=uuid4(),
+            action_id=action_id,
+            session_id=action.session_id,
+            approver_id=approver_id,
+            approver_type=approver_type,
+            context_presented=context_presented,
+            decision=decision,
+            decision_reason=decision_reason,
+            parent_approval_id=parent_approval_id,
+            response_latency_ms=response_latency_ms,
+            timestamp=datetime.now(timezone.utc),
+        )
+        db.add(approval_row)
+        await db.execute(
+            update(Action)
+            .where(
+                Action.action_id == action_id,
+                Action.timestamp == action_timestamp,
+            )
+            .values(authorization_status=new_status)
+        )
+        await db.flush()
+        return approval_row
 
 
 approval = CRUDApproval(Approval, pk_attr="approval_id")

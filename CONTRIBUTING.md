@@ -18,11 +18,15 @@ cd rootsign
 pip install -e '.[dev]'          # installs dev + test deps
 docker-compose up -d db          # PostgreSQL + TimescaleDB
 rootsign-admin init              # alembic upgrade head
-pytest tests/unit/ -v            # unit tests (no DB needed at runtime — see note)
-pytest tests/integration/ -v     # integration tests (needs DB)
+python -m pytest tests/unit/ -v          # unit tests (no DB needed at runtime — see note)
+python -m pytest tests/integration/ -v   # integration tests (needs DB)
 ```
 
 > **Python:** RootSign requires Python 3.11 or 3.12. We do not support 3.10 or below.
+>
+> The package's `requires-python` is `>=3.11,<3.15`, but the `[crewai]` extra currently lacks wheels for 3.13/3.14 so installs of `'.[crewai]'` on those versions fail with `No matching distribution found`. Bump the recommendation only after upstream ships matching wheels.
+>
+> **Always invoke pytest as `python -m pytest`.** If you `brew install`-ed pytest, the system binary will resolve ahead of the venv's pytest on PATH and run under the system Python — which does not see your venv's site-packages and will fail with confusing `ModuleNotFoundError` (typically on `sqlalchemy` first). `python -m pytest` always uses the venv's interpreter.
 >
 > **Note on unit tests:** The session-scoped `_bootstrap_test_db` fixture in `tests/conftest.py` runs alembic against the test DB before any test (including unit tests). Bring `docker-compose up -d db` up first.
 
