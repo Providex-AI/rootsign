@@ -91,6 +91,10 @@ first valid chain" type of quote.
 
 ## Pre-publish checklist
 
+- [ ] **GitHub Support has confirmed unreachable-object GC ran on the repo.** After the v0.1.0 launch cleanup we `git filter-repo`'d 10 internal docs out of history and force-pushed; orphaned commits remained accessible by direct SHA URL until Support purged them. Posting Show HN before Support confirms = spiking crawler traffic on URLs that still reach the orphaned content. Verify in an incognito browser that `github.com/Providex-AI/rootsign/commit/2c9a566` returns 404 before un-privating the repo. Memory: `feedback_filter_repo_github_gc`.
+- [ ] **Repo flipped back to public** after the GC verification above.
+
+
 - [ ] `python -m pytest tests/integration/test_show_hn_quickstart.py -v` passes in a clean venv. Exact recipe:
   ```bash
   rm -rf /tmp/rs_clean
