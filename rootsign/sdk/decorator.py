@@ -84,10 +84,13 @@ def trace(
             the LangGraph/CrewAI paths raise NotImplementedError so users
             get a clear "wrap the underlying tool function" hint rather
             than silently degrading to auto-authorized.
-        approval_context_builder: Callable(tool_name, input_payload) → dict
+        approval_context_builder: Callable(tool_name, redacted_input) → dict
             building the context the operator sees via
-            `rootsign approve --list`. Default is
-            ``{"tool_name": ..., "input_summary": str(input)[:500]}``.
+            `rootsign approve --list`. The second arg is the REDACTED
+            input payload — never the raw input — because the return
+            value is persisted into `approvals.context_presented` and
+            must not carry raw PII. Default is
+            ``{"tool_name": ..., "input_summary": str(redacted)[:500]}``.
         poll_interval_seconds: HiTLCheckpoint poll cadence. Default 2.0s.
         timeout_seconds: HiTL deadline. After this, the action transitions
             to `timed_out` and `HiTLTimeoutError` is raised. Default 300s.
@@ -352,16 +355,19 @@ async def _emit_hitl_action(
     input_hash = compute_payload_hash(redacted_input)
     timestamp = datetime.now(timezone.utc)
 
-    # 2. Build context_presented
+    # 2. Build context_presented from the REDACTED input — never the raw
+    #    payload. The HiTL CLI / poll loop persists this dict to
+    #    `approvals.context_presented`, so raw PII landing here would
+    #    survive in the audit table indefinitely. Audit fix.
     if approval_context_builder is not None:
-        context_presented = approval_context_builder(tool_name, input_payload)
+        context_presented = approval_context_builder(tool_name, redacted_input)
     else:
         # Cap the summary at 500 chars so a multi-MB JSON payload doesn't
         # become unreadable in the CLI listing. Operators wanting the
         # full payload can fetch input_redacted directly.
         context_presented = {
             "tool_name": tool_name,
-            "input_summary": str(input_payload)[:500],
+            "input_summary": str(redacted_input)[:500],
         }
 
     # 3. Submit pending ACTION_RECORD — must succeed; HiTL cannot proceed

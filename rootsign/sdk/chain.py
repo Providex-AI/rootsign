@@ -78,7 +78,15 @@ def verify_session_local(jsonl_path: str) -> VerifyResult:
     inconsistencies (including an empty file) produce a `VerifyResult`
     with `valid=False`.
     """
-    from rootsign.sdk.hashing import compute_payload_hash
+    # CRITICAL: use the FROZEN canonical hash from `rootsign.hashing`, NOT
+    # `rootsign.sdk.hashing.compute_payload_hash`. The two diverge on
+    # None-handling (canonical coerces `None`→`""` for `output_hash` and
+    # `prev_action_hash`; payload-hash serializes them as JSON `null`).
+    # Record #1 of any real store-exported chain has `prev_action_hash =
+    # NULL`, so re-implementing the canonical formula inline reliably
+    # produces TAMPERED on genuine exports. Audit fix.
+    # Memory: feedback_canonical_hash_never_reimplemented.
+    from rootsign.hashing import compute_action_self_hash
 
     path = Path(jsonl_path).expanduser()
     if not path.exists():
@@ -104,21 +112,20 @@ def verify_session_local(jsonl_path: str) -> VerifyResult:
 
     expected_prev: str | None = None
     for record in records:
-        # Reconstruct the canonical payload exactly as the DB-side verify
-        # uses it. `compute_payload_hash` here stands in for the action
-        # self-hash formula — keep this aligned with the CRUD-side
-        # `compute_action_self_hash` if its shape ever drifts.
-        canonical = {
-            "action_id": record.get("action_id"),
-            "session_id": record.get("session_id"),
-            "tool_name": record.get("tool_name"),
-            "input_hash": record.get("input_hash"),
-            "output_hash": record.get("output_hash"),
-            "prev_action_hash": record.get("prev_action_hash"),
-            "timestamp": record.get("timestamp"),
-            "sequence_number": record.get("sequence_number"),
-        }
-        recomputed = compute_payload_hash(canonical)
+        # `compute_action_self_hash` handles the None→"" coercion and
+        # UUID-stringification internally — we just pass the record as-is.
+        # Required field guard: any missing canonical field is itself a
+        # tamper signal, surface as an explicit error.
+        try:
+            recomputed = compute_action_self_hash(record)
+        except KeyError as missing:
+            return VerifyResult(
+                valid=False,
+                record_count=len(records),
+                session_id=session_id,
+                first_invalid_sequence=record.get("sequence_number"),
+                error=f"missing canonical field {missing!s}",
+            )
         if record.get("self_hash") != recomputed:
             return VerifyResult(
                 valid=False,

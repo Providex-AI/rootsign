@@ -5,16 +5,33 @@ before hashing or persisting. Matched values are replaced with the literal
 [REDACTED] string in a *copy* of the payload — the original dict is never
 mutated.
 
-Field paths support dot notation:
+## Matching semantics (audit fix — leaf-key default)
 
-    RedactionConfig({"user.email": r"[^@]+@[^@]+\\.[^@]+"})
+Two rule-key shapes are supported:
 
-would redact `payload["user"]["email"]` when its value matches the pattern.
-Unconfigured fields pass through unchanged.
+* **Bare names** (no dot) → **leaf-key match.** Rule `"email"` fires on
+  any field named `email` regardless of nesting. So a payload
+  `{"args": [], "kwargs": {"user": {"email": "alice@..."}}}` redacts
+  `kwargs.user.email` because the leaf is `email`.
 
-Sprint 3 hardening (ADR-006):
+* **Dotted paths** → **exact-path match.** Rule `"user.email"` fires only
+  when the field path is exactly `user.email` — top-level under key
+  `user` only.
+
+The decorator's payload envelope is `{"args": [...], "kwargs": {...}}`,
+so leaf-key matching is the only way pre-built configs (`email`,
+`phone`, `ssn`) hit real PII coming through `kwargs.*`. Path-key
+matching survives for advanced users with strict nesting requirements.
+
+`match_mode="path"` opts out of leaf inference entirely — every rule
+key is treated as a full path, even bare names. Useful when you need
+to distinguish `user.email` from `audit.email` and don't want bare
+`email` to redact both.
+
+Sprint 3 hardening (ADR-006), Sprint 4 audit:
   - List items walked recursively (lists of dicts redact through).
-  - Depth-limited at 5 levels to bound recursion on adversarial payloads.
+  - Depth-limited at 5 levels — fails CLOSED past the bound (returns
+    `[REDACTED]`, not the raw subtree).
   - Pre-built `StandardPIIConfig`, `FinancialPIIConfig`,
     `HealthcarePIIConfig` for common patterns — design partners can extend
     via `extra_rules=`.
@@ -40,18 +57,53 @@ MAX_REDACTION_DEPTH = 5
 class RedactionConfig:
     """Per-field regex redaction policy. Immutable after construction."""
 
-    def __init__(self, rules: dict[str, str]):
-        """rules: {field_path: regex_pattern}
+    def __init__(
+        self,
+        rules: dict[str, str],
+        *,
+        match_mode: str = "leaf",
+    ):
+        """rules: {field_key: regex_pattern}
 
-        field_path supports dot notation (e.g. 'user.email').
+        field_key: either a bare name (`"email"`) for leaf-key matching,
+            or a dotted path (`"user.email"`) for exact-path matching.
+            See module docstring for the full semantics.
         regex_pattern: if the field VALUE matches this pattern, redact it.
+        match_mode: ``"leaf"`` (default) — bare keys = leaf-key match,
+            dotted keys = path match. ``"path"`` — every key is treated
+            as an exact path, no leaf inference.
 
         Examples::
 
+            # Leaf-key match: redacts `email` anywhere in the payload tree
             RedactionConfig({"email": r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}"})
-            RedactionConfig({"ssn":   r"\\d{3}-\\d{2}-\\d{4}"})
+
+            # Strict path-only mode for `audit.email`, leaves `user.email` alone
+            RedactionConfig({"audit.email": r".+@.+"}, match_mode="path")
         """
-        self._rules = {path: re.compile(pattern) for path, pattern in rules.items()}
+        if match_mode not in ("leaf", "path"):
+            raise ValueError(
+                f"match_mode must be 'leaf' or 'path', got {match_mode!r}"
+            )
+        self._match_mode = match_mode
+        self._leaf_rules: dict[str, re.Pattern[str]] = {}
+        self._path_rules: dict[str, re.Pattern[str]] = {}
+        for key, pattern in rules.items():
+            compiled = re.compile(pattern)
+            if match_mode == "path" or "." in key:
+                # Dotted keys are always paths regardless of mode. Bare
+                # keys become paths only when the user explicitly opts in
+                # via match_mode="path".
+                self._path_rules[key] = compiled
+            else:
+                self._leaf_rules[key] = compiled
+
+    @property
+    def match_mode(self) -> str:
+        return self._match_mode
+
+    def _has_rules(self) -> bool:
+        return bool(self._leaf_rules) or bool(self._path_rules)
 
     def redact(self, payload: Any) -> Any:
         """Return a new payload with matching fields redacted.
@@ -62,27 +114,47 @@ class RedactionConfig:
         """
         if not isinstance(payload, dict):
             return payload
-        if not self._rules:
+        if not self._has_rules():
             return payload
         return self._redact_dict(payload, path="", depth=0)
 
-    def _redact_dict(self, obj: dict[str, Any], path: str, depth: int) -> dict[str, Any]:
+    def _redact_dict(self, obj: dict[str, Any], path: str, depth: int) -> Any:
+        # Fail CLOSED past the depth limit — return the redaction
+        # placeholder rather than the raw subtree. Audit fix.
         if depth > MAX_REDACTION_DEPTH:
-            return obj
+            return REDACTED_PLACEHOLDER
         result: dict[str, Any] = {}
         for k, v in obj.items():
             full_path = f"{path}.{k}" if path else k
             result[k] = self._redact_value(full_path, v, depth + 1)
         return result
 
+    def _matched_rule(self, path: str) -> re.Pattern[str] | None:
+        """Resolve which rule (if any) applies to a given field path.
+
+        Path-keyed rules always win over leaf-keyed rules when both
+        match — explicit beats inferred. This matters for the audit-fix
+        scenario where a user adds a tighter `kwargs.email` path rule
+        alongside a broad leaf `email` rule.
+        """
+        if path in self._path_rules:
+            return self._path_rules[path]
+        if self._leaf_rules:
+            leaf = path.rsplit(".", 1)[-1] if "." in path else path
+            if leaf in self._leaf_rules:
+                return self._leaf_rules[leaf]
+        return None
+
     def _redact_value(self, path: str, value: Any, depth: int) -> Any:
+        # Same fail-closed rule as _redact_dict — see note above.
         if depth > MAX_REDACTION_DEPTH:
-            return value
-        # Path-keyed rule matches only fire on string values — applying a
-        # regex to anything else would crash, so silently skip mismatched
-        # types instead of throwing.
-        if path in self._rules and isinstance(value, str):
-            if self._rules[path].search(value):
+            return REDACTED_PLACEHOLDER
+        # Rule matches only fire on string values — applying a regex to
+        # anything else would crash, so silently skip mismatched types
+        # instead of throwing.
+        rule = self._matched_rule(path)
+        if rule is not None and isinstance(value, str):
+            if rule.search(value):
                 return REDACTED_PLACEHOLDER
         if isinstance(value, dict):
             return self._redact_dict(value, path, depth)

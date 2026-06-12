@@ -35,3 +35,17 @@ coverage.xml
 pip-log.txt
 pip-delete-this-directory.txt
 .python-version
+
+# Confidential coding-agent sprint briefings (per CLAUDE.md / memory
+# feedback_never_commit_internal_specs). These are dropped into the
+# repo root for the coding agent to READ but must NEVER be committed.
+# Memory reference: feedback_never_commit_internal_specs.md.
+AGENTS_Phase*.md
+RootSign_Phase*.docx
+RootSign_Phase*.md
+ProvidexAI_Phase*.docx
+ProvidexAI_Phase*.md
+
+# Code-quality / security review artifacts the founder runs locally.
+# Track them in a private notes location, not in-tree.
+rootsign_review.md

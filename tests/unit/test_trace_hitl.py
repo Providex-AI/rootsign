@@ -240,6 +240,52 @@ class TestContextPresented:
         assert "input_summary" in captured["context"]
         assert "99.99" in captured["context"]["input_summary"]
 
+    async def test_redaction_applies_to_context_presented(self, ctx, accepting_client):
+        """REGRESSION (audit finding #1): context_presented must carry
+        the REDACTED input, not the raw payload. The HiTL CLI / poll loop
+        persists this dict into `approvals.context_presented`; raw PII
+        landing here would survive in the audit table indefinitely.
+
+        Pre-fix bug: `_emit_hitl_action` passed `input_payload` (raw) to
+        both the default summary and the custom builder, even when a
+        `redaction_config` was provided.
+        """
+        from rootsign.sdk.redaction import RedactionConfig
+
+        # Rule that matches the kwarg-path explicitly — confirms the
+        # fix passes the redacted dict (which has '[REDACTED]' for the
+        # email field) to context_presented, not the raw input.
+        redaction = RedactionConfig(
+            rules={"kwargs.email": r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}"}
+        )
+
+        @trace(
+            ingest_client=accepting_client,
+            session_context=ctx,
+            require_approval=True,
+            redaction_config=redaction,
+        )
+        async def my_tool(*, email: str) -> str:
+            return "sent"
+
+        captured = {}
+
+        async def fake_wait(self, *, context_presented):
+            captured["context"] = context_presented
+            return HiTLResult(decision=ApprovalDecision.APPROVED)
+
+        with patch(
+            "rootsign.sdk.hitl.HiTLCheckpoint.wait_for_approval",
+            new=fake_wait,
+        ):
+            await my_tool(email="alice@acme.com")
+
+        # The PII must be redacted in the persisted context. The default
+        # builder produces an `input_summary` string — assert the raw PII
+        # is gone and the placeholder is present.
+        assert "alice@acme.com" not in captured["context"]["input_summary"]
+        assert "[REDACTED]" in captured["context"]["input_summary"]
+
     async def test_custom_builder_overrides_default(self, ctx, accepting_client):
         """approval_context_builder lets callers shape what the operator sees.
         Critical for financial / PII flows where the default str() is wrong."""

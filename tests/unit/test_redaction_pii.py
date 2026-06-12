@@ -69,6 +69,84 @@ class TestStandardPIIConfig:
             "email": REDACTED_PLACEHOLDER,
         }
 
+    def test_redacts_pii_inside_decorator_envelope_shape(self):
+        """REGRESSION (audit finding #3): the decorator's input payload is
+        `{"args": [...], "kwargs": {...}}`. Pre-audit, `StandardPIIConfig`
+        was keyed by bare names (`email`, `ssn`, ...) but the matcher
+        only fired on top-level path keys, so PII at `kwargs.email`
+        never matched and the config was effectively a no-op for every
+        real tool call.
+
+        Post-audit fix: leaf-key matching is the default — a rule keyed
+        `email` fires on any field named `email` regardless of nesting.
+        This test mirrors what `_emit_action_record` actually produces.
+        """
+        cfg = StandardPIIConfig()
+        envelope = {
+            "args": [],
+            "kwargs": {
+                "customer_id": "acme",
+                "email": "alice@example.com",
+                "phone": "+1-415-555-1234",
+                "ssn": "123-45-6789",
+            },
+        }
+        out = cfg.redact(envelope)
+        assert out["kwargs"]["email"] == REDACTED_PLACEHOLDER
+        assert out["kwargs"]["phone"] == REDACTED_PLACEHOLDER
+        assert out["kwargs"]["ssn"] == REDACTED_PLACEHOLDER
+        # Non-PII fields pass through unchanged.
+        assert out["kwargs"]["customer_id"] == "acme"
+        assert out["args"] == []
+
+    def test_redacts_pii_deeply_nested_in_envelope(self):
+        """Leaf-key matching must walk the full nesting depth — a tool
+        that passes a structured user object should still get its
+        email/phone redacted."""
+        cfg = StandardPIIConfig()
+        envelope = {
+            "args": [],
+            "kwargs": {
+                "user": {
+                    "profile": {
+                        "email": "alice@example.com",
+                        "phone": "+14155551234",
+                    },
+                    "id": "u-7",
+                },
+            },
+        }
+        out = cfg.redact(envelope)
+        assert out["kwargs"]["user"]["profile"]["email"] == REDACTED_PLACEHOLDER
+        assert out["kwargs"]["user"]["profile"]["phone"] == REDACTED_PLACEHOLDER
+        assert out["kwargs"]["user"]["id"] == "u-7"
+
+    def test_path_mode_does_not_apply_leaf_inference(self):
+        """`match_mode="path"` opts out of leaf inference — bare names
+        match only top-level paths, NOT nested ones. Useful when you
+        want to distinguish `audit.email` from `user.email`."""
+        cfg = RedactionConfig({"email": r".+@.+"}, match_mode="path")
+        out = cfg.redact(
+            {"kwargs": {"email": "alice@example.com"}}
+        )
+        # Under path mode, the bare rule "email" only matches path "email"
+        # at the top level — kwargs.email does NOT match.
+        assert out == {"kwargs": {"email": "alice@example.com"}}
+
+    def test_path_keyed_rule_always_takes_precedence_over_leaf(self):
+        """When both a path rule and a leaf rule could match, the explicit
+        path-keyed rule wins. This lets users tighten a broad leaf rule
+        with a narrow path-specific one (e.g. allow `audit.email` to use
+        a different pattern than the generic `email` leaf rule)."""
+        cfg = RedactionConfig(
+            {
+                "email": r"BROAD.+",  # leaf rule — wouldn't match
+                "kwargs.email": r".+@.+",  # path rule — matches
+            }
+        )
+        out = cfg.redact({"kwargs": {"email": "alice@example.com"}})
+        assert out["kwargs"]["email"] == REDACTED_PLACEHOLDER
+
 
 class TestFinancialAndHealthcareConfigs:
     def test_financial_redacts_iban(self):
@@ -108,25 +186,34 @@ class TestListAndDepth:
             ]
         }
 
-    def test_max_depth_bounded(self):
+    def test_max_depth_fails_closed(self):
+        """Audit fix: past MAX_REDACTION_DEPTH the redactor must FAIL
+        CLOSED — return the redaction placeholder, never the raw subtree.
+        Prior behaviour returned `obj`/`value` unchanged, which silently
+        let raw PII past the privacy boundary on deeply nested payloads.
+        """
+        from rootsign.sdk.redaction import REDACTED_PLACEHOLDER
+
         cfg = RedactionConfig({"a.b.c.d.e.f.g": ".*"})
-        # Build a payload one level past MAX_REDACTION_DEPTH; the inner
-        # value should NOT be redacted because traversal halts.
-        nested = {}
+        # Build a payload that pushes the recursion past MAX_REDACTION_DEPTH.
+        nested: dict[str, Any] = {}
         cur = nested
         keys = ["a", "b", "c", "d", "e", "f", "g"]
         assert len(keys) > MAX_REDACTION_DEPTH
         for k in keys[:-1]:
             cur[k] = {}
             cur = cur[k]
-        cur[keys[-1]] = "should_not_be_redacted"
+        cur[keys[-1]] = "should_not_be_visible_in_output"
 
         out = cfg.redact(nested)
-        # Walk down to leaf in the output; the value is unchanged.
-        cur_out = out
-        for k in keys[:-1]:
-            cur_out = cur_out[k]
-        assert cur_out[keys[-1]] == "should_not_be_redacted"
+        # The raw PII string MUST NOT appear anywhere in the output —
+        # the depth-limit bail-out replaced the subtree with the
+        # placeholder, so a serialised form of `out` should contain
+        # neither the raw value nor any path beyond the limit.
+        import json
+        rendered = json.dumps(out)
+        assert "should_not_be_visible_in_output" not in rendered
+        assert REDACTED_PLACEHOLDER in rendered
 
 
 class TestRedactionGoldenVectors:

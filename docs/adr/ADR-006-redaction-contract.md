@@ -49,14 +49,49 @@ This is enforced in two places:
 No redaction. Raw payload is hashed. The customer is responsible.
 `StandardPIIConfig()` is a one-line convenience for the common case.
 
+### Matching semantics — leaf-key default with path-key opt-in
+
+**Update (Sprint 4 audit fix).** The original ADR-006 implementation
+used path-key matching only: rule `"email"` matched only the top-level
+field `email`. That made the pre-built `StandardPIIConfig` effectively
+non-functional on the decorator's actual envelope shape
+`{"args": [...], "kwargs": {...}}` — a kwarg `email` has path
+`kwargs.email`, which a rule keyed `email` did not match.
+
+Current semantics:
+
+* **Bare rule keys** (no dot) → **leaf-key match.** Rule `"email"` fires
+  on any field named `email` regardless of nesting depth. Pre-built
+  configs (`StandardPIIConfig`, `FinancialPIIConfig`,
+  `HealthcarePIIConfig`) now redact PII anywhere in the tree, including
+  the decorator's `kwargs.*` envelope.
+
+* **Dotted rule keys** → **exact-path match.** Rule `"user.email"`
+  still fires only at the exact path `user.email`. Backward-compatible
+  with custom configs from earlier sprints.
+
+* **`match_mode="path"` constructor argument** → opt-in strict mode.
+  Every rule key is treated as a full path, even bare names. Useful
+  when you need to distinguish `audit.email` from `user.email` and
+  don't want a bare `email` rule to redact both.
+
+* **Precedence.** When both a path-keyed rule and a leaf-keyed rule
+  could match the same field, the path-keyed rule wins. Explicit beats
+  inferred. This lets users tighten a broad leaf rule with a narrow
+  path-specific override.
+
 ### Nested field support
 
-`RedactionConfig` walks dicts recursively with dot-path keys:
-`{"user.email": ".*@.*"}` redacts `payload["user"]["email"]`. Lists are
-walked item-by-item, items keep the parent's path for rule lookup. Depth
-is capped at `MAX_REDACTION_DEPTH = 5` to bound recursion on adversarial
-payloads — anything deeper is returned unchanged. Five levels covers every
-realistic tool payload (LangChain / CrewAI tools rarely nest beyond 2–3).
+`RedactionConfig` walks dicts and lists recursively. List items keep
+the parent's path for rule lookup so `{"emails": ["a@b", "c@d"]}`
+redacts both list items.
+
+### Depth limit — fails closed (Sprint 4 audit fix)
+
+Depth is capped at `MAX_REDACTION_DEPTH = 5` to bound recursion. Past
+the limit the redactor returns `REDACTED_PLACEHOLDER`, **not** the raw
+subtree. Returning the raw value would invert the privacy default —
+deeply nested or adversarial payloads must fail closed.
 
 ### Standard PII configs
 
@@ -102,6 +137,14 @@ their domain.
 - **Unbounded recursion.** Rejected. Five-level depth limit catches
   realistic payloads and refuses pathological inputs without changing the
   contract surface.
+- **Path-key matching only** (the pre-audit default). Rejected — pre-built
+  configs designed around path keys don't survive contact with real
+  envelope shapes. Leaf-key matching is the semantic users want ("redact
+  PII fields by their name, wherever they are"); path-key is the
+  advanced-user opt-in. Memory: `feedback_audit_redaction_leaf_keys`.
+- **Depth-limit fail-open** (the pre-audit default). Rejected — a privacy
+  control must err toward MORE redaction when uncertain, not less. Memory:
+  `feedback_privacy_fails_closed`.
 
 ## Verification
 
