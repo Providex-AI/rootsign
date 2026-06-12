@@ -50,9 +50,11 @@ pip install rootsign[langgraph]
 Start PostgreSQL + TimescaleDB locally and apply the schema:
 
 ```bash
-docker-compose up -d db
+rootsign-admin start-db   # docker run timescale/timescaledb:latest-pg16
 rootsign-admin init       # alembic upgrade head
 ```
+
+`start-db` wraps a single `docker run` so you don't need to clone the repo. If you *have* cloned it, `docker-compose up -d db` is the equivalent developer path. Both reuse the same `rootsign-timescaledb` container name and `rootsign_pgdata` volume — pick either, not both.
 
 ### 2. Register your agent (one-time setup)
 

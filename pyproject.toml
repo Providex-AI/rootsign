@@ -97,6 +97,6 @@ venvPath = "."
 venv = ".venv"
 pythonVersion = "3.12"
 include = ["rootsign", "tests", "scripts"]
-exclude = [".venv", "alembic/versions"]
+exclude = [".venv", "rootsign/_migrations/versions"]
 reportMissingImports = "warning"
 reportUnusedImport = "warning"
