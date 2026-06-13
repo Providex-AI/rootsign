@@ -41,11 +41,25 @@ pip-delete-this-directory.txt
 # repo root for the coding agent to READ but must NEVER be committed.
 # Memory reference: feedback_never_commit_internal_specs.md.
 AGENTS_Phase*.md
+AGENTS_PRD*.md
 RootSign_Phase*.docx
 RootSign_Phase*.md
+RootSign_PRD*.docx
+RootSign_PRD*.md
 ProvidexAI_Phase*.docx
 ProvidexAI_Phase*.md
+ProvidexAI_PRD*.docx
+ProvidexAI_PRD*.md
 
 # Code-quality / security review artifacts the founder runs locally.
 # Track them in a private notes location, not in-tree.
 rootsign_review.md
+
+# Local-only memory backups and ephemeral sample files dropped into the
+# repo root for the coding agent to read during a session. See CLAUDE.md
+# top section. MEMORY.md is the working memory index — never committed.
+MEMORY.md
+MEMORY_*.md
+Sample_*.md
+Sample_*.py
+Sample_*.docx
