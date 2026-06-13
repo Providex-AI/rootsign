@@ -277,9 +277,11 @@ def _make_envelope(event_type, agent_id, session_id, payload):
     from datetime import datetime, timezone
     from uuid import uuid4
 
+    from rootsign._version import SDK_VERSION
+
     return {
         "schema_version": "1.0",
-        "sdk_version": "0.1.1",
+        "sdk_version": SDK_VERSION,
         "event_type": event_type,
         "event_id": str(uuid4()),
         "emitted_at": datetime.now(timezone.utc).isoformat(),

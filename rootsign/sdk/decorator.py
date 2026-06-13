@@ -34,8 +34,9 @@ from rootsign.sdk.redaction import RedactionConfig
 
 logger = logging.getLogger("rootsign.sdk")
 
+from rootsign._version import SDK_VERSION  # noqa: F401  (re-exported via envelopes)
+
 SCHEMA_VERSION = "1.0"
-SDK_VERSION = "0.1.1"
 
 
 def _is_langchain_tool(func: Any) -> bool:

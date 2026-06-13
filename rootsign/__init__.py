@@ -40,7 +40,7 @@ from rootsign.sdk.redaction import (
 from rootsign.sdk.registration import register_agent
 from rootsign.sdk.session import session
 
-__version__ = "0.1.1"
+from rootsign._version import __version__  # noqa: E402, F401  (re-export)
 
 
 def wrap_tools(

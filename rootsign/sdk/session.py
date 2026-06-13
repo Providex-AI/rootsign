@@ -25,8 +25,9 @@ from rootsign.sdk.context import SessionContext
 
 logger = logging.getLogger("rootsign.sdk.session")
 
+from rootsign._version import SDK_VERSION  # noqa: F401  (re-exported via envelopes)
+
 SCHEMA_VERSION = "1.0"
-SDK_VERSION = "0.1.1"
 
 
 def _envelope_base(
