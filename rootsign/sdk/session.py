@@ -26,7 +26,7 @@ from rootsign.sdk.context import SessionContext
 logger = logging.getLogger("rootsign.sdk.session")
 
 SCHEMA_VERSION = "1.0"
-SDK_VERSION = "0.1.0.dev0"
+SDK_VERSION = "0.1.1"
 
 
 def _envelope_base(

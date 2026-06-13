@@ -279,7 +279,7 @@ def _make_envelope(event_type, agent_id, session_id, payload):
 
     return {
         "schema_version": "1.0",
-        "sdk_version": "0.1.0.dev0",
+        "sdk_version": "0.1.1",
         "event_type": event_type,
         "event_id": str(uuid4()),
         "emitted_at": datetime.now(timezone.utc).isoformat(),

@@ -69,3 +69,57 @@ class TestMarkSessionOpen:
         results = await asyncio.gather(*[ctx.mark_session_open() for _ in range(20)])
         assert sum(1 for r in results if r is True) == 1
         assert ctx.session_open_emitted is True
+
+
+class TestSessionContextDecisionCapture:
+    """ADR-008: pending Decision slot + opt-in record_decision."""
+
+    async def test_record_decision_noop_when_flag_off(self, monkeypatch):
+        """CAPTURE_DECISIONS=False: returns None, ingest client not called."""
+        from unittest.mock import AsyncMock
+
+        from rootsign.sdk import config as cfg
+
+        monkeypatch.setenv("ROOTSIGN_CAPTURE_DECISIONS", "false")
+        # Singleton sdk_settings was instantiated at import time; reload so
+        # the env override is read. record_decision does
+        # `from rootsign.sdk.config import sdk_settings` at call time, which
+        # picks up the rebound module attribute.
+        import importlib
+
+        importlib.reload(cfg)
+
+        ctx = SessionContext(agent_id=AGENT_ID)
+        mock_client = AsyncMock()
+
+        result = await ctx.record_decision(
+            selected_action="test_tool",
+            ingest_client=mock_client,
+        )
+
+        assert result is None
+        mock_client.handle.assert_not_called()
+        assert ctx._pending_decision_id is None
+
+    async def test_pending_decision_id_cleared_after_consume(self):
+        """First _consume returns the stashed id; second returns None."""
+        ctx = SessionContext(agent_id=AGENT_ID)
+        ctx._pending_decision_id = UUID("770e8400-e29b-41d4-a716-446655440002")
+
+        first = await ctx._consume_pending_decision_id()
+        second = await ctx._consume_pending_decision_id()
+
+        assert first == UUID("770e8400-e29b-41d4-a716-446655440002")
+        assert second is None
+        assert ctx._pending_decision_id is None
+
+    async def test_record_decision_keyword_only(self):
+        """Sprint 4 Flag 1: all params keyword-only."""
+        import inspect
+
+        sig = inspect.signature(SessionContext.record_decision)
+        non_self = [p for n, p in sig.parameters.items() if n != "self"]
+        for param in non_self:
+            assert param.kind == inspect.Parameter.KEYWORD_ONLY, (
+                f"Parameter {param.name} must be keyword-only"
+            )

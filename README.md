@@ -39,7 +39,7 @@ Compliance-grade audit trails. Zero changes to your agent code.
 pip install rootsign[langgraph]
 ```
 
-> **Pre-PyPI note (until v0.1.0 ships).** While we finalise the PyPI publish, install from source instead:
+> **Pre-PyPI note (until v0.1.1 ships).** While we finalise the PyPI publish, install from source instead:
 >
 > ```bash
 > pip install 'rootsign[langgraph] @ git+https://github.com/Providex-AI/rootsign.git'
@@ -120,6 +120,37 @@ WARNING: This session log may have been tampered with.
 
 See [docs/framework-support.md](docs/framework-support.md) for the version matrix and integration notes.
 
+## Decision capture (opt-in)
+
+Record the *why* before each tool call — foundational for Phase 2 session replay. Off by default; opt in deliberately with `ROOTSIGN_CAPTURE_DECISIONS=true`.
+
+```python
+import os
+os.environ["ROOTSIGN_CAPTURE_DECISIONS"] = "true"
+
+async with rootsign.session(agent_id=agent.agent_id, client=client) as ctx:
+    # Record what the agent decided before calling the tool.
+    await ctx.record_decision(
+        selected_action="send_invoice",
+        reasoning_summary="Amount within policy; recipient verified.",
+        confidence=0.97,
+        ingest_client=client,
+    )
+    tools = rootsign.wrap_tools([send_invoice], ctx=ctx, client=client)
+    await tools[0].ainvoke({"customer_id": "acme", "amount": 1500.0})
+    # The Action record now carries decision_id linking it to the reasoning above.
+```
+
+Depth controls how much reasoning is persisted, via `ROOTSIGN_REASONING_DEPTH`:
+
+| Value | What's stored |
+|---|---|
+| `minimal` | `selected_action` + `confidence` only |
+| `summary` (default) | + `reasoning_summary` truncated to 500 chars |
+| `full` | + `reasoning_summary` truncated to 10,000 chars + `alternatives_considered` |
+
+Calling `ctx.record_decision()` when the flag is off is a silent no-op — safe to ship in capture-on and capture-off environments without conditionals at the call site. One `Decision` links to one `Action`; the pending slot is single and cleared after the next tool call consumes it. Decisions are **not** in the hash chain (ADR-008) — `verify_chain` is unchanged.
+
 ## Quickstart — CrewAI
 
 CrewAI integration is the same shape — wrap the tool list at construction time.
@@ -128,7 +159,7 @@ CrewAI integration is the same shape — wrap the tool list at construction time
 pip install rootsign[crewai]
 ```
 
-> Same pre-PyPI note as above — until v0.1.0 ships, use `pip install 'rootsign[crewai] @ git+https://github.com/Providex-AI/rootsign.git'`.
+> Same pre-PyPI note as above — until v0.1.1 ships, use `pip install 'rootsign[crewai] @ git+https://github.com/Providex-AI/rootsign.git'`.
 
 ```python
 import rootsign

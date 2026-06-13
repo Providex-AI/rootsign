@@ -13,9 +13,27 @@ bundled docker-compose db using the local transport.
 
 from __future__ import annotations
 
+from enum import Enum
 from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class ReasoningDepth(str, Enum):
+    """Controls how much of a Decision's reasoning is persisted.
+
+    MINIMAL: only selected_action + confidence (reasoning_summary dropped).
+    SUMMARY: + reasoning_summary truncated to 500 chars (default).
+    FULL:    + reasoning_summary truncated to 10,000 chars + alternatives.
+
+    The persisted depth is recorded on the Decision row's
+    `reasoning_depth` field so a replay consumer can tell why
+    `reasoning_summary` is None or truncated. See ADR-008.
+    """
+
+    MINIMAL = "minimal"
+    SUMMARY = "summary"
+    FULL = "full"
 
 
 class SDKSettings(BaseSettings):
@@ -40,6 +58,10 @@ class SDKSettings(BaseSettings):
     # each ACTION_RECORD. Off by default because Decision payloads tend to
     # contain the largest, most PII-dense data the agent produces.
     CAPTURE_DECISIONS: bool = False
+
+    # How much reasoning to persist when CAPTURE_DECISIONS is True. Ignored
+    # when capture is off. See `ReasoningDepth` above and ADR-008.
+    REASONING_DEPTH: ReasoningDepth = ReasoningDepth.SUMMARY
 
     # WAL buffer for events that fail ingest. Drained on the next successful
     # handle(). Phase 1 ships manual replay; an auto-replay loop lands in

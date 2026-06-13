@@ -35,7 +35,7 @@ from rootsign.sdk.redaction import RedactionConfig
 logger = logging.getLogger("rootsign.sdk")
 
 SCHEMA_VERSION = "1.0"
-SDK_VERSION = "0.1.0.dev0"
+SDK_VERSION = "0.1.1"
 
 
 def _is_langchain_tool(func: Any) -> bool:
@@ -204,6 +204,13 @@ async def _emit_action_record(
     input_hash = compute_payload_hash(redacted_input)
     timestamp = datetime.now(timezone.utc)
 
+    # Consume the pending Decision slot BEFORE the tool runs so a failed
+    # tool still records the decision_id on its ACTION_RECORD. Single-slot
+    # semantics (ADR-008): if record_decision wasn't called or the slot
+    # was already consumed by a concurrent action, this returns None and
+    # the payload's decision_id will be null.
+    decision_id = await ctx._consume_pending_decision_id()
+
     result: Any = None
     redacted_output: dict[str, Any] | None = None
     output_hash: str | None = None
@@ -234,6 +241,7 @@ async def _emit_action_record(
         redacted_input=redacted_input,
         redacted_output=redacted_output,
         timestamp=timestamp,
+        decision_id=decision_id,
     )
 
     if error is not None:
@@ -252,6 +260,7 @@ async def _try_ingest(
     redacted_output: Any,
     timestamp: datetime,
     authorization_status: str = "auto_authorized",
+    decision_id: UUID | None = None,
 ) -> IngestResponse | None:
     """Best-effort ingest — never raises (ADR-002 failure isolation rule).
 
@@ -263,6 +272,12 @@ async def _try_ingest(
     `authorization_status` defaults to 'auto_authorized' so existing call
     sites keep their semantics. The HiTL wrapper passes 'pending' to
     publish the ACTION_RECORD before the human-decision wait.
+
+    `decision_id` populates the ACTION_RECORD payload's `decision_id` field
+    (already present on ActionRecordPayload as `UUID | None`). Callers fetch
+    it from `ctx._consume_pending_decision_id()` so a Decision recorded just
+    before this action carries through. None when Decision capture is off
+    or the pending slot is already spent. See ADR-008.
     """
     try:
         sequence_number = await ctx.next_sequence()
@@ -284,6 +299,7 @@ async def _try_ingest(
                 else None,
                 "timestamp": timestamp.isoformat(),
                 "authorization_status": authorization_status,
+                "decision_id": str(decision_id) if decision_id else None,
             },
         }
         response = await client.handle(envelope)
@@ -376,6 +392,12 @@ async def _emit_hitl_action(
     #    is no DB row to vote on, so the wait would deadlock for
     #    `timeout_seconds`. Raise immediately so the caller can retry or
     #    fall back to auto-authorized.
+    #
+    # Consume the pending Decision slot before submitting so the pending
+    # ACTION_RECORD carries decision_id to its eventual approved/rejected
+    # outcome. Single-slot semantics per ADR-008 — same contract as the
+    # auto-authorized path.
+    decision_id = await ctx._consume_pending_decision_id()
     response = await _try_ingest(
         client=client,
         ctx=ctx,
@@ -386,6 +408,7 @@ async def _emit_hitl_action(
         redacted_output=None,
         timestamp=timestamp,
         authorization_status="pending",
+        decision_id=decision_id,
     )
     if response is None or response.entity_id is None:
         raise RuntimeError(
@@ -493,3 +516,96 @@ async def _emit_approval_record(
             action_id,
             ingest_err,
         )
+
+
+async def _emit_decision_record(
+    *,
+    client: IngestClient,
+    ctx: SessionContext,
+    selected_action: str,
+    reasoning_summary: str | None = None,
+    confidence: float | None = None,
+    alternatives_considered: list[str] | None = None,
+) -> UUID | None:
+    """Emit a DECISION_RECORD envelope and return the handler-assigned id.
+
+    Called by `SessionContext.record_decision` after the CAPTURE_DECISIONS
+    gate. Honors `ROOTSIGN_REASONING_DEPTH`:
+
+    * MINIMAL — `reasoning_summary` dropped; `alternatives_considered` dropped.
+    * SUMMARY — `reasoning_summary` truncated to 500 chars; alternatives dropped.
+    * FULL    — `reasoning_summary` truncated to 10,000 chars; alternatives kept.
+
+    The actual depth used is recorded on the payload's `reasoning_depth`
+    field so a replay consumer can tell whether `reasoning_summary` is
+    `None` because the developer didn't supply one or because MINIMAL
+    dropped it (ADR-008).
+
+    Wire-format detail: the envelope does NOT include `decision_id`.
+    `DecisionRecordPayload` is `extra='forbid'` and the handler assigns
+    the id itself, returning it in `IngestResponse.entity_id`. This helper
+    reads it back and returns it so the caller can stash it in
+    `_pending_decision_id`.
+
+    Failure isolation (ADR-002): any ingest failure is logged at WARNING
+    and the helper returns `None` instead of raising. The caller treats
+    `None` as "Decision was not captured" — the auto-authorized path
+    continues and the next Action gets a null `decision_id`.
+
+    Keyword-only signature (Sprint 4 Flag 1).
+    """
+    # Lazy import — capture is opt-in; avoid module-load cost on the
+    # default no-capture path. `from ... import` re-reads on each call so
+    # importlib.reload in tests is honored.
+    from rootsign.sdk.config import ReasoningDepth, sdk_settings
+
+    depth = sdk_settings.REASONING_DEPTH
+    if depth == ReasoningDepth.MINIMAL:
+        summary: str | None = None
+        alts: list[str] = []
+    else:
+        max_chars = 500 if depth == ReasoningDepth.SUMMARY else 10_000
+        summary = reasoning_summary[:max_chars] if reasoning_summary else None
+        alts = list(alternatives_considered or []) if depth == ReasoningDepth.FULL else []
+
+    try:
+        envelope = {
+            "schema_version": SCHEMA_VERSION,
+            "sdk_version": SDK_VERSION,
+            "event_type": EventType.DECISION_RECORD.value,
+            "event_id": str(uuid4()),
+            "emitted_at": datetime.now(timezone.utc).isoformat(),
+            "agent_id": str(ctx.agent_id),
+            "session_id": str(ctx.session_id),
+            "payload": {
+                "selected_action": selected_action,
+                "reasoning_summary": summary,
+                "confidence": confidence,
+                "alternatives_considered": alts,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "reasoning_depth": depth.value,
+                "reasoning_captured": summary is not None,
+            },
+        }
+        response = await client.handle(envelope)
+        if response is None or response.entity_id is None:
+            logger.warning(
+                "rootsign: _emit_decision_record got no entity_id "
+                "(response=%s); pending slot will not be set",
+                response,
+            )
+            return None
+        logger.debug(
+            "DECISION_RECORD emitted decision_id=%s selected_action=%s depth=%s",
+            response.entity_id,
+            selected_action,
+            depth.value,
+        )
+        return response.entity_id
+    except Exception as ingest_err:  # noqa: BLE001 — see failure isolation rule
+        logger.warning(
+            "rootsign: _emit_decision_record failed for selected_action=%s: %s",
+            selected_action,
+            ingest_err,
+        )
+        return None

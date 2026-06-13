@@ -40,7 +40,7 @@ from rootsign.sdk.redaction import (
 from rootsign.sdk.registration import register_agent
 from rootsign.sdk.session import session
 
-__version__ = "0.1.0.dev0"
+__version__ = "0.1.1"
 
 
 def wrap_tools(
