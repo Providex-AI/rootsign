@@ -416,6 +416,10 @@ async def _emit_hitl_action(
     return await maybe if asyncio.iscoroutine(maybe) else maybe
 
 
+# Phase 2 hook — not invoked in v0.1.0; the v0.1.0 HiTL CLI writes
+# APPROVAL_RECORD rows directly via CRUDApproval.create_with_chain_link.
+# See _emit_hitl_action docstring (above) for the rationale. Helper kept +
+# unit-tested now so Phase 2's HttpIngestClient can wire it in trivially.
 async def _emit_approval_record(
     *,
     client: IngestClient,

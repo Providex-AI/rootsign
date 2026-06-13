@@ -79,10 +79,21 @@ class CRUDApproval(CRUDBase[Approval, ApprovalCreate]):
         """
         decision = obj_in.decision.value if isinstance(obj_in.decision, ApprovalDecision) else obj_in.decision
 
-        # 1. Look up the target Action by (session_id, action_id). Both fields
-        #    are required because actions is a TimescaleDB hypertable — scoping
-        #    by session_id keeps the planner inside the relevant chunk via the
-        #    ix_actions_session_seq index instead of full-table scanning.
+        # 1. Look up the target Action by (session_id, action_id). Both
+        #    columns are required because `actions` is a TimescaleDB hypertable
+        #    and a single-column action_id lookup is not unique under the
+        #    composite PK. This diverges from Sprint 4 Flag 5's canonical
+        #    (action_id, action_timestamp) form deliberately — the ingest-path
+        #    ApprovalRecordPayload does not carry the action's original
+        #    timestamp, only its own. Switching would require an envelope
+        #    schema bump for no semantic gain since action_id is a UUID and
+        #    becomes unique once scoped to a session. The lookup is served by
+        #    `ix_actions_session_seq (session_id, sequence_number)`; chunks are
+        #    still scanned (TimescaleDB prunes on the partition column
+        #    `timestamp`, not session_id), but sessions are short-lived so
+        #    only 1–2 chunks are touched in practice. `create_with_chain_link`
+        #    below uses the canonical (action_id, action_timestamp) form
+        #    because the HiTL / CLI callers have the timestamp on hand.
         action = (
             await db.execute(
                 select(Action).where(
