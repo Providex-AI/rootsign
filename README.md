@@ -1,11 +1,17 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Providex-AI/rootsign/main/docs/rootsign-logo.png" alt="RootSign" width="220" />
+</p>
+
 # RootSign
 
 **Tamper-evident provenance logging for AI agents.**
 
 [![CI](https://github.com/Providex-AI/rootsign/actions/workflows/ci.yml/badge.svg)](https://github.com/Providex-AI/rootsign/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
-[![PyPI - coming soon](https://img.shields.io/badge/PyPI-coming_soon-lightgrey.svg)](https://pypi.org/project/rootsign/)
+[![PyPI](https://img.shields.io/pypi/v/rootsign.svg)](https://pypi.org/project/rootsign/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![X](https://img.shields.io/badge/X-@getprovidex-black?logo=x)](https://x.com/getprovidex)
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-Providex-0A66C2?logo=linkedin)](https://www.linkedin.com/company/providex)
 
 > *RootSign is a Providex AI product — the agent capture layer of the Providex AI Agent Accountability Platform.*
 
@@ -19,12 +25,12 @@ Compliance-grade audit trails. Zero changes to your agent code.
 
 ## Status
 
-**Phase 1 MVP — v0.1.0.** LangGraph + CrewAI integrations, `rootsign verify` CLI, PII redaction, and human-in-the-loop checkpoints are all shipping.
+**Phase 1 MVP — v0.1.1.** LangGraph + CrewAI integrations, `rootsign verify` CLI, PII redaction, human-in-the-loop checkpoints, and opt-in decision capture (PRD-19 / ADR-008) are all shipping.
 
 | Phase | Scope | Status |
 |---|---|---|
 | 0 | Data model + storage + ingest handler | ✅ Complete |
-| 1 | Python SDK — `@rootsign.trace`, LangGraph + CrewAI, `rootsign verify` CLI, redaction, HiTL checkpoint | ✅ v0.1.0 |
+| 1 | Python SDK — `@rootsign.trace`, LangGraph + CrewAI, `rootsign verify` CLI, redaction, HiTL checkpoint, opt-in decision capture | ✅ v0.1.1 |
 | 2 | Hosted ingest backend + compliance dashboard | Planned |
 | 3 | Policy enforcement + incident workflow | Planned |
 | 4 | Cross-platform governance | Planned |
@@ -38,14 +44,6 @@ Compliance-grade audit trails. Zero changes to your agent code.
 ```bash
 pip install rootsign[langgraph]
 ```
-
-> **Pre-PyPI note (until v0.1.1 ships).** While we finalise the PyPI publish, install from source instead:
->
-> ```bash
-> pip install 'rootsign[langgraph] @ git+https://github.com/Providex-AI/rootsign.git'
-> ```
->
-> Once the PyPI release lands, the `pip install rootsign[langgraph]` line above will Just Work and this callout goes away.
 
 Start PostgreSQL + TimescaleDB locally and apply the schema:
 
@@ -159,8 +157,6 @@ CrewAI integration is the same shape — wrap the tool list at construction time
 pip install rootsign[crewai]
 ```
 
-> Same pre-PyPI note as above — until v0.1.1 ships, use `pip install 'rootsign[crewai] @ git+https://github.com/Providex-AI/rootsign.git'`.
-
 ```python
 import rootsign
 from crewai import Agent
@@ -212,10 +208,10 @@ When `wire_transfer(...)` is called, the SDK inserts an `ACTION_RECORD` with `au
 ```bash
 $ rootsign approve --list
 Pending approvals (1):
-  550e8400-...  wire_transfer  session=...  submitted=2026-06-11T13:42:01+00:00
+  <action-id>  wire_transfer  session=<session-id>  submitted=<timestamp>
 
-$ rootsign approve 550e8400-... --reason "Verified with customer"
-✓  Action 550e8400-... approved.
+$ rootsign approve <action-id> --reason "Verified with customer"
+✓  Action <action-id> approved.
 ```
 
 The decorated function returns normally. Rejection (`--reject`) raises `HiTLRejectedError`; a 5-minute timeout raises `HiTLTimeoutError` and the action's authorization status becomes `'timed_out'` (a terminal forensic state distinct from `'human_rejected'`).
@@ -243,14 +239,13 @@ tools = rootsign.wrap_tools(
 ## Architecture
 
 * **`@rootsign.trace`** wraps a tool callable and emits an `ACTION_RECORD` envelope per call. LangGraph `BaseTool` and CrewAI tools are detected automatically.
-* **`LocalIngestClient`** is the in-process ingest path for v0.1.0. A `HttpIngestClient` for the hosted backend lands in Phase 2.
+* **`LocalIngestClient`** is the in-process ingest path for v0.1.x. A `HttpIngestClient` for the hosted backend lands in Phase 2.
 * **Hash chain** is per-session: each `Action` carries `prev_action_hash` so reconstructing the chain detects any after-the-fact modification.
 * **`HiTLCheckpoint`** is an async poll loop that opens its own DB session per cycle — see ADR-007 for the loop-binding rationale.
 * **Storage** is PostgreSQL 16 + TimescaleDB 2.14. The `actions` table is a hypertable; the chain stays intact across chunks.
 
 ## What's next
 
-* **PyPI publish** — pip install will Just Work once we ship.
 * **Phase 2 cloud backend** — `HttpIngestClient` + hosted compliance dashboard. Drop-in replacement for `LocalIngestClient` once available.
 * **Web UI for HiTL** — approve/reject pending actions from a browser instead of the CLI.
 * **AutoGen integration** — same duck-typing shape as CrewAI.
