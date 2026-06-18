@@ -19,6 +19,7 @@ from langchain_core.messages import HumanMessage
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
+from sqlalchemy import select
 
 import rootsign
 from rootsign import (
@@ -29,6 +30,7 @@ from rootsign import (
     register_agent,
 )
 from rootsign.database import AsyncSessionLocal
+from rootsign.models.agent import Agent
 
 load_dotenv()
 
@@ -56,9 +58,26 @@ async def notify_customer(customer_id: str, message: str) -> str:
 
 
 async def _ensure_agent() -> UUID:
-    """Register the agent on first run; reuse the cached agent_id thereafter."""
+    """Get an agent_id for this example, idempotently.
+
+    Order of resolution:
+      1. The cached `.agent_id` file (fastest path on re-runs).
+      2. A row in the DB with `name == AGENT_NAME` (handles the case where
+         `.agent_id` was deleted but the row from a prior run is still
+         around — `agents.name` has a UNIQUE constraint, so a blind
+         re-register would crash).
+      3. Otherwise register fresh.
+    """
     if AGENT_ID_CACHE.exists():
         return UUID(AGENT_ID_CACHE.read_text().strip())
+
+    async with AsyncSessionLocal() as db:
+        existing = (
+            await db.execute(select(Agent).where(Agent.name == AGENT_NAME))
+        ).scalar_one_or_none()
+        if existing is not None:
+            AGENT_ID_CACHE.write_text(str(existing.agent_id))
+            return existing.agent_id
 
     agent = await register_agent(
         name=AGENT_NAME,

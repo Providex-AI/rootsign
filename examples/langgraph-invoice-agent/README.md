@@ -22,10 +22,11 @@ Then bring up the shared TimescaleDB and migrate the schema once:
 cd ..
 docker-compose up -d db
 cd langgraph-invoice-agent
-DATABASE_URL=$ROOTSIGN_DATABASE_URL rootsign-admin init
+set -a && source .env && set +a       # export DATABASE_URL[_SYNC] for rootsign-admin
+rootsign-admin init
 ```
 
-(`ROOTSIGN_DATABASE_URL` is read from `.env`; the wrapper above just hands it to `rootsign-admin` for the migration step.)
+(`rootsign-admin` reads `DATABASE_URL` / `DATABASE_URL_SYNC` directly — no `ROOTSIGN_` prefix. The `set -a` trick exports every variable in `.env` to the subprocess so the admin CLI sees them.)
 
 ## Run it
 
