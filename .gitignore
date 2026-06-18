@@ -55,6 +55,13 @@ ProvidexAI_PRD*.md
 # Track them in a private notes location, not in-tree.
 rootsign_review.md
 
+# Launch-prep working docs — founder-internal copy and design-partner
+# names that should NOT live in the public repo. Both were briefly
+# tracked pre-launch; removed from history via git rm --cached and
+# kept local-only from this commit forward.
+docs/show-hn-draft.md
+docs/design-partner-feedback.md
+
 # Local-only memory backups and ephemeral sample files dropped into the
 # repo root for the coding agent to read during a session. See CLAUDE.md
 # top section. MEMORY.md is the working memory index — never committed.
