@@ -11,6 +11,10 @@
 [![X](https://img.shields.io/badge/X-@getprovidex-black?logo=x)](https://x.com/getprovidex)
 [![LinkedIn](https://img.shields.io/badge/LinkedIn-Providex-0A66C2?logo=linkedin)](https://www.linkedin.com/company/providex)
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Providex-AI/rootsign/main/docs/demo.gif" alt="RootSign demo — three instrumented tool calls land on the hash chain, rootsign verify confirms VALID" width="780" />
+</p>
+
 ## What is RootSign?
 
 > *RootSign is a Providex AI product — the agent capture layer of the Providex AI Agent Accountability Platform.*
@@ -114,7 +118,7 @@ TAMPERED ✗  —  chain broken at record #2
 WARNING: This session log may have been tampered with.
 ```
 
-See [docs/framework-support.md](docs/framework-support.md) for the version matrix and integration notes.
+See [docs/framework-support.md](docs/framework-support.md) for the version matrix and integration notes. A full runnable LangGraph example (ReAct agent, three instrumented tools, OpenAI-backed) lives in [`examples/langgraph-invoice-agent`](examples/langgraph-invoice-agent/).
 
 ## Decision capture (opt-in)
 

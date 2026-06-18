@@ -1,0 +1,20 @@
+services:
+  db:
+    image: timescale/timescaledb:latest-pg16
+    container_name: rootsign-examples-db
+    environment:
+      POSTGRES_USER: rootsign
+      POSTGRES_PASSWORD: rootsign
+      POSTGRES_DB: rootsign_examples
+    ports:
+      - "5433:5432"
+    volumes:
+      - rootsign_examples_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rootsign -d rootsign_examples"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+volumes:
+  rootsign_examples_pgdata:
