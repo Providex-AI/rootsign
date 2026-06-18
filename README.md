@@ -1,21 +1,19 @@
-<p align="center">
-  <img src="https://raw.githubusercontent.com/Providex-AI/rootsign/main/docs/rootsign-logo.png" alt="RootSign" width="220" />
-</p>
-
 # RootSign
 
-**Tamper-evident provenance logging for AI agents.**
+**Tamper-evident provenance logging for production AI agents.**
 
-[![CI](https://github.com/Providex-AI/rootsign/actions/workflows/ci.yml/badge.svg)](https://github.com/Providex-AI/rootsign/actions/workflows/ci.yml)
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 [![PyPI](https://img.shields.io/pypi/v/rootsign?cacheSeconds=300)](https://pypi.org/project/rootsign/)
+[![Downloads](https://img.shields.io/pypi/dm/rootsign)](https://pypi.org/project/rootsign/)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
+[![CI](https://github.com/Providex-AI/rootsign/actions/workflows/ci.yml/badge.svg)](https://github.com/Providex-AI/rootsign/actions/workflows/ci.yml)
+[![Stars](https://img.shields.io/github/stars/Providex-AI/rootsign?style=flat&logo=github)](https://github.com/Providex-AI/rootsign/stargazers)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![X](https://img.shields.io/badge/X-@getprovidex-black?logo=x)](https://x.com/getprovidex)
 [![LinkedIn](https://img.shields.io/badge/LinkedIn-Providex-0A66C2?logo=linkedin)](https://www.linkedin.com/company/providex)
 
-> *RootSign is a Providex AI product — the agent capture layer of the Providex AI Agent Accountability Platform.*
-
 ## What is RootSign?
+
+> *RootSign is a Providex AI product — the agent capture layer of the Providex AI Agent Accountability Platform.*
 
 When AI agents take actions in production — calling tools, hitting APIs, writing to databases — there is no built-in audit trail. If something goes wrong (a wrong refund, a leaked PII record, a malformed deployment), there is no way to prove what the agent did, in what order, on whose authorization, or whether the record has been tampered with after the fact.
 
