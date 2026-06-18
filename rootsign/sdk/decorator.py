@@ -39,6 +39,44 @@ from rootsign._version import SDK_VERSION  # noqa: F401  (re-exported via envelo
 SCHEMA_VERSION = "1.0"
 
 
+def _to_json_safe(value: Any) -> Any:
+    """Coerce a value into a JSON-serializable shape for storage + hashing.
+
+    Defangs non-JSON returns (LangChain BaseMessage, dataclasses, arbitrary
+    objects) before they reach the JSONB column or `compute_payload_hash`.
+
+    Why this exists: LangGraph's ToolNode invokes tools via the LangChain
+    ToolCall envelope (`tool.ainvoke({"name", "args", "id", "type"})`).
+    BaseTool then wraps the tool's plain-string return into a `ToolMessage`
+    before returning. Without this normalization the ToolMessage trips
+    JSONB serialization and the ACTION_RECORD never inserts.
+
+    Behavior:
+      * `None`, primitives, JSON-clean dicts/lists/tuples → preserved
+        (tuples become lists for spec parity).
+      * LangChain BaseMessage duck-types (have both `.content` and `.type`)
+        → `{"_message_type": <type>, "content": <recursed content>}` so the
+        agent's intent is captured without dragging in private fields like
+        `tool_call_id`, `additional_kwargs`, or `usage_metadata`.
+      * Anything else → `str(value)` as a last resort so the hash never
+        explodes.
+
+    Deterministic by construction — calling it twice on equal inputs
+    produces equal outputs, so input/output hashes stay stable.
+    """
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, dict):
+        return {str(k): _to_json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_to_json_safe(v) for v in value]
+    content = getattr(value, "content", None)
+    msg_type = getattr(value, "type", None)
+    if content is not None and isinstance(msg_type, str):
+        return {"_message_type": msg_type, "content": _to_json_safe(content)}
+    return str(value)
+
+
 def _is_langchain_tool(func: Any) -> bool:
     """True if *func* is a LangChain BaseTool instance.
 
@@ -195,10 +233,9 @@ async def _emit_action_record(
     the caller. If *func* raises, the exception is re-raised AFTER the ingest
     attempt so we still record the failed action.
     """
-    input_payload: dict[str, Any] = {
-        "args": list(args),
-        "kwargs": dict(kwargs),
-    }
+    input_payload: dict[str, Any] = _to_json_safe(
+        {"args": list(args), "kwargs": dict(kwargs)}
+    )
     redacted_input = (
         redaction_config.redact(input_payload) if redaction_config else input_payload
     )
@@ -225,7 +262,7 @@ async def _emit_action_record(
             # LangGraphTracer adapter where _call is sync but its body awaits
             # the original ainvoke.
             result = await maybe if asyncio.iscoroutine(maybe) else maybe
-        output_payload = {"result": result}
+        output_payload = _to_json_safe({"result": result})
         redacted_output = (
             redaction_config.redact(output_payload) if redaction_config else output_payload
         )
