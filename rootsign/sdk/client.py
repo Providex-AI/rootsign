@@ -17,6 +17,7 @@ ROOTSIGN_BACKEND (read via SDKSettings).
 
 from __future__ import annotations
 
+import asyncio
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -58,6 +59,25 @@ class LocalIngestClient(IngestClient):
             )
         self._idempotency = idempotency if idempotency is not None else IdempotencyStore()
         self._handler = IngestHandler(db=db, idempotency=self._idempotency)
+        # Serializes handle() calls against the shared AsyncSession.
+        #
+        # Why this exists: under LangGraph's ToolNode (and create_react_agent)
+        # multiple tool calls can interleave on the event loop. Each
+        # `await client.handle(envelope)` walks the same AsyncSession through
+        # SELECT FOR UPDATE → add → flush. If a second handle() lands during
+        # a prior call's flush, SQLAlchemy fires
+        # `Session is already flushing` and the SAWarning about
+        # `Session.add()` during flush. Postgres row locks serialize the
+        # actual writes (chain integrity holds — verify still returns VALID),
+        # but the warning is real and points at a hazard that would bite
+        # the moment any future code path relied on ORM identity-map
+        # consistency mid-flush. See GitHub issue #2.
+        #
+        # The lock is per-client (not per-process) so multiple LocalIngestClient
+        # instances on different AsyncSessions run independently. Within one
+        # client, calls serialize — which is exactly the contract a single
+        # AsyncSession needs.
+        self._handle_lock = asyncio.Lock()
 
     @property
     def idempotency(self) -> IdempotencyStore:
@@ -65,7 +85,8 @@ class LocalIngestClient(IngestClient):
         return self._idempotency
 
     async def handle(self, envelope: dict[str, Any]) -> IngestResponse:
-        return await self._handler.handle(envelope)
+        async with self._handle_lock:
+            return await self._handler.handle(envelope)
 
 
 class HttpIngestClient(IngestClient):
