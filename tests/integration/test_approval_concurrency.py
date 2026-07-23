@@ -109,7 +109,7 @@ async def _resolve(factory, **kwargs):
         try:
             await approval_crud.create_with_chain_link(session, **kwargs)
             await session.commit()
-        except BaseException as exc:  # noqa: BLE001 - test needs the exception object
+        except Exception as exc:  # noqa: BLE001 - test needs the exception object
             await session.rollback()
             return exc
     return "ok"
