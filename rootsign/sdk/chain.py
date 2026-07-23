@@ -88,6 +88,13 @@ def verify_session_local(jsonl_path: str) -> VerifyResult:
     # Memory: feedback_canonical_hash_never_reimplemented.
     from rootsign.hashing import compute_action_self_hash
 
+    # audit #4: re-bind the redacted payloads to the input_hash/output_hash
+    # the chain protects. `compute_action_self_hash` excludes the redacted
+    # payloads, so a tampered export could rewrite the human-readable
+    # evidence while the self_hash chain still verifies. Only enforced when a
+    # record actually carries the redacted field.
+    from rootsign.sdk.hashing import compute_payload_hash
+
     path = Path(jsonl_path).expanduser()
     if not path.exists():
         raise FileNotFoundError(f"Session file not found: {path}")
@@ -141,6 +148,28 @@ def verify_session_local(jsonl_path: str) -> VerifyResult:
                 session_id=session_id,
                 first_invalid_sequence=record["sequence_number"],
                 error="prev_action_hash chain broken",
+            )
+        input_redacted = record.get("input_redacted")
+        if input_redacted is not None and compute_payload_hash(input_redacted) != record.get(
+            "input_hash"
+        ):
+            return VerifyResult(
+                valid=False,
+                record_count=len(records),
+                session_id=session_id,
+                first_invalid_sequence=record["sequence_number"],
+                error="payload_hash mismatch: input_redacted does not match input_hash",
+            )
+        output_redacted = record.get("output_redacted")
+        if output_redacted is not None and compute_payload_hash(output_redacted) != record.get(
+            "output_hash"
+        ):
+            return VerifyResult(
+                valid=False,
+                record_count=len(records),
+                session_id=session_id,
+                first_invalid_sequence=record["sequence_number"],
+                error="payload_hash mismatch: output_redacted does not match output_hash",
             )
         expected_prev = record["self_hash"]
 

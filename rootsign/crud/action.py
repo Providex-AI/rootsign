@@ -19,6 +19,43 @@ from rootsign.models.action import Action
 from rootsign.models.session import AgentSession
 from rootsign.schemas.action import ActionCreate
 
+# `compute_payload_hash` lives in the SDK layer but is a pure leaf utility
+# (stdlib-only, no rootsign imports), so importing it here introduces no
+# cycle. It re-derives the input/output payload fingerprint that
+# `compute_action_self_hash` binds into the chain via input_hash/output_hash.
+from rootsign.sdk.hashing import compute_payload_hash
+
+
+def _payload_binding_error(
+    *,
+    input_redacted: Any,
+    input_hash: str,
+    output_redacted: Any,
+    output_hash: str | None,
+    sequence_number: int,
+) -> str | None:
+    """Return an error string if a stored redacted payload no longer hashes
+    to the input_hash/output_hash the chain protects, else None.
+
+    audit #4: `self_hash` deliberately excludes `input_redacted`/
+    `output_redacted` (ADR-001), so the chain proves the *hashes* are intact
+    but not that the human-readable evidence still matches them. DB write
+    access could rewrite a redacted payload without tripping TAMPERED. This
+    re-binds them. Only checked when a redacted payload is actually present
+    (void tools and non-dict payloads store NULL and are skipped).
+    """
+    if input_redacted is not None and compute_payload_hash(input_redacted) != input_hash:
+        return (
+            f"payload_hash mismatch at sequence_number={sequence_number}: "
+            f"input_redacted does not match input_hash"
+        )
+    if output_redacted is not None and compute_payload_hash(output_redacted) != output_hash:
+        return (
+            f"payload_hash mismatch at sequence_number={sequence_number}: "
+            f"output_redacted does not match output_hash"
+        )
+    return None
+
 
 class CRUDAction(CRUDBase[Action, ActionCreate]):
     async def create_with_hash(
@@ -45,9 +82,7 @@ class CRUDAction(CRUDBase[Action, ActionCreate]):
 
         # 1. Row-lock the session — serializes concurrent writers.
         locked_session = await db.execute(
-            select(AgentSession)
-            .where(AgentSession.session_id == session_id)
-            .with_for_update()
+            select(AgentSession).where(AgentSession.session_id == session_id).with_for_update()
         )
         session_row = locked_session.scalar_one()
 
@@ -110,9 +145,7 @@ class CRUDAction(CRUDBase[Action, ActionCreate]):
 
         return db_action
 
-    async def get_session_chain(
-        self, db: AsyncSession, *, session_id: UUID
-    ) -> list[Action]:
+    async def get_session_chain(self, db: AsyncSession, *, session_id: UUID) -> list[Action]:
         """Return all actions for a session ordered by sequence_number ASC."""
         stmt = (
             select(Action)
@@ -122,9 +155,7 @@ class CRUDAction(CRUDBase[Action, ActionCreate]):
         result = await db.execute(stmt)
         return list(result.scalars().all())
 
-    async def verify_chain(
-        self, db: AsyncSession, *, session_id: UUID
-    ) -> dict[str, Any]:
+    async def verify_chain(self, db: AsyncSession, *, session_id: UUID) -> dict[str, Any]:
         """Reconstruct the chain and verify each link.
 
         Returns:
@@ -175,8 +206,7 @@ class CRUDAction(CRUDBase[Action, ActionCreate]):
                     "record_count": len(actions),
                     "first_invalid_sequence": action.sequence_number,
                     "error": (
-                        f"sequence gap or duplicate: expected {idx}, "
-                        f"got {action.sequence_number}"
+                        f"sequence gap or duplicate: expected {idx}, got {action.sequence_number}"
                     ),
                 }
             if (action.prev_action_hash or None) != expected_prev:
@@ -187,6 +217,20 @@ class CRUDAction(CRUDBase[Action, ActionCreate]):
                     "error": (
                         f"prev_action_hash mismatch at sequence_number={action.sequence_number}"
                     ),
+                }
+            binding_error = _payload_binding_error(
+                input_redacted=action.input_redacted,
+                input_hash=action.input_hash,
+                output_redacted=action.output_redacted,
+                output_hash=action.output_hash,
+                sequence_number=action.sequence_number,
+            )
+            if binding_error is not None:
+                return {
+                    "valid": False,
+                    "record_count": len(actions),
+                    "first_invalid_sequence": action.sequence_number,
+                    "error": binding_error,
                 }
             expected_prev = action.self_hash
 
