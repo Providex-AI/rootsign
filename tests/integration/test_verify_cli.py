@@ -76,9 +76,7 @@ def patched_cli_session(monkeypatch):
 
 
 class TestVerifyCLI:
-    async def test_valid_session_exits_0(
-        self, clean_db, seeded_agent, patched_cli_session
-    ):
+    async def test_valid_session_exits_0(self, clean_db, seeded_agent, patched_cli_session):
         handler = IngestHandler(db=clean_db, idempotency=IdempotencyStore())
         session_id = uuid4()
         await handler.handle(
@@ -108,16 +106,12 @@ class TestVerifyCLI:
         )
         await clean_db.commit()
 
-        result = await asyncio.to_thread(
-            runner.invoke, app, ["verify", str(session_id)]
-        )
+        result = await asyncio.to_thread(runner.invoke, app, ["verify", str(session_id)])
         assert result.exit_code == 0, result.output
         assert "VALID" in result.output
         assert "2" in result.output
 
-    async def test_tampered_session_exits_1(
-        self, clean_db, seeded_agent, patched_cli_session
-    ):
+    async def test_tampered_session_exits_1(self, clean_db, seeded_agent, patched_cli_session):
         handler = IngestHandler(db=clean_db, idempotency=IdempotencyStore())
         session_id = uuid4()
         await handler.handle(
@@ -147,8 +141,18 @@ class TestVerifyCLI:
         )
         await clean_db.commit()
 
-        result = await asyncio.to_thread(
-            runner.invoke, app, ["verify", str(session_id)]
-        )
+        result = await asyncio.to_thread(runner.invoke, app, ["verify", str(session_id)])
         assert result.exit_code == 1, result.output
         assert "TAMPERED" in result.output
+
+
+class TestVerifyBadInput:
+    """audit #11a: `verify <bad-uuid>` must give a clean one-line error, not a
+    raw ValueError traceback (matching how `approve` already handles it)."""
+
+    def test_bad_uuid_exits_1_with_clean_message(self):
+        # Sync invoke is fine — parsing fails before the CLI's asyncio.run.
+        result = runner.invoke(app, ["verify", "not-a-uuid"])
+        assert result.exit_code == 1
+        assert "not a valid UUID" in result.output
+        assert "Traceback" not in result.output

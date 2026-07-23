@@ -94,26 +94,18 @@ async def _seed_pending_action(
 
 
 class TestApproveListCLI:
-    async def test_list_empty_shows_message(
-        self, clean_db, seeded_agent, patched_cli_session
-    ):
-        result = await asyncio.to_thread(
-            runner.invoke, app, ["approve", "--list"]
-        )
+    async def test_list_empty_shows_message(self, clean_db, seeded_agent, patched_cli_session):
+        result = await asyncio.to_thread(runner.invoke, app, ["approve", "--list"])
         assert result.exit_code == 0, result.output
         assert "No pending approvals" in result.output
 
-    async def test_list_shows_pending_actions(
-        self, clean_db, seeded_agent, patched_cli_session
-    ):
+    async def test_list_shows_pending_actions(self, clean_db, seeded_agent, patched_cli_session):
         _, action_id = await _seed_pending_action(
             clean_db=clean_db,
             agent_id=seeded_agent.agent_id,
             tool_name="send_invoice",
         )
-        result = await asyncio.to_thread(
-            runner.invoke, app, ["approve", "--list"]
-        )
+        result = await asyncio.to_thread(runner.invoke, app, ["approve", "--list"])
         assert result.exit_code == 0, result.output
         assert "Pending approvals" in result.output
         assert str(action_id) in result.output
@@ -127,26 +119,25 @@ class TestApproveAction:
         session_id, action_id = await _seed_pending_action(
             clean_db=clean_db, agent_id=seeded_agent.agent_id
         )
-        result = await asyncio.to_thread(
-            runner.invoke, app, ["approve", str(action_id)]
-        )
+        result = await asyncio.to_thread(runner.invoke, app, ["approve", str(action_id)])
         assert result.exit_code == 0, result.output
         assert "approved" in result.output
 
         # Re-read state on a fresh session (CLI's commit lands cross-conn)
         action = (
-            await clean_db.execute(
-                select(Action).where(Action.action_id == action_id)
-            )
+            await clean_db.execute(select(Action).where(Action.action_id == action_id))
         ).scalar_one()
         assert action.authorization_status == "human_approved"
         approval = (
-            await clean_db.execute(
-                select(Approval).where(Approval.action_id == action_id)
-            )
+            await clean_db.execute(select(Approval).where(Approval.action_id == action_id))
         ).scalar_one()
         assert approval.decision == "approved"
-        assert approval.approver_id == "cli:operator"
+        # audit #7a: approver_id now records the actual OS operator under the
+        # "cli:" namespace instead of a hardcoded "cli:operator".
+        import getpass
+
+        assert approval.approver_id == f"cli:{getpass.getuser()}"
+        assert approval.approver_id.startswith("cli:")
         assert approval.approver_type == "human"
         # session_id pulled from the looked-up Action — verifies the
         # CRUDApproval.create_with_chain_link auto-fill works in CLI.
@@ -155,9 +146,7 @@ class TestApproveAction:
     async def test_reject_with_reason_persists_status_and_reason(
         self, clean_db, seeded_agent, patched_cli_session
     ):
-        _, action_id = await _seed_pending_action(
-            clean_db=clean_db, agent_id=seeded_agent.agent_id
-        )
+        _, action_id = await _seed_pending_action(clean_db=clean_db, agent_id=seeded_agent.agent_id)
         result = await asyncio.to_thread(
             runner.invoke,
             app,
@@ -167,27 +156,19 @@ class TestApproveAction:
         assert "rejected" in result.output
 
         action = (
-            await clean_db.execute(
-                select(Action).where(Action.action_id == action_id)
-            )
+            await clean_db.execute(select(Action).where(Action.action_id == action_id))
         ).scalar_one()
         assert action.authorization_status == "human_rejected"
         approval = (
-            await clean_db.execute(
-                select(Approval).where(Approval.action_id == action_id)
-            )
+            await clean_db.execute(select(Approval).where(Approval.action_id == action_id))
         ).scalar_one()
         assert approval.decision == "rejected"
         assert approval.decision_reason == "Too risky"
 
 
 class TestApproveErrors:
-    async def test_invalid_uuid_argument(
-        self, clean_db, seeded_agent, patched_cli_session
-    ):
-        result = await asyncio.to_thread(
-            runner.invoke, app, ["approve", "not-a-uuid"]
-        )
+    async def test_invalid_uuid_argument(self, clean_db, seeded_agent, patched_cli_session):
+        result = await asyncio.to_thread(runner.invoke, app, ["approve", "not-a-uuid"])
         assert result.exit_code == 1
         assert "not a valid UUID" in result.output
 
@@ -198,32 +179,20 @@ class TestApproveErrors:
         assert result.exit_code == 1
         assert "provide an action_id" in result.output
 
-    async def test_action_not_pending_exits_1(
-        self, clean_db, seeded_agent, patched_cli_session
-    ):
+    async def test_action_not_pending_exits_1(self, clean_db, seeded_agent, patched_cli_session):
         """A second approval on the same action must fail — the first
         flipped status away from 'pending', so the SELECT misses."""
-        _, action_id = await _seed_pending_action(
-            clean_db=clean_db, agent_id=seeded_agent.agent_id
-        )
+        _, action_id = await _seed_pending_action(clean_db=clean_db, agent_id=seeded_agent.agent_id)
         # First approval — succeeds
-        result1 = await asyncio.to_thread(
-            runner.invoke, app, ["approve", str(action_id)]
-        )
+        result1 = await asyncio.to_thread(runner.invoke, app, ["approve", str(action_id)])
         assert result1.exit_code == 0, result1.output
         # Second — no pending row matches
-        result2 = await asyncio.to_thread(
-            runner.invoke, app, ["approve", str(action_id)]
-        )
+        result2 = await asyncio.to_thread(runner.invoke, app, ["approve", str(action_id)])
         assert result2.exit_code == 1
         assert "no pending action found" in result2.output
 
-    async def test_unknown_action_id(
-        self, clean_db, seeded_agent, patched_cli_session
-    ):
+    async def test_unknown_action_id(self, clean_db, seeded_agent, patched_cli_session):
         missing = uuid4()
-        result = await asyncio.to_thread(
-            runner.invoke, app, ["approve", str(missing)]
-        )
+        result = await asyncio.to_thread(runner.invoke, app, ["approve", str(missing)])
         assert result.exit_code == 1
         assert str(missing) in result.output
