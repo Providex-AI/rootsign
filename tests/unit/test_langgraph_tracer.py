@@ -97,9 +97,7 @@ class TestWrapTool:
 class TestWrapToolsDoubleWrapGuard:
     def test_double_wrap_skipped(self, sample_tool, ctx, mock_client):
         wrapped_once = LangGraphTracer.wrap_tool(sample_tool, ctx=ctx, client=mock_client)
-        result = LangGraphTracer.wrap_tools(
-            [wrapped_once], ctx=ctx, client=mock_client
-        )
+        result = LangGraphTracer.wrap_tools([wrapped_once], ctx=ctx, client=mock_client)
         # Same object, returned unchanged — not re-wrapped.
         assert result[0] is wrapped_once
 
@@ -142,3 +140,31 @@ class TestRunSync:
 
         with pytest.raises(ValueError, match="from worker"):
             _run_sync(boom())
+
+
+class TestReentrancyGuard:
+    """Regression for issue #3 (LangGraph sync-@tool flake).
+
+    A SYNC @tool invoked via `ainvoke` makes LangChain run the sync function
+    through `run_in_executor(None, self.invoke, ...)`, which re-enters our
+    replaced `.invoke` (`traced_invoke`) in a worker thread. Without the
+    contextvar re-entrancy guard that produced a duplicate ACTION_RECORD emit
+    on a fresh event loop (the asyncpg cross-loop flake). The guard must make
+    the inner call a pass-through so exactly ONE emit happens.
+    """
+
+    async def test_sync_tool_via_ainvoke_emits_exactly_once(self, sample_tool, ctx, mock_client):
+        wrapped = LangGraphTracer.wrap_tool(sample_tool, ctx=ctx, client=mock_client)
+
+        result = await wrapped.ainvoke({"x": 5})
+
+        assert result == 10  # the tool still runs and returns correctly
+        action_calls = [
+            call
+            for call in mock_client.handle.call_args_list
+            if call.args and call.args[0].get("event_type") == "ACTION_RECORD"
+        ]
+        assert len(action_calls) == 1, (
+            f"expected one ACTION_RECORD emit, got {len(action_calls)} "
+            "(re-entrancy guard regressed — sync executor fallback double-emitted)"
+        )
