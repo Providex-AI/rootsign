@@ -17,7 +17,6 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
-import sys
 import time
 from importlib import resources
 from pathlib import Path
@@ -68,14 +67,26 @@ def _alembic_config(sync_url: str | None = None) -> Config:
     return cfg
 
 
+def _dsn_role() -> str:
+    """Owner role for the recreated schema — derived from the configured DSN
+    rather than hardcoded, so a non-`rootsign` DB user (e.g. `ci_user`) works
+    (audit #11b)."""
+    from sqlalchemy.engine import make_url
+
+    return make_url(settings.DATABASE_URL_SYNC).username or "rootsign"
+
+
 def _drop_public_schema() -> None:
+    from psycopg2 import sql
+
     dsn = _strip_driver(settings.DATABASE_URL_SYNC)
+    role = sql.Identifier(_dsn_role())
     conn = psycopg2.connect(dsn)
     conn.autocommit = True
     try:
         with conn.cursor() as cur:
             cur.execute("DROP SCHEMA IF EXISTS public CASCADE")
-            cur.execute("CREATE SCHEMA public AUTHORIZATION rootsign")
+            cur.execute(sql.SQL("CREATE SCHEMA public AUTHORIZATION {}").format(role))
             cur.execute("GRANT ALL ON SCHEMA public TO public")
             cur.execute("CREATE EXTENSION IF NOT EXISTS timescaledb")
     finally:
@@ -136,13 +147,21 @@ def start_db(
         typer.echo(f"Pulling {_DB_IMAGE} and starting {_DB_CONTAINER} on port {port}...")
         subprocess.run(
             [
-                docker, "run", "-d",
-                "--name", _DB_CONTAINER,
-                "--restart", "unless-stopped",
-                "-e", "POSTGRES_USER=rootsign",
-                "-e", "POSTGRES_PASSWORD=rootsign",
-                "-e", "POSTGRES_DB=rootsign_dev",
-                "-p", f"{port}:5432",
+                docker,
+                "run",
+                "-d",
+                "--name",
+                _DB_CONTAINER,
+                "--restart",
+                "unless-stopped",
+                "-e",
+                "POSTGRES_USER=rootsign",
+                "-e",
+                "POSTGRES_PASSWORD=rootsign",
+                "-e",
+                "POSTGRES_DB=rootsign_dev",
+                "-p",
+                f"{port}:5432",
                 _DB_IMAGE,
             ],
             check=True,
@@ -184,10 +203,25 @@ def init(
     reset: bool = typer.Option(
         False, "--reset", help="Drop and recreate the schema before upgrading."
     ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Skip the confirmation prompt for --reset (for non-interactive use).",
+    ),
 ) -> None:
     """Apply migrations to the dev database. Use --reset to start from scratch."""
     start = time.perf_counter()
     if reset:
+        # audit #11b: --reset drops the ENTIRE public schema. Require an
+        # explicit confirmation (or --yes for CI) so it can't run by accident.
+        if not yes:
+            typer.confirm(
+                "This will DROP the entire public schema "
+                f"({_strip_driver(settings.DATABASE_URL_SYNC)}) and destroy all "
+                "data. Continue?",
+                abort=True,
+            )
         typer.echo("Dropping public schema...")
         _drop_public_schema()
     typer.echo("Running alembic upgrade head...")

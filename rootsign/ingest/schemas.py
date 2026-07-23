@@ -126,6 +126,14 @@ class IngestResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+# NB: SessionOpenPayload / SessionClosePayload deliberately use extra="allow"
+# while every other payload forbids extras. Session envelopes are the
+# forward-compatibility seam — SDK versions ahead of the store may attach new
+# session-level fields (extra tracing context, framework hints) that older
+# stores should tolerate and pass through rather than reject, since a rejected
+# SESSION_OPEN/CLOSE would break the whole session. Per-event payloads
+# (ACTION/DECISION/APPROVAL) stay extra="forbid" because they feed the hash
+# chain and must be exact. (audit #12a — documenting the intentional asymmetry.)
 class SessionOpenPayload(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -142,9 +150,7 @@ class ActionRecordPayload(BaseModel):
     output_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     input_redacted: dict | None = None
     output_redacted: dict | None = None
-    timestamp: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc)
-    )
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     duration_ms: int | None = Field(default=None, ge=0)
     decision_id: UUID | None = None
     policy_id: UUID | None = None
@@ -179,6 +185,7 @@ class ApprovalRecordPayload(BaseModel):
 
 
 class SessionClosePayload(BaseModel):
+    # extra="allow" for the same forward-compat reason as SessionOpenPayload.
     model_config = ConfigDict(extra="allow")
 
     status: str

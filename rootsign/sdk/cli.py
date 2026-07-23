@@ -51,9 +51,7 @@ def version() -> None:
 
 @app.command()
 def verify(
-    session_id: Optional[str] = typer.Argument(
-        None, help="Session ID to verify (UUID)."
-    ),
+    session_id: Optional[str] = typer.Argument(None, help="Session ID to verify (UUID)."),
     local: Optional[Path] = typer.Option(
         None,
         "--local",
@@ -79,7 +77,14 @@ def verify(
         _verify_local(local, verbose)
         return
     if session_id is not None:
-        _verify_remote(UUID(session_id), verbose)
+        # audit #11a: parse the UUID here so a bad value gets the same clean
+        # one-line error as `approve`, not a raw ValueError traceback.
+        try:
+            parsed = UUID(session_id)
+        except ValueError:
+            typer.echo(f"Error: {session_id!r} is not a valid UUID.", err=True)
+            raise typer.Exit(code=1) from None
+        _verify_remote(parsed, verbose)
         return
     typer.echo("Error: provide a session_id or --local path", err=True)
     raise typer.Exit(code=1)
@@ -225,9 +230,7 @@ def _list_pending_approvals() -> None:
         )
 
 
-def _submit_approval(
-    *, action_id: UUID, decision: str, reason: str | None
-) -> None:
+def _submit_approval(*, action_id: UUID, decision: str, reason: str | None) -> None:
     """Write the APPROVAL_RECORD + flip Action.authorization_status atomically.
 
     The lookup is intentionally two-step: SELECT first by (action_id,
@@ -236,11 +239,21 @@ def _submit_approval(
     The hypertable-safe (action_id, timestamp) write lives inside
     `create_with_chain_link`.
     """
+    import getpass
+
     from sqlalchemy import select
 
     from rootsign.crud.approval import approval as approval_crud
     from rootsign.errors import ActionAlreadyResolvedError, ActionNotFoundError
     from rootsign.models.action import Action
+
+    # audit #7a: attribute the approval to the actual OS operator instead of a
+    # hardcoded "cli:operator", so the audit trail records who approved.
+    # Keep the "cli:" prefix so the approver namespace stays legible.
+    try:
+        approver_id = f"cli:{getpass.getuser()}"
+    except Exception:  # noqa: BLE001 — getuser() can raise if no username resolvable
+        approver_id = "cli:operator"
 
     async def _run() -> None:
         async with AsyncSessionLocal() as db:
@@ -262,7 +275,7 @@ def _submit_approval(
                     db,
                     action_id=action.action_id,
                     action_timestamp=action.timestamp,
-                    approver_id="cli:operator",
+                    approver_id=approver_id,
                     approver_type="human",
                     context_presented=action.input_redacted or {},
                     decision=decision,
