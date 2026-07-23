@@ -233,12 +233,8 @@ async def _emit_action_record(
     the caller. If *func* raises, the exception is re-raised AFTER the ingest
     attempt so we still record the failed action.
     """
-    input_payload: dict[str, Any] = _to_json_safe(
-        {"args": list(args), "kwargs": dict(kwargs)}
-    )
-    redacted_input = (
-        redaction_config.redact(input_payload) if redaction_config else input_payload
-    )
+    input_payload: dict[str, Any] = _to_json_safe({"args": list(args), "kwargs": dict(kwargs)})
+    redacted_input = redaction_config.redact(input_payload) if redaction_config else input_payload
     input_hash = compute_payload_hash(redacted_input)
     timestamp = datetime.now(timezone.utc)
 
@@ -318,7 +314,6 @@ async def _try_ingest(
     or the pending slot is already spent. See ADR-008.
     """
     try:
-        sequence_number = await ctx.next_sequence()
         envelope = {
             "schema_version": SCHEMA_VERSION,
             "sdk_version": SDK_VERSION,
@@ -332,20 +327,27 @@ async def _try_ingest(
                 "input_hash": input_hash,
                 "output_hash": output_hash,
                 "input_redacted": redacted_input if isinstance(redacted_input, dict) else None,
-                "output_redacted": redacted_output
-                if isinstance(redacted_output, dict)
-                else None,
+                "output_redacted": redacted_output if isinstance(redacted_output, dict) else None,
                 "timestamp": timestamp.isoformat(),
                 "authorization_status": authorization_status,
                 "decision_id": str(decision_id) if decision_id else None,
             },
         }
         response = await client.handle(envelope)
+        # audit #9: advance the SDK counter ONLY when the store accepted the
+        # ACTION_RECORD, so SESSION_CLOSE's total_actions (ctx.current_sequence)
+        # matches the store's action_count and the AC-3.11 reconciliation
+        # warning doesn't fire spuriously on a failed/rejected ingest. The
+        # counter is never transmitted — the store assigns the authoritative
+        # sequence_number under its session lock and returns it below.
+        if response is not None and response.status == "accepted":
+            await ctx.next_sequence()
         logger.debug(
-            "ACTION_RECORD emitted tool=%s seq=%d status=%s",
+            "ACTION_RECORD tool=%s status=%s ingest=%s store_seq=%s",
             tool_name,
-            sequence_number,
             authorization_status,
+            response.status if response is not None else "failed",
+            response.sequence_number if response is not None else None,
         )
         return response
     except Exception as ingest_err:  # noqa: BLE001 — see failure isolation rule
@@ -403,9 +405,7 @@ async def _emit_hitl_action(
 
     # 1. Hash + redact input
     input_payload: dict[str, Any] = {"args": list(args), "kwargs": dict(kwargs)}
-    redacted_input = (
-        redaction_config.redact(input_payload) if redaction_config else input_payload
-    )
+    redacted_input = redaction_config.redact(input_payload) if redaction_config else input_payload
     input_hash = compute_payload_hash(redacted_input)
     timestamp = datetime.now(timezone.utc)
 
@@ -534,9 +534,7 @@ async def _emit_approval_record(
                 "context_presented": context_presented,
                 "decision": decision,
                 "decision_reason": decision_reason,
-                "parent_approval_id": (
-                    str(parent_approval_id) if parent_approval_id else None
-                ),
+                "parent_approval_id": (str(parent_approval_id) if parent_approval_id else None),
                 "response_latency_ms": response_latency_ms,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             },
