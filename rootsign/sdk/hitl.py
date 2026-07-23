@@ -60,6 +60,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("rootsign.sdk.hitl")
 
+# APPROVAL_RECORD.approver_type sentinel the poll loop writes on timeout.
+# Mirrors CRUDApproval._TIMEOUT_APPROVER_TYPE. A row carrying it is a
+# timeout, not a human rejection — even though its `decision` is 'rejected'
+# to satisfy the ck_approvals_decision CHECK constraint. `_raise_or_return`
+# MUST branch on this before it branches on decision, or the forensic
+# distinction ADR-007 preserves (timed_out vs human_rejected) is lost.
+_TIMEOUT_APPROVER_TYPE = "timeout_auto_rejected"
+
 
 class ApprovalDecision(str, Enum):
     """The three terminal states a HiTL checkpoint can resolve into.
@@ -145,10 +153,13 @@ class HiTLCheckpoint:
         )
 
         while loop.time() < deadline:
-            await asyncio.sleep(self.poll_interval)
+            # Poll BEFORE sleeping so an already-resolved action (a human who
+            # approved between ACTION_RECORD insert and this loop starting)
+            # returns immediately instead of eating a full poll_interval.
             approval = await self._poll_once()
             if approval is not None and approval.decision in ("approved", "rejected"):
                 return self._raise_or_return(approval)
+            await asyncio.sleep(self.poll_interval)
 
         # Deadline elapsed. Try to write the timeout record — if a human
         # raced us and committed first, _record_timeout will re-poll and
@@ -180,9 +191,7 @@ class HiTLCheckpoint:
             )
             return result.scalar_one_or_none()
 
-    async def _record_timeout(
-        self, *, context_presented: dict
-    ) -> Approval | None:
+    async def _record_timeout(self, *, context_presented: dict) -> Approval | None:
         """Write the timeout APPROVAL_RECORD. Return the racing human's row
         on conflict, None on a clean timeout.
 
@@ -201,7 +210,7 @@ class HiTLCheckpoint:
                     action_id=self.action_id,
                     action_timestamp=self.action_timestamp,
                     approver_id="system:timeout",
-                    approver_type="timeout_auto_rejected",
+                    approver_type=_TIMEOUT_APPROVER_TYPE,
                     context_presented=context_presented,
                     decision="rejected",
                     decision_reason=f"No response within {int(self.timeout)}s",
@@ -220,7 +229,15 @@ class HiTLCheckpoint:
         Rejection is a raise, not a return, so trace-decorator call sites
         don't have to inspect a decision field — `except HiTLRejectedError`
         is enough.
+
+        A timeout row also has `decision='rejected'`, so branch on
+        `approver_type` FIRST — otherwise a timeout (whether written by our
+        own `_record_timeout` and re-polled, or by a racing process) would
+        surface as HiTLRejectedError and destroy the timed_out vs
+        human_rejected distinction ADR-007 guarantees (audit #10a).
         """
+        if approval.approver_type == _TIMEOUT_APPROVER_TYPE:
+            raise HiTLTimeoutError(self.action_id, self.timeout)
         if approval.decision == "rejected":
             reason = getattr(approval, "decision_reason", None)
             raise HiTLRejectedError(self.action_id, reason=reason)

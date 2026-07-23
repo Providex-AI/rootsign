@@ -93,11 +93,14 @@ def _make_factory(
     return spy
 
 
-def _mock_approval(decision: str, reason: str | None = None) -> MagicMock:
+def _mock_approval(
+    decision: str, reason: str | None = None, approver_type: str = "human"
+) -> MagicMock:
     """Build a stand-in Approval row with just the fields the checkpoint reads."""
     approval = MagicMock()
     approval.decision = decision
     approval.decision_reason = reason
+    approval.approver_type = approver_type
     approval.approval_id = uuid4()
     approval.approver_id = "user@test.com"
     return approval
@@ -276,6 +279,67 @@ class TestHumanWinsRace:
         ):
             with pytest.raises(HiTLRejectedError, match="Nope"):
                 await checkpoint.wait_for_approval(context_presented={})
+
+
+class TestTimeoutClassification:
+    """audit #10a: a timeout row has decision='rejected' but
+    approver_type='timeout_auto_rejected'. It must surface as
+    HiTLTimeoutError, never HiTLRejectedError — the timed_out vs
+    human_rejected forensic split (ADR-007) depends on it."""
+
+    async def test_timeout_row_raises_timeout_not_rejected(self):
+        timeout_row = _mock_approval(
+            decision="rejected",
+            reason="No response within 300s",
+            approver_type="timeout_auto_rejected",
+        )
+        action_id = uuid4()
+        factory = _make_factory(constant=timeout_row)
+        checkpoint = HiTLCheckpoint(
+            action_id=action_id,
+            action_timestamp=datetime.now(timezone.utc),
+            session_factory=factory,
+            poll_interval_seconds=0.01,
+            timeout_seconds=5.0,
+        )
+        with pytest.raises(HiTLTimeoutError) as exc_info:
+            await checkpoint.wait_for_approval(context_presented={})
+        assert exc_info.value.action_id == action_id
+
+    async def test_human_rejection_still_raises_rejected(self):
+        """Guard against over-correction: an explicit human rejection keeps
+        raising HiTLRejectedError."""
+        rejection = _mock_approval(decision="rejected", reason="Nope", approver_type="human")
+        factory = _make_factory(constant=rejection)
+        checkpoint = HiTLCheckpoint(
+            action_id=uuid4(),
+            action_timestamp=datetime.now(timezone.utc),
+            session_factory=factory,
+            poll_interval_seconds=0.01,
+            timeout_seconds=5.0,
+        )
+        with pytest.raises(HiTLRejectedError, match="Nope"):
+            await checkpoint.wait_for_approval(context_presented={})
+
+
+class TestPollBeforeSleep:
+    """audit #10a: the loop must poll before sleeping so an already-resolved
+    action returns immediately instead of eating a full poll_interval."""
+
+    async def test_already_resolved_returns_without_sleeping(self):
+        approved = _mock_approval(decision="approved")
+        factory = _make_factory(constant=approved)
+        checkpoint = HiTLCheckpoint(
+            action_id=uuid4(),
+            action_timestamp=datetime.now(timezone.utc),
+            session_factory=factory,
+            poll_interval_seconds=999.0,  # would hang if we slept first
+            timeout_seconds=5.0,
+        )
+        with patch("rootsign.sdk.hitl.asyncio.sleep", new_callable=AsyncMock) as mocked_sleep:
+            result = await checkpoint.wait_for_approval(context_presented={})
+        assert result.decision is ApprovalDecision.APPROVED
+        mocked_sleep.assert_not_awaited()
 
 
 class TestConstructor:
