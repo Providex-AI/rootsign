@@ -16,6 +16,7 @@ or routes through a fresh worker thread.
 
 from __future__ import annotations
 
+import contextvars
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -27,6 +28,22 @@ if TYPE_CHECKING:
     from rootsign.sdk.redaction import RedactionConfig
 
 logger = logging.getLogger("rootsign.sdk.langgraph")
+
+# Re-entrancy guard (ADR-004 § "Sync-path correctness"). When `traced_ainvoke`
+# awaits the original `ainvoke` on a tool whose underlying function is SYNC,
+# LangChain runs that sync function via `run_in_executor(None, self.invoke, …)`
+# — and `self.invoke` is our replaced `traced_invoke`. That re-entry lands in a
+# ThreadPoolExecutor thread with no running loop, so `_run_sync` spins up a
+# fresh event loop and opens a second AsyncSession bound to it, while the
+# caller's connection is bound to the outer loop → asyncpg "another operation
+# in progress" / "attached to a different loop" (the cold-run flake, issue #3),
+# plus a redundant ACTION_RECORD. LangChain's executor uses `copy_context()`,
+# so this ContextVar — set around the original call in the outer traced method —
+# propagates into that thread, where the re-entrant call sees it and passes
+# straight through to the untraced tool. The outer async emit is authoritative.
+_emitting: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "rootsign_langgraph_emitting", default=False
+)
 
 
 class LangGraphTracer:
@@ -56,13 +73,22 @@ class LangGraphTracer:
         tool_name = tool.name
 
         def traced_invoke(input: Any, config: Any = None, **kwargs: Any) -> Any:
+            if _emitting.get():
+                # Re-entrant sync fallback from within traced_ainvoke — the
+                # outer async emit owns this call. Run the tool untraced.
+                return original_invoke(input, config, **kwargs)
+
             async def _runner() -> Any:
                 # The wrapped callable bound here delegates to the *original*
                 # invoke so we don't recurse into our own traced_invoke. We
                 # adapt to _emit_action_record's (args, kwargs) signature by
                 # passing the input dict as the sole positional arg.
                 def _call(*_a: Any, **_kw: Any) -> Any:
-                    return original_invoke(input, config, **kwargs)
+                    token = _emitting.set(True)
+                    try:
+                        return original_invoke(input, config, **kwargs)
+                    finally:
+                        _emitting.reset(token)
 
                 return await _emit_action_record(
                     func=_call,
@@ -77,8 +103,18 @@ class LangGraphTracer:
             return _run_sync(_runner())
 
         async def traced_ainvoke(input: Any, config: Any = None, **kwargs: Any) -> Any:
-            async def _call(*_a: Any, **_kw: Any) -> Any:
+            if _emitting.get():
                 return await original_ainvoke(input, config, **kwargs)
+
+            async def _call(*_a: Any, **_kw: Any) -> Any:
+                # Set the guard around the original call so LangChain's
+                # sync-in-executor fallback (which copy_context()s this frame
+                # into a worker thread) sees it and skips re-emitting.
+                token = _emitting.set(True)
+                try:
+                    return await original_ainvoke(input, config, **kwargs)
+                finally:
+                    _emitting.reset(token)
 
             return await _emit_action_record(
                 func=_call,
