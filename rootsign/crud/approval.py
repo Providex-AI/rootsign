@@ -50,9 +50,7 @@ _DECISION_TO_AUTH_STATUS: dict[str, str] = {
 
 # Authorization states that are terminal — no further APPROVAL_RECORD allowed.
 # Sprint 4 adds 'timed_out' (poll-loop expiry recorded by HiTLCheckpoint).
-_TERMINAL_AUTH_STATES = frozenset(
-    {"human_approved", "human_rejected", "timed_out"}
-)
+_TERMINAL_AUTH_STATES = frozenset({"human_approved", "human_rejected", "timed_out"})
 
 # Sentinel approver_type for poll-loop timeouts. When the HiTL checkpoint
 # fails to receive a human decision within timeout_seconds, it records an
@@ -77,7 +75,11 @@ class CRUDApproval(CRUDBase[Approval, ApprovalCreate]):
                 `escalated` approval with parent_approval_id already set
                 (chained escalation — Phase 0 forbids).
         """
-        decision = obj_in.decision.value if isinstance(obj_in.decision, ApprovalDecision) else obj_in.decision
+        decision = (
+            obj_in.decision.value
+            if isinstance(obj_in.decision, ApprovalDecision)
+            else obj_in.decision
+        )
 
         # 1. Look up the target Action by (session_id, action_id). Both
         #    columns are required because `actions` is a TimescaleDB hypertable
@@ -94,22 +96,30 @@ class CRUDApproval(CRUDBase[Approval, ApprovalCreate]):
         #    only 1–2 chunks are touched in practice. `create_with_chain_link`
         #    below uses the canonical (action_id, action_timestamp) form
         #    because the HiTL / CLI callers have the timestamp on hand.
+        #    `with_for_update()` row-locks the Action so two concurrent
+        #    resolvers (e.g. ingest + a stray CLI/timeout writer) serialise
+        #    here instead of both passing the terminal guard below and
+        #    racing to insert (audit #5). Matches the session-row lock in
+        #    `CRUDAction.create_with_hash`.
         action = (
             await db.execute(
-                select(Action).where(
+                select(Action)
+                .where(
                     Action.session_id == obj_in.session_id,
                     Action.action_id == obj_in.action_id,
                 )
+                .with_for_update()
             )
         ).scalar_one_or_none()
         if action is None:
             raise ActionNotFoundError(
-                f"action_id={obj_in.action_id} not found in session "
-                f"{obj_in.session_id}"
+                f"action_id={obj_in.action_id} not found in session {obj_in.session_id}"
             )
 
         # 2. Terminal state guard. Any APPROVAL_RECORD (incl. escalated) is
-        #    rejected once the Action is fully approved/rejected.
+        #    rejected once the Action is fully approved/rejected. Safe under
+        #    concurrency because the FOR UPDATE above means the loser of a
+        #    race re-reads the winner's committed authorization_status.
         if action.authorization_status in _TERMINAL_AUTH_STATES:
             raise ActionAlreadyResolvedError(
                 f"action_id={obj_in.action_id} is already "
@@ -130,9 +140,7 @@ class CRUDApproval(CRUDBase[Approval, ApprovalCreate]):
         if obj_in.parent_approval_id is not None:
             parent = (
                 await db.execute(
-                    select(Approval).where(
-                        Approval.approval_id == obj_in.parent_approval_id
-                    )
+                    select(Approval).where(Approval.approval_id == obj_in.parent_approval_id)
                 )
             ).scalar_one_or_none()
             if parent is None:
@@ -223,10 +231,18 @@ class CRUDApproval(CRUDBase[Approval, ApprovalCreate]):
         """
         # 1. Hypertable-safe lookup. Both columns required for the actions
         #    composite PK. Without action_timestamp the planner cannot prune
-        #    chunks and the row would not be unique.
-        stmt = select(Action).where(
-            Action.action_id == action_id,
-            Action.timestamp == action_timestamp,
+        #    chunks and the row would not be unique. `with_for_update()`
+        #    row-locks the Action so the `rootsign approve` CLI and the poll
+        #    loop's timeout writer serialise on it — the ADR-007
+        #    "human wins ties" invariant depends on this guard serialising,
+        #    which a plain SELECT under READ COMMITTED does not (audit #5).
+        stmt = (
+            select(Action)
+            .where(
+                Action.action_id == action_id,
+                Action.timestamp == action_timestamp,
+            )
+            .with_for_update()
         )
         action = (await db.execute(stmt)).scalar_one_or_none()
         if action is None:
