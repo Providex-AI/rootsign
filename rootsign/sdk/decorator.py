@@ -403,8 +403,14 @@ async def _emit_hitl_action(
     from rootsign.database import AsyncSessionLocal
     from rootsign.sdk.hitl import HiTLCheckpoint
 
-    # 1. Hash + redact input
-    input_payload: dict[str, Any] = {"args": list(args), "kwargs": dict(kwargs)}
+    # 1. Hash + redact input. `_to_json_safe` defangs non-JSON values
+    #    (LangChain BaseMessage, dataclasses, arbitrary objects) BEFORE they
+    #    reach redaction, the payload hash, and the input_redacted JSONB column
+    #    — mirroring _emit_action_record. Without it a non-JSON-safe arg throws
+    #    on JSONB insert, which in the HiTL path escalates to a RuntimeError
+    #    (the pending ACTION_RECORD must succeed for the gate to proceed), and
+    #    desyncs input_hash from the stored payload (breaks verify-time binding).
+    input_payload: dict[str, Any] = _to_json_safe({"args": list(args), "kwargs": dict(kwargs)})
     redacted_input = redaction_config.redact(input_payload) if redaction_config else input_payload
     input_hash = compute_payload_hash(redacted_input)
     timestamp = datetime.now(timezone.utc)
