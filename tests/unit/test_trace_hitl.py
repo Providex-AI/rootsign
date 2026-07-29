@@ -159,9 +159,7 @@ class TestPendingInsert:
     """The ACTION_RECORD must be inserted with status='pending' and no
     output_hash. The IngestResponse drives the HiTLCheckpoint binding."""
 
-    async def test_envelope_has_pending_status_and_no_output_hash(
-        self, ctx, accepting_client
-    ):
+    async def test_envelope_has_pending_status_and_no_output_hash(self, ctx, accepting_client):
         @trace(
             ingest_client=accepting_client,
             session_context=ctx,
@@ -370,3 +368,49 @@ class TestFrameworkPathsRejectRequireApproval:
             pytest.skip("duck-type heuristic doesn't match this stand-in")
         with pytest.raises(NotImplementedError, match="CrewAI"):
             decorator(FakeCrewAITool())
+
+
+class TestHitlInputJsonSafety:
+    """REGRESSION: `_emit_hitl_action` must run inputs through `_to_json_safe`
+    exactly like `_emit_action_record` (decorator.py line ~407). A non-JSON-safe
+    arg (LangChain BaseMessage, dataclass, arbitrary object) otherwise reaches
+    the `input_redacted` JSONB column raw and throws TypeError on insert — and
+    in the HiTL path that escalates to a RuntimeError, because the pending
+    ACTION_RECORD must succeed for the gate to proceed. It also desyncs
+    input_hash from the stored payload, breaking verify-time payload binding.
+    """
+
+    async def test_non_json_safe_arg_coerced_in_pending_envelope(self, ctx, accepting_client):
+        import json
+
+        class _FakeMessage:
+            # Duck-types a LangChain BaseMessage: `.content` + a str `.type`.
+            type = "human"
+            content = "please approve"
+
+        @trace(
+            ingest_client=accepting_client,
+            session_context=ctx,
+            require_approval=True,
+        )
+        async def my_tool(msg: object) -> str:
+            return "done"
+
+        async def fake_wait(self, *, context_presented):
+            return HiTLResult(decision=ApprovalDecision.APPROVED)
+
+        with patch("rootsign.sdk.hitl.HiTLCheckpoint.wait_for_approval", new=fake_wait):
+            result = await my_tool(_FakeMessage())
+
+        assert result == "done"
+        # The pending ACTION_RECORD is the only envelope handed to the client.
+        envelope = accepting_client.handle.call_args.args[0]
+        input_redacted = envelope["payload"]["input_redacted"]
+        # Must be JSONB-storable: json.dumps with NO default must not raise
+        # (this is the line that threw before the fix).
+        json.dumps(input_redacted)
+        # And the message was defanged into the _to_json_safe shape.
+        assert input_redacted["args"][0] == {
+            "_message_type": "human",
+            "content": "please approve",
+        }
