@@ -21,6 +21,7 @@ from rootsign.sdk.chain import (
     verify_session,
     verify_session_local,
 )
+from rootsign.sdk.buffered_client import BufferedIngestClient
 from rootsign.sdk.client import (
     HttpIngestClient,
     IngestClient,
@@ -80,6 +81,7 @@ __all__ = [
     "AgentEnvironment",
     "AgentFramework",
     "AgentRiskTier",
+    "BufferedIngestClient",
     "CrewAITracer",
     "EscalationDepthExceededError",
     "FinancialPIIConfig",

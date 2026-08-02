@@ -340,7 +340,14 @@ async def _try_ingest(
         # warning doesn't fire spuriously on a failed/rejected ingest. The
         # counter is never transmitted — the store assigns the authoritative
         # sequence_number under its session lock and returns it below.
-        if response is not None and response.status == "accepted":
+        #
+        # ADR-009 Decision 3: "buffered" also advances. BufferedIngestClient
+        # returns status="buffered" for an auto-authorized ACTION_RECORD it
+        # queued instead of sending. The record has optimistically landed from
+        # the SDK's view, so total_actions stays accurate without waiting on the
+        # async flush. Accepted risk: over-counts if that flush later exhausts
+        # its retries and discards — tolerated by the never-crash contract.
+        if response is not None and response.status in ("accepted", "buffered"):
             await ctx.next_sequence()
         logger.debug(
             "ACTION_RECORD tool=%s status=%s ingest=%s store_seq=%s",

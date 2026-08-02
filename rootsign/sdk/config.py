@@ -63,6 +63,16 @@ class SDKSettings(BaseSettings):
     # when capture is off. See `ReasoningDepth` above and ADR-008.
     REASONING_DEPTH: ReasoningDepth = ReasoningDepth.SUMMARY
 
+    # Micro-batching (ADR-009). When True, get_ingest_client() wraps the
+    # transport in a BufferedIngestClient so tool calls don't block on the
+    # ingest round-trip. Off by default — LocalIngestClient is already fast;
+    # this earns its keep against the Phase 2 HttpIngestClient. Field names
+    # are unprefixed; env vars carry the ROOTSIGN_ prefix (ROOTSIGN_BUFFERED,
+    # ROOTSIGN_BUFFER_INTERVAL, ROOTSIGN_BUFFER_MAX_SIZE).
+    BUFFERED: bool = False
+    BUFFER_INTERVAL: float = 0.5  # background flush cadence, seconds
+    BUFFER_MAX_SIZE: int = 100  # records buffered before a forced flush
+
     # WAL buffer for events that fail ingest. Drained on the next successful
     # handle(). Phase 1 ships manual replay; an auto-replay loop lands in
     # Sprint 3 alongside the `rootsign verify` CLI.
