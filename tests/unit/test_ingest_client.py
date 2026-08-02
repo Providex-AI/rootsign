@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import pytest
 
+from rootsign.sdk.buffered_client import BufferedIngestClient
 from rootsign.sdk.client import (
     HttpIngestClient,
     IngestClient,
@@ -194,3 +195,37 @@ class TestGetIngestClient:
 
         c = get_ingest_client(db=_StubSession())  # type: ignore[arg-type]
         assert isinstance(c, LocalIngestClient)
+
+    def test_unbuffered_by_default(self, monkeypatch):
+        monkeypatch.setenv("ROOTSIGN_BACKEND", "local")
+
+        class _StubSession:
+            pass
+
+        c = get_ingest_client(db=_StubSession())  # type: ignore[arg-type]
+        assert not isinstance(c, BufferedIngestClient)
+
+    def test_buffered_flag_wraps_local_client(self, monkeypatch):
+        # ADR-009: ROOTSIGN_BUFFERED wraps the transport in a
+        # BufferedIngestClient without disturbing the inner selection.
+        monkeypatch.setenv("ROOTSIGN_BACKEND", "local")
+        monkeypatch.setenv("ROOTSIGN_BUFFERED", "true")
+        monkeypatch.setenv("ROOTSIGN_BUFFER_INTERVAL", "1.5")
+        monkeypatch.setenv("ROOTSIGN_BUFFER_MAX_SIZE", "42")
+
+        class _StubSession:
+            pass
+
+        c = get_ingest_client(db=_StubSession())  # type: ignore[arg-type]
+        assert isinstance(c, BufferedIngestClient)
+        assert isinstance(c._inner, LocalIngestClient)
+        # Config values propagate to the wrapper.
+        assert c._flush_interval == 1.5
+        assert c._max_buffer_size == 42
+
+    def test_buffered_flag_wraps_cloud_client(self, monkeypatch):
+        monkeypatch.setenv("ROOTSIGN_BACKEND", "cloud")
+        monkeypatch.setenv("ROOTSIGN_BUFFERED", "true")
+        c = get_ingest_client(db=None)
+        assert isinstance(c, BufferedIngestClient)
+        assert isinstance(c._inner, HttpIngestClient)

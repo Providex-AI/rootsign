@@ -96,6 +96,25 @@ async def session(
         close_status = "failed"
         raise
     finally:
+        # Flush any buffered ACTION_RECORDs BEFORE emitting SESSION_CLOSE so
+        # every action is persisted ahead of the session's terminal record
+        # (ADR-009 Decision 5). Duck-typed — works with any client exposing
+        # flush(), no IngestClient ABC change. Belt-and-suspenders with the
+        # BufferedIngestClient passthrough path, which already flushes ahead
+        # of a SESSION_CLOSE envelope; this also covers future clients that
+        # buffer terminal records or change that ordering. Best-effort:
+        # a flush failure is logged, never raised, and never blocks the
+        # SESSION_CLOSE emit (ADR-002 failure isolation).
+        flush = getattr(client, "flush", None)
+        if callable(flush):
+            try:
+                await flush()
+            except Exception as flush_err:  # noqa: BLE001
+                logger.warning(
+                    "rootsign pre-close flush failed for session %s: %s",
+                    ctx.session_id,
+                    flush_err,
+                )
         # Best-effort SESSION_CLOSE — log but never swallow the original
         # exception from inside the `with` body.
         try:

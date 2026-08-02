@@ -119,10 +119,25 @@ def get_ingest_client(db: AsyncSession | None = None) -> IngestClient:
 
     s = SDKSettings()
     if s.BACKEND == "cloud":
-        return HttpIngestClient(base_url=s.CLOUD_URL, api_key=s.API_KEY)
-    if db is None:
+        client: IngestClient = HttpIngestClient(base_url=s.CLOUD_URL, api_key=s.API_KEY)
+    elif db is None:
         raise ValueError(
             "LocalIngestClient requires a db session. Pass db= or set "
             "ROOTSIGN_BACKEND=cloud (Phase 2 only)."
         )
-    return LocalIngestClient(db=db)
+    else:
+        client = LocalIngestClient(db=db)
+
+    # ADR-009: wrap in the micro-batching client when ROOTSIGN_BUFFERED is set.
+    # Its background flush loop starts lazily on first handle() — the factory
+    # is sync and can't await start(). session()'s pre-close flush still
+    # guarantees a final drain regardless.
+    if s.BUFFERED:
+        from rootsign.sdk.buffered_client import BufferedIngestClient
+
+        client = BufferedIngestClient(
+            client,
+            flush_interval_seconds=s.BUFFER_INTERVAL,
+            max_buffer_size=s.BUFFER_MAX_SIZE,
+        )
+    return client
