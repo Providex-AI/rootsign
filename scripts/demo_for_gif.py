@@ -97,7 +97,7 @@ async def main() -> None:
         await db.commit()
 
     SESSION_FILE.write_text(str(ctx.session_id))
-    print(f"session closed. 3 actions on the hash chain.")
+    print("session closed. 3 actions on the hash chain.")
     sys.exit(0)
 
 

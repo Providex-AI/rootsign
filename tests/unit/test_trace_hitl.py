@@ -21,7 +21,6 @@ for awaited methods, sync MagicMock for synchronous attributes.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -331,7 +330,7 @@ class TestFrameworkPathsRejectRequireApproval:
     hint rather than silently falling through to auto-authorized."""
 
     def test_langchain_tool_with_require_approval_raises(self, ctx, accepting_client):
-        langchain_core = pytest.importorskip("langchain_core")
+        pytest.importorskip("langchain_core")
         from langchain_core.tools import tool as langchain_tool
 
         @langchain_tool
