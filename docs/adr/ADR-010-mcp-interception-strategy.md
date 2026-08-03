@@ -25,10 +25,10 @@ RootSign-compatible with zero framework code — the framework-agnostic moat.
   It intercepts `tools/call` requests, emits an ACTION_RECORD, forwards
   upstream, and returns the response. The agent changes only its
   `MCP_SERVER_URL` — no code change.
-- **Mode B — RootSign as MCP Server** (Week 3 stretch). Exposes the audit-log
-  DB as an MCP server so "Auditor AI agents" can query hash chains in-context.
-  Read-only over the existing CRUD layer; no new tables. Deferred; not part of
-  this ADR's committed surface.
+- **Mode B — RootSign as MCP Server** (implemented, `rootsign/mcp/server.py`).
+  Exposes the audit-log DB as an MCP server so "Auditor AI agents" can query
+  hash chains in-context. Read-only over the existing CRUD layer; no new tables.
+  See the Mode B addendum below.
 
 ### 2. HTTP transport, not stdio
 
@@ -101,3 +101,37 @@ non-existent `require_approval` kwarg.
 - The `mcp` extra is optional; the core SDK imports with zero MCP deps.
 - A new **required** CI job `framework-contract-mcp` runs the proxy contract
   tests, matching the repo's `checkout@v5` / `setup-python@v6`.
+
+## Addendum — Mode B (MCP audit-log server), implemented 2026-08
+
+`rootsign/mcp/server.py` exposes the audit log over MCP via the official SDK's
+`FastMCP`, with four **read-only** tools over the existing CRUD/models — **no
+new tables or migrations**:
+
+- `list_sessions(agent_id?, limit=20)` — direct `SELECT` on `sessions`
+- `query_session_chain(session_id)` — `action_crud.get_session_chain`
+- `verify_session_chain(session_id)` — `action_crud.verify_chain` (identical
+  result to `rootsign verify`)
+- `get_approval_records(action_id)` — direct `SELECT` on `approvals` (a list;
+  escalation can produce several rows)
+
+Decisions:
+
+- **Session-factory injection.** Each tool opens its own `AsyncSession` from an
+  injected `session_factory` (default: the app's `AsyncSessionLocal`), never a
+  shared session — mirroring the HiTL poll loop's per-call isolation. The query
+  bodies are standalone `_…(session_factory, *, …)` functions so they are
+  unit-testable against a DB without going through FastMCP.
+- **Lazy `mcp` import** (Decision 3): `FastMCP` is imported inside
+  `create_server` / `create_server_app`; the query helpers use only core deps,
+  so `import rootsign.mcp.server` works without `rootsign[mcp]`.
+- **Read-only.** The server never writes — it is an audit/read surface. The
+  doc's originally-listed `get_approval_record` (singular) became
+  `get_approval_records` (plural/list) to reflect the escalation-chain reality.
+- **Transport & tests.** `create_server_app()` returns the `streamable_http_app()`
+  Starlette ASGI app (HTTP transport, Decision 2). Contract tests
+  (`tests/contract/mcp/test_server.py`, DB-less) cover wiring/registration and
+  run in `framework-contract-mcp`; integration tests
+  (`tests/integration/test_mcp_server.py`, real DB) drive the query helpers
+  directly and confirm `verify_session_chain` matches the CRUD path — no
+  `ci.yml` change needed, they slot into the existing jobs.

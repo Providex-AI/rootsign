@@ -49,7 +49,11 @@ autogen = ["pyautogen>=0.2"]
 # MCP interception (ADR-010). Optional — the core SDK imports with zero MCP
 # deps; rootsign/mcp/* imports these lazily inside functions.
 mcp = [
-    "mcp>=1.0",
+    # Cap below 2.0: mcp 2.0 is a major rewrite that relocated FastMCP out of
+    # `mcp.server.fastmcp` (and pulls an httpx2/mcp-types ecosystem). The audit
+    # server (rootsign/mcp/server.py) is built against the 1.x FastMCP API
+    # (streamable_http_app, @mcp.tool). Revisit when porting to 2.x.
+    "mcp>=1.9,<2.0",
     "fastapi>=0.111",
     "uvicorn[standard]>=0.30",
     "httpx>=0.27",
