@@ -218,6 +218,17 @@ async def serve_proxy(agent_id):
 
 `require_approval=True` gates every proxied tool call on a human decision — the same HiTL flow as `@rootsign.trace`, pausing before the call reaches the upstream server. See [ADR-010](docs/adr/ADR-010-mcp-interception-strategy.md).
 
+RootSign can also run **as an MCP server** — exposing the audit log itself as a read-only data source so an "auditor agent" can list sessions, pull a session's hash chain, verify integrity, and read approval records in-context:
+
+```python
+from rootsign.mcp.server import create_server_app
+
+app = create_server_app()   # ASGI app; mounts the MCP server at /mcp
+# uvicorn rootsign.mcp.server:app --port 8001
+```
+
+Four read-only tools (`list_sessions`, `query_session_chain`, `verify_session_chain`, `get_approval_records`) over the existing store — no new tables.
+
 ## Human-in-the-loop checkpoint
 
 High-risk actions can be gated on a human decision. Pass `require_approval=True` to `@rootsign.trace` and the SDK blocks the tool from running until someone approves it via the CLI.
@@ -295,7 +306,6 @@ Only auto-authorized actions are buffered; HiTL, decision, and session records p
 ## What's next
 
 * **Phase 2 cloud backend** — `HttpIngestClient` + hosted compliance dashboard. Drop-in replacement for `LocalIngestClient`; `BufferedIngestClient` already removes the per-call round-trip latency it would otherwise add.
-* **MCP audit-log server** — expose hash chains as an MCP data source (Mode B) so "auditor agents" can query them in-context.
 * **Web UI for HiTL** — approve/reject pending actions from a browser instead of the CLI.
 * **AutoGen integration** — same duck-typing shape as CrewAI.
 
