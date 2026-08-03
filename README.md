@@ -27,12 +27,12 @@ Compliance-grade audit trails. Zero changes to your agent code.
 
 ## Status
 
-**Phase 1 MVP — v0.1.1.** LangGraph + CrewAI integrations, `rootsign verify` CLI, PII redaction, human-in-the-loop checkpoints, and opt-in decision capture (PRD-19 / ADR-008) are all shipping.
+**v0.1.5.** LangGraph + CrewAI integrations, a framework-agnostic MCP proxy, `rootsign verify` CLI, PII redaction, human-in-the-loop checkpoints, opt-in decision capture (PRD-19 / ADR-008), and opt-in SDK micro-batching are all shipping.
 
 | Phase | Scope | Status |
 |---|---|---|
 | 0 | Data model + storage + ingest handler | ✅ Complete |
-| 1 | Python SDK — `@rootsign.trace`, LangGraph + CrewAI, `rootsign verify` CLI, redaction, HiTL checkpoint, opt-in decision capture | ✅ v0.1.1 |
+| 1 | Python SDK — `@rootsign.trace`, LangGraph + CrewAI + MCP proxy, `rootsign verify` CLI, redaction, HiTL checkpoint, decision capture, micro-batching | ✅ v0.1.5 |
 | 2 | Hosted ingest backend + compliance dashboard | Planned |
 | 3 | Policy enforcement + incident workflow | Planned |
 | 4 | Cross-platform governance | Planned |
@@ -187,6 +187,37 @@ async def run_crew(agent_id):
 
 Tested against CrewAI `0.28`, `0.40`, and `1.x` (see [CI matrix](https://github.com/Providex-AI/rootsign/actions/workflows/ci.yml)).
 
+## Quickstart — MCP proxy (any framework)
+
+Instead of a per-framework adapter, RootSign can intercept at the [Model Context Protocol](https://modelcontextprotocol.io) layer. Point your agent's MCP client at the RootSign proxy and every `tools/call` becomes a tamper-evident `ACTION_RECORD` — any MCP-compatible agent is instrumented with zero framework code.
+
+```bash
+pip install rootsign[mcp]
+```
+
+```python
+import rootsign
+import uvicorn
+from rootsign.mcp.proxy import create_proxy_app
+
+async def serve_proxy(agent_id):
+    async with AsyncSessionLocal() as db:
+        client = LocalIngestClient(db=db)
+        async with rootsign.session(agent_id=agent_id, client=client) as ctx:
+            app = create_proxy_app(
+                upstream_url="http://your-mcp-server:8001/mcp",
+                client=client,
+                ctx=ctx,
+                # require_approval=True  # gate every proxied call on human approval
+            )
+            # A uvicorn-compatible ASGI app. Point the agent's MCP_SERVER_URL
+            # here; tools/call is recorded and forwarded, other methods
+            # (initialize, tools/list, …) pass through unchanged.
+            await uvicorn.Server(uvicorn.Config(app, host="0.0.0.0", port=8000)).serve()
+```
+
+`require_approval=True` gates every proxied tool call on a human decision — the same HiTL flow as `@rootsign.trace`, pausing before the call reaches the upstream server. See [ADR-010](docs/adr/ADR-010-mcp-interception-strategy.md).
+
 ## Human-in-the-loop checkpoint
 
 High-risk actions can be gated on a human decision. Pass `require_approval=True` to `@rootsign.trace` and the SDK blocks the tool from running until someone approves it via the CLI.
@@ -238,17 +269,33 @@ tools = rootsign.wrap_tools(
 
 `FinancialPIIConfig` adds account / routing / IBAN patterns; `HealthcarePIIConfig` adds MRN / NPI / DOB. Each accepts `extra_rules={...}` for domain-specific patterns without subclassing. See [ADR-006](docs/adr/ADR-006-redaction-contract.md).
 
+## Micro-batching (opt-in)
+
+`BufferedIngestClient` wraps any ingest client and buffers `ACTION_RECORD`s in memory, flushing asynchronously — so a long, tool-heavy pipeline doesn't pay a per-call ingest round-trip. Enable it with `ROOTSIGN_BUFFERED=true` (the factory wraps the transport for you), or wrap explicitly:
+
+```python
+from rootsign import BufferedIngestClient, LocalIngestClient
+
+async with BufferedIngestClient(LocalIngestClient(db=db)) as client:
+    async with rootsign.session(agent_id=agent_id, client=client) as ctx:
+        ...  # session() flushes the buffer before SESSION_CLOSE
+```
+
+Only auto-authorized actions are buffered; HiTL, decision, and session records pass through synchronously, so approvals and hash-chain ordering are never deferred. See [ADR-009](docs/adr/ADR-009-buffered-ingest-client.md).
+
 ## Architecture
 
 * **`@rootsign.trace`** wraps a tool callable and emits an `ACTION_RECORD` envelope per call. LangGraph `BaseTool` and CrewAI tools are detected automatically.
-* **`LocalIngestClient`** is the in-process ingest path for v0.1.x. A `HttpIngestClient` for the hosted backend lands in Phase 2.
+* **MCP proxy** — `create_proxy_app` intercepts MCP `tools/call` at the protocol layer, so any MCP-compatible agent is instrumented without a framework adapter (ADR-010).
+* **`LocalIngestClient`** is the in-process ingest path for v0.1.x. A `HttpIngestClient` for the hosted backend lands in Phase 2. **`BufferedIngestClient`** optionally wraps either for async micro-batching (ADR-009).
 * **Hash chain** is per-session: each `Action` carries `prev_action_hash` so reconstructing the chain detects any after-the-fact modification.
 * **`HiTLCheckpoint`** is an async poll loop that opens its own DB session per cycle — see ADR-007 for the loop-binding rationale.
 * **Storage** is PostgreSQL 16 + TimescaleDB 2.14. The `actions` table is a hypertable; the chain stays intact across chunks.
 
 ## What's next
 
-* **Phase 2 cloud backend** — `HttpIngestClient` + hosted compliance dashboard. Drop-in replacement for `LocalIngestClient` once available.
+* **Phase 2 cloud backend** — `HttpIngestClient` + hosted compliance dashboard. Drop-in replacement for `LocalIngestClient`; `BufferedIngestClient` already removes the per-call round-trip latency it would otherwise add.
+* **MCP audit-log server** — expose hash chains as an MCP data source (Mode B) so "auditor agents" can query them in-context.
 * **Web UI for HiTL** — approve/reject pending actions from a browser instead of the CLI.
 * **AutoGen integration** — same duck-typing shape as CrewAI.
 
