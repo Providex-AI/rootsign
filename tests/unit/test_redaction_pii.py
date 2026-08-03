@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 from rootsign.sdk.hashing import compute_payload_hash
 from rootsign.sdk.redaction import (
