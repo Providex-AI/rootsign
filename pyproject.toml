@@ -46,6 +46,14 @@ dev = [
 langgraph = ["langgraph>=0.1"]
 crewai = ["crewai>=0.28"]
 autogen = ["pyautogen>=0.2"]
+# MCP interception (ADR-010). Optional — the core SDK imports with zero MCP
+# deps; rootsign/mcp/* imports these lazily inside functions.
+mcp = [
+    "mcp>=1.0",
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.30",
+    "httpx>=0.27",
+]
 
 [project.scripts]
 rootsign = "rootsign.sdk.cli:app"
