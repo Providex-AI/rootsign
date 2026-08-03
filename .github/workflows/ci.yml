@@ -85,7 +85,10 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
-      - run: pip install -e '.[dev]'
+      # mcp extra so the DB-backed MCP proxy integration test
+      # (tests/integration/test_mcp_proxy.py) runs here instead of skipping on
+      # a missing fastapi import.
+      - run: pip install -e '.[dev,mcp]'
       - name: Bootstrap rootsign_test
         run: |
           PGPASSWORD=rootsign psql -h localhost -U rootsign -d rootsign_dev \
@@ -151,3 +154,27 @@ jobs:
         run: pip install -e '.[dev,crewai]' "crewai~=${{ matrix.crewai-version }}"
       - name: Contract tests
         run: pytest tests/contract/crewai/ -v
+
+  framework-contract-mcp:
+    # ADR-010 / Pre-Phase 2 sprint: MCP proxy contract tests are MANDATORY —
+    # this job must pass on every PR before merge. Same DB-less pattern as the
+    # langgraph / crewai jobs: the proxy interception + HiTL-over-MCP tests use
+    # a mock IngestClient and never touch the DB, so ROOTSIGN_SKIP_DB_BOOTSTRAP
+    # skips alembic / DB connect at session start.
+    #
+    # Installs the mcp extra (fastapi + uvicorn + mcp + httpx). Lazy imports in
+    # rootsign/mcp/* mean the core SDK still imports without it (verified by a
+    # test in tests/contract/mcp/), but the proxy itself needs fastapi to run.
+    name: MCP proxy contract tests
+    runs-on: ubuntu-latest
+    env:
+      ROOTSIGN_SKIP_DB_BOOTSTRAP: '1'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install with mcp extra
+        run: pip install -e '.[dev,mcp]'
+      - name: Contract tests
+        run: pytest tests/contract/mcp/ -v

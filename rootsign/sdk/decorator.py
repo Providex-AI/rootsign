@@ -225,6 +225,7 @@ async def _emit_action_record(
     client: IngestClient,
     ctx: SessionContext,
     redaction_config: RedactionConfig | None,
+    _input_payload_override: dict[str, Any] | None = None,
 ) -> Any:
     """Shared emission logic for both plain and LangGraph paths.
 
@@ -232,9 +233,24 @@ async def _emit_action_record(
     fires the ACTION_RECORD envelope. Best-effort ingest — never raises into
     the caller. If *func* raises, the exception is re-raised AFTER the ingest
     attempt so we still record the failed action.
+
+    `_input_payload_override` (ADR-010): when a caller has already built the
+    redacted input payload — the MCP proxy has a ready-made `arguments` dict
+    that it `_to_json_safe`'d and redacted itself — it passes that dict here.
+    We then use it *directly* as `redacted_input` (no `{"args", "kwargs"}`
+    wrapping, no second redaction pass) and hash it as-is. When None (every
+    framework/plain caller), input is captured from `(args, kwargs)` and
+    redacted exactly as before. Output capture is unaffected either way.
     """
-    input_payload: dict[str, Any] = _to_json_safe({"args": list(args), "kwargs": dict(kwargs)})
-    redacted_input = redaction_config.redact(input_payload) if redaction_config else input_payload
+    if _input_payload_override is not None:
+        redacted_input: Any = _input_payload_override
+    else:
+        input_payload: dict[str, Any] = _to_json_safe(
+            {"args": list(args), "kwargs": dict(kwargs)}
+        )
+        redacted_input = (
+            redaction_config.redact(input_payload) if redaction_config else input_payload
+        )
     input_hash = compute_payload_hash(redacted_input)
     timestamp = datetime.now(timezone.utc)
 
@@ -374,6 +390,7 @@ async def _emit_hitl_action(
     approval_context_builder: Callable[[str, dict[str, Any]], dict] | None,
     poll_interval_seconds: float,
     timeout_seconds: float,
+    _input_payload_override: dict[str, Any] | None = None,
 ) -> Any:
     """HiTL-gated tool execution. Spec §S4-TASK 6.
 
@@ -417,8 +434,19 @@ async def _emit_hitl_action(
     #    on JSONB insert, which in the HiTL path escalates to a RuntimeError
     #    (the pending ACTION_RECORD must succeed for the gate to proceed), and
     #    desyncs input_hash from the stored payload (breaks verify-time binding).
-    input_payload: dict[str, Any] = _to_json_safe({"args": list(args), "kwargs": dict(kwargs)})
-    redacted_input = redaction_config.redact(input_payload) if redaction_config else input_payload
+    # `_input_payload_override` (ADR-010): the MCP proxy supplies an
+    # already-safe, already-redacted `arguments` dict, so we use it directly
+    # and keep the HiTL path's stored input_redacted shape identical to the
+    # auto path's. Otherwise capture from (args, kwargs) as before.
+    if _input_payload_override is not None:
+        redacted_input: Any = _input_payload_override
+    else:
+        input_payload: dict[str, Any] = _to_json_safe(
+            {"args": list(args), "kwargs": dict(kwargs)}
+        )
+        redacted_input = (
+            redaction_config.redact(input_payload) if redaction_config else input_payload
+        )
     input_hash = compute_payload_hash(redacted_input)
     timestamp = datetime.now(timezone.utc)
 
