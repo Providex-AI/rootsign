@@ -294,6 +294,25 @@ async with BufferedIngestClient(LocalIngestClient(db=db)) as client:
 
 Only auto-authorized actions are buffered; HiTL, decision, and session records pass through synchronously, so approvals and hash-chain ordering are never deferred. See [ADR-009](docs/adr/ADR-009-buffered-ingest-client.md).
 
+## Performance
+
+Instrumentation overhead is designed to be negligible. The LangGraph tracer's per-call overhead is benchmarked over 1,000 instrumented tool calls against a mock ingest client — isolating interception cost from the datastore:
+
+| Metric | Per-call overhead |
+|---|---|
+| p99 | ~0.3 ms |
+| mean | ~0.23 ms |
+| median | ~0.23 ms |
+
+That is **~15× under the 5 ms p99 budget** enforced by the regression test `test_p99_overhead_under_5ms` (ADR-004). Reproduce it yourself — no database required:
+
+```bash
+ROOTSIGN_SKIP_DB_BOOTSTRAP=1 python -m pytest \
+    tests/performance/test_langgraph_benchmarks.py -m benchmark -s
+```
+
+The `-m benchmark` marker keeps the performance suite opt-in. Run it **without** `--cov`: coverage instrumentation roughly doubles the measured overhead and would not reflect production numbers. Figures above are indicative (dev laptop, Python 3.12); your absolute numbers will vary, but the budget assertion runs in CI-representative conditions.
+
 ## Architecture
 
 * **`@rootsign.trace`** wraps a tool callable and emits an `ACTION_RECORD` envelope per call. LangGraph `BaseTool` and CrewAI tools are detected automatically.
@@ -315,7 +334,7 @@ Watch the [GitHub Issues](https://github.com/Providex-AI/rootsign/issues) for th
 
 We welcome contributions. See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, coding standards, and the PR process. By submitting a contribution, you agree to the [CLA](CLA.md).
 
-Open-source community channels and Discord coming soon — for now, GitHub Issues is the canonical place to file bugs and propose features.
+Have a question, an idea, or feedback from using RootSign? Start a thread in [**GitHub Discussions**](https://github.com/Providex-AI/rootsign/discussions) — that's the best place for design feedback, use-case questions, and feature ideas. For reproducible bugs and concrete feature requests, open a [GitHub Issue](https://github.com/Providex-AI/rootsign/issues).
 
 ## License
 
