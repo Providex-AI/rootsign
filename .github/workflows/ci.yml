@@ -57,7 +57,7 @@ jobs:
           PGPASSWORD=rootsign psql -h localhost -U rootsign -d rootsign_test \
             -c "CREATE EXTENSION IF NOT EXISTS timescaledb;"
       - name: Unit tests
-        run: pytest tests/unit/ -v
+        run: pytest tests/unit/ tests/contract/no_extras/ -v
 
   integration-tests:
     name: Integration tests (Python 3.12)
@@ -178,3 +178,56 @@ jobs:
         run: pip install -e '.[dev,mcp]'
       - name: Contract tests
         run: pytest tests/contract/mcp/ -v
+
+  no-extras-install:
+    # ADR-011 Workstream 1: the authoritative packaging-split gate. Installs
+    # rootsign with NO extras and proves the core is dependency-light and
+    # DB-free — no Postgres service, no database driver resolved. If a stray
+    # top-level `import sqlalchemy` sneaks back into the SDK, `import rootsign`
+    # here fails. This job is REQUIRED.
+    name: No-extras install (DB-free core)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install core only (no extras)
+        run: pip install .
+      - name: Zero database packages resolved
+        run: |
+          python - <<'PY'
+          import importlib.util as u
+          bad = [m for m in ("sqlalchemy","asyncpg","psycopg2","greenlet","alembic")
+                 if u.find_spec(m) is not None]
+          assert not bad, f"core install pulled DB packages: {bad}"
+          print("no DB packages installed — OK")
+          PY
+      - name: import rootsign + facade surface works DB-free
+        run: |
+          python - <<'PY'
+          import sys, rootsign
+          from rootsign import (trace, session, wrap_tools, wrap_crewai_tools,
+              BufferedIngestClient, IngestClient, get_ingest_client,
+              verify_session_local, SessionContext, StandardPIIConfig,
+              register_agent, LangGraphTracer, CrewAITracer)
+          assert "sqlalchemy" not in sys.modules
+          print("import rootsign OK, DB-free")
+          PY
+      - name: postgres backend without extra raises actionable error
+        run: |
+          python - <<'PY'
+          from rootsign.errors import RootSignPostgresExtraRequired
+          from rootsign.sdk.client import get_ingest_client
+          class _StubDB: pass
+          try:
+              get_ingest_client(db=_StubDB())
+              raise SystemExit("expected RootSignPostgresExtraRequired")
+          except RootSignPostgresExtraRequired as e:
+              assert "rootsign[postgres]" in str(e), e
+              print("RootSignPostgresExtraRequired raised OK")
+          PY
+      - name: Guard-rail + isolation tests (bare env)
+        run: |
+          pip install pytest pytest-asyncio
+          pytest tests/contract/no_extras/ -v

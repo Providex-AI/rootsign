@@ -171,3 +171,24 @@ class EscalationDepthExceededError(RootSignError):
             f"Escalation depth limit (1) exceeded for action {action_id}"
         )
         self.action_id = action_id
+
+
+class RootSignPostgresExtraRequired(RootSignError):
+    """The Postgres backend was requested but the DB stack isn't installed.
+
+    Since ADR-011, the SQLAlchemy / asyncpg / alembic stack lives in the
+    optional ``postgres`` extra so ``pip install rootsign`` stays dependency-
+    light and DB-free (the default backend is JSONL). Selecting
+    ``ROOTSIGN_BACKEND=postgres`` (or the deprecated ``local``) without that
+    extra raises this — with the exact install command — instead of a bare
+    ``ModuleNotFoundError`` deep in the import graph.
+    """
+
+    INSTALL_HINT = (
+        "ROOTSIGN_BACKEND=postgres requires the database extra. Install with:  "
+        "pip install 'rootsign[postgres]'"
+    )
+
+    def __init__(self, detail: str | None = None):
+        message = self.INSTALL_HINT if detail is None else f"{self.INSTALL_HINT}  ({detail})"
+        super().__init__(message)

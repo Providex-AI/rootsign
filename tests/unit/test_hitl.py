@@ -178,7 +178,7 @@ class TestTimeout:
         # Patch the CRUD call so we don't try to insert against a mock
         # without a real Action row — _record_timeout will succeed (None).
         with patch(
-            "rootsign.sdk.hitl.approval_crud.create_with_chain_link",
+            "rootsign.crud.approval.approval.create_with_chain_link",
             new_callable=AsyncMock,
         ) as mocked_crud:
             with pytest.raises(HiTLTimeoutError) as exc_info:
@@ -204,7 +204,7 @@ class TestTimeout:
             timeout_seconds=0.05,
         )
         with patch(
-            "rootsign.sdk.hitl.approval_crud.create_with_chain_link",
+            "rootsign.crud.approval.approval.create_with_chain_link",
             new_callable=AsyncMock,
         ):
             with pytest.raises(HiTLTimeoutError):
@@ -247,7 +247,7 @@ class TestHumanWinsRace:
             timeout_seconds=0.0,
         )
         with patch(
-            "rootsign.sdk.hitl.approval_crud.create_with_chain_link",
+            "rootsign.crud.approval.approval.create_with_chain_link",
             new_callable=AsyncMock,
             side_effect=ActionAlreadyResolvedError("already terminal"),
         ):
@@ -273,7 +273,7 @@ class TestHumanWinsRace:
             timeout_seconds=0.0,
         )
         with patch(
-            "rootsign.sdk.hitl.approval_crud.create_with_chain_link",
+            "rootsign.crud.approval.approval.create_with_chain_link",
             new_callable=AsyncMock,
             side_effect=ActionAlreadyResolvedError("already terminal"),
         ):

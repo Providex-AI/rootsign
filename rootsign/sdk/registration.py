@@ -11,17 +11,21 @@ registration to a hosted control plane.
 
 from __future__ import annotations
 
-from sqlalchemy.ext.asyncio import AsyncSession
+from typing import TYPE_CHECKING
 
-from rootsign.crud import agent as agent_crud
-from rootsign.database import AsyncSessionLocal
-from rootsign.models.agent import Agent
 from rootsign.schemas.agent import (
     AgentCreate,
     AgentEnvironment,
     AgentFramework,
     AgentRiskTier,
 )
+
+if TYPE_CHECKING:
+    # DB stack lives in the optional `postgres` extra (ADR-011); these are only
+    # type hints here. The real imports happen inside register_agent's body.
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from rootsign.models.agent import Agent
 
 
 async def register_agent(
@@ -49,6 +53,12 @@ async def register_agent(
     The same name twice will raise via the `uq_agents_name` unique
     constraint — registration is a one-shot setup step.
     """
+    # Lazy imports — the DB stack is the postgres extra (ADR-011). Registration
+    # only runs on the postgres path today; the jsonl backend gets its own
+    # get-or-create in Sprint A Workstream 2.
+    from rootsign.crud import agent as agent_crud
+    from rootsign.database import AsyncSessionLocal
+
     obj_in = AgentCreate(
         name=name,
         owner=owner,

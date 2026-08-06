@@ -19,13 +19,15 @@ from __future__ import annotations
 
 import asyncio
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from rootsign.ingest.handler import IngestHandler
 from rootsign.ingest.idempotency import IdempotencyStore
 from rootsign.ingest.schemas import IngestResponse
+
+if TYPE_CHECKING:
+    # SQLAlchemy is in the optional `postgres` extra (ADR-011). Only used as a
+    # type hint here; imported for real inside LocalIngestClient.__init__.
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class IngestClient(ABC):
@@ -57,6 +59,11 @@ class LocalIngestClient(IngestClient):
                 "or switch to HttpIngestClient via ROOTSIGN_BACKEND=cloud "
                 "(Phase 2 only)."
             )
+        # Lazy import — IngestHandler pulls the SQLAlchemy/crud stack (postgres
+        # extra, ADR-011). LocalIngestClient is only constructed on the postgres
+        # path, so the cost lands only when it is actually used.
+        from rootsign.ingest.handler import IngestHandler
+
         self._idempotency = idempotency if idempotency is not None else IdempotencyStore()
         self._handler = IngestHandler(db=db, idempotency=self._idempotency)
         # Serializes handle() calls against the shared AsyncSession.
@@ -126,7 +133,23 @@ def get_ingest_client(db: AsyncSession | None = None) -> IngestClient:
             "ROOTSIGN_BACKEND=cloud (Phase 2 only)."
         )
     else:
-        client = LocalIngestClient(db=db)
+        # The postgres path pulls the DB stack (optional `postgres` extra,
+        # ADR-011). Translate a missing-extra ModuleNotFoundError into an
+        # actionable error naming the install command.
+        try:
+            client = LocalIngestClient(db=db)
+        except ModuleNotFoundError as exc:
+            from rootsign.errors import RootSignPostgresExtraRequired
+
+            if (exc.name or "").split(".")[0] in {
+                "sqlalchemy",
+                "asyncpg",
+                "psycopg2",
+                "greenlet",
+                "alembic",
+            }:
+                raise RootSignPostgresExtraRequired(f"missing module: {exc.name}") from exc
+            raise
 
     # ADR-009: wrap in the micro-batching client when ROOTSIGN_BUFFERED is set.
     # Its background flush loop starts lazily on first handle() — the factory
