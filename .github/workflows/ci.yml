@@ -227,7 +227,9 @@ jobs:
               assert "rootsign[postgres]" in str(e), e
               print("RootSignPostgresExtraRequired raised OK")
           PY
-      - name: Guard-rail + isolation tests (bare env)
-        run: |
-          pip install pytest pytest-asyncio
-          pytest tests/contract/no_extras/ -v
+      # NOTE: we deliberately do NOT run `pytest tests/contract/no_extras/`
+      # here — the root tests/conftest.py imports sqlalchemy at module level
+      # (for the DB fixtures), so pytest cannot even collect in a DB-free env.
+      # The python -c checks above ARE the authoritative bare-install gate;
+      # the guard-rail + subprocess isolation tests run in the unit-tests job
+      # (full env, where the subprocess blocker simulates the missing stack).
