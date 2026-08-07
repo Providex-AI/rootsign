@@ -28,6 +28,7 @@ from rootsign.sdk.client import (
     LocalIngestClient,
     get_ingest_client,
 )
+from rootsign.sdk.jsonl_client import JsonlIngestClient
 from rootsign.sdk.context import SessionContext
 from rootsign.sdk.decorator import trace
 from rootsign.sdk.frameworks.crewai import CrewAITracer
@@ -90,6 +91,7 @@ __all__ = [
     "HiTLTimeoutError",
     "HttpIngestClient",
     "IngestClient",
+    "JsonlIngestClient",
     "LangGraphTracer",
     "LocalIngestClient",
     "RedactionConfig",

@@ -422,6 +422,22 @@ async def _emit_hitl_action(
         `ActionAlreadyResolvedError` guard and log a noisy warning for
         no semantic gain.
     """
+    # Backend dispatch (ADR-011 §6): the JSONL backend has no shared store for
+    # the async poll loop, so it uses a synchronous inline TTY prompt. Detect
+    # BEFORE importing the DB stack (which lives in the optional postgres extra).
+    if _is_jsonl_backend(client):
+        return await _emit_hitl_action_sync(
+            func=func,
+            args=args,
+            kwargs=kwargs,
+            tool_name=tool_name,
+            client=client,
+            ctx=ctx,
+            redaction_config=redaction_config,
+            approval_context_builder=approval_context_builder,
+            _input_payload_override=_input_payload_override,
+        )
+
     # Lazy imports — HiTL is a Sprint 4 surface and pulling these at
     # module load would pessimize cold start for non-HiTL users.
     from rootsign.database import AsyncSessionLocal
@@ -512,6 +528,111 @@ async def _emit_hitl_action(
     await checkpoint.wait_for_approval(context_presented=context_presented)
 
     # 6. Approved — execute the tool and return the result.
+    if asyncio.iscoroutinefunction(func):
+        return await func(*args, **kwargs)
+    maybe = func(*args, **kwargs)
+    return await maybe if asyncio.iscoroutine(maybe) else maybe
+
+
+def _is_jsonl_backend(client: IngestClient) -> bool:
+    """True if *client* is (or wraps, e.g. BufferedIngestClient) a JSONL client.
+
+    jsonl_client is a core (DB-free) module, so importing it here is cheap and
+    keeps the guard-rail clean.
+    """
+    from rootsign.sdk.jsonl_client import JsonlIngestClient
+
+    inner = getattr(client, "_inner", None)
+    return isinstance(client, JsonlIngestClient) or isinstance(inner, JsonlIngestClient)
+
+
+async def _emit_hitl_action_sync(
+    *,
+    func: Callable[..., Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    tool_name: str,
+    client: IngestClient,
+    ctx: SessionContext,
+    redaction_config: RedactionConfig | None,
+    approval_context_builder: Callable[[str, dict[str, Any]], dict] | None,
+    _input_payload_override: dict[str, Any] | None = None,
+) -> Any:
+    """Synchronous HiTL for the JSONL backend (ADR-011 §6).
+
+    Fail-fast (before any tool work) when there is no TTY — a headless
+    `require_approval=True` run on JSONL can't prompt and has no shared store to
+    poll, so it raises `HiTLUnsupportedBackendError`. With a TTY: insert the
+    pending ACTION_RECORD, prompt inline (via `asyncio.to_thread(input, …)` so
+    the event loop never blocks), write the APPROVAL_RECORD, then run the tool
+    on approval or raise `HiTLRejectedError` on rejection.
+    """
+    import getpass
+    import sys
+
+    from rootsign.errors import HiTLRejectedError, HiTLUnsupportedBackendError
+
+    # Fail-fast on first invocation, before any work, if we can't prompt.
+    if not sys.stdin.isatty():
+        raise HiTLUnsupportedBackendError(tool_name)
+
+    if _input_payload_override is not None:
+        redacted_input: Any = _input_payload_override
+    else:
+        input_payload: dict[str, Any] = _to_json_safe({"args": list(args), "kwargs": dict(kwargs)})
+        redacted_input = (
+            redaction_config.redact(input_payload) if redaction_config else input_payload
+        )
+    input_hash = compute_payload_hash(redacted_input)
+    timestamp = datetime.now(timezone.utc)
+
+    if approval_context_builder is not None:
+        context_presented = approval_context_builder(tool_name, redacted_input)
+    else:
+        context_presented = {"tool_name": tool_name, "input_summary": str(redacted_input)[:500]}
+
+    # Insert the pending ACTION_RECORD so the chain carries the row (mirrors the
+    # postgres path). Must succeed — no row means nothing to approve against.
+    decision_id = await ctx._consume_pending_decision_id()
+    response = await _try_ingest(
+        client=client,
+        ctx=ctx,
+        tool_name=tool_name,
+        input_hash=input_hash,
+        output_hash=None,
+        redacted_input=redacted_input,
+        redacted_output=None,
+        timestamp=timestamp,
+        authorization_status="pending",
+        decision_id=decision_id,
+    )
+    if response is None or response.entity_id is None:
+        raise RuntimeError(
+            f"rootsign: failed to submit pending ACTION_RECORD for {tool_name!r} "
+            "(jsonl HiTL); cannot proceed without a chain row."
+        )
+    action_id = response.entity_id
+
+    prompt = f"[rootsign] Approve tool {tool_name!r}? [y/N] (text after y/n is a note): "
+    raw = (await asyncio.to_thread(input, prompt)).strip()
+    approved = raw[:1].lower() in ("y", "a")
+    note = raw[1:].strip() or None
+
+    await _emit_approval_record(
+        client=client,
+        ctx=ctx,
+        action_id=action_id,
+        action_timestamp=timestamp,
+        approver_id=f"tty:{getpass.getuser()}",
+        approver_type="human",
+        context_presented=context_presented,
+        decision="approved" if approved else "rejected",
+        decision_reason=note,
+    )
+
+    if not approved:
+        raise HiTLRejectedError(action_id, reason=note or "rejected at prompt")
+
     if asyncio.iscoroutinefunction(func):
         return await func(*args, **kwargs)
     maybe = func(*args, **kwargs)

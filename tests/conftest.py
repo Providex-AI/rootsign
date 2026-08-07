@@ -31,6 +31,14 @@ from sqlalchemy.pool import NullPool
 
 from rootsign.config import settings
 
+# ADR-011: the default SDK backend flipped to `jsonl` in v0.2.0. The existing
+# suite assumes the Postgres path (get_ingest_client() → LocalIngestClient,
+# clean_db fixtures, HiTL poll loop). Pin it back to postgres for the whole
+# suite so the flip is behavior-neutral here; JSONL-specific tests construct
+# JsonlIngestClient directly or monkeypatch ROOTSIGN_BACKEND. setdefault so a
+# developer's explicit ROOTSIGN_BACKEND still wins.
+os.environ.setdefault("ROOTSIGN_BACKEND", "postgres")
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
