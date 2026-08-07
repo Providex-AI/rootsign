@@ -43,7 +43,9 @@ async def _agent(db: AsyncSession) -> Agent:
 
 
 class TestAgentUniqueness:
-    async def test_duplicate_agent_name_rejected(self, db: AsyncSession):
+    """Identity is (name, environment) since ADR-012 / migration 0005."""
+
+    async def test_duplicate_name_and_environment_rejected(self, db: AsyncSession):
         await crud.agent.create(
             db,
             obj_in=AgentCreate(
@@ -60,11 +62,25 @@ class TestAgentUniqueness:
                 obj_in=AgentCreate(
                     name="duplicated-name",
                     owner="other",
-                    environment=AgentEnvironment.STAGING,
+                    environment=AgentEnvironment.PRODUCTION,
                     risk_tier=AgentRiskTier.HIGH,
                     framework=AgentFramework.CUSTOM,
                 ),
             )
+
+    async def test_same_name_in_a_different_environment_allowed(self, db: AsyncSession):
+        for env in (AgentEnvironment.DEVELOPMENT, AgentEnvironment.PRODUCTION):
+            await crud.agent.create(
+                db,
+                obj_in=AgentCreate(
+                    name="per-environment-name",
+                    owner="xx",
+                    environment=env,
+                    risk_tier=AgentRiskTier.LOW,
+                    framework=AgentFramework.LANGGRAPH,
+                ),
+            )
+        await db.flush()  # no IntegrityError
 
 
 class TestSessionFK:

@@ -53,8 +53,8 @@ class LangGraphTracer:
     def wrap_tool(
         tool: Any,
         *,
-        ctx: SessionContext,
-        client: IngestClient,
+        ctx: SessionContext | None = None,
+        client: IngestClient | None = None,
         redaction_config: RedactionConfig | None = None,
     ) -> Any:
         """Wrap *tool* in place. Returns the same `BaseTool` instance.
@@ -63,10 +63,16 @@ class LangGraphTracer:
         existing object rather than constructing a new one. Sets
         `_rootsign_instrumented = True` and `_rootsign_context = ctx` on the
         tool so subsequent passes through `wrap_tools` skip re-wrapping.
+
+        `ctx`/`client` may be omitted (ADR-012): they are then resolved from the
+        ambient `rootsign.session()` at each **invocation**, not here — wrapping
+        commonly happens at import time, before any session exists. Explicit
+        arguments always win.
         """
         # Import inside the function so the SDK installs cleanly without the
         # langgraph extra. ADR-004 keeps third-party deps lazy.
         from rootsign.sdk.decorator import _emit_action_record
+        from rootsign.sdk.facade import _resolve_ctx_client
 
         original_invoke = tool.invoke
         original_ainvoke = tool.ainvoke
@@ -77,6 +83,11 @@ class LangGraphTracer:
                 # Re-entrant sync fallback from within traced_ainvoke — the
                 # outer async emit owns this call. Run the tool untraced.
                 return original_invoke(input, config, **kwargs)
+
+            # Resolve before entering the worker loop: `_run_sync` may hop to a
+            # fresh thread whose copied context we'd rather read here, in the
+            # caller's frame, where the ambient session is guaranteed visible.
+            call_ctx, call_client = _resolve_ctx_client(ctx, client, surface="wrap_tools")
 
             async def _runner() -> Any:
                 # The wrapped callable bound here delegates to the *original*
@@ -95,8 +106,8 @@ class LangGraphTracer:
                     args=(input,),
                     kwargs={},
                     tool_name=tool_name,
-                    client=client,
-                    ctx=ctx,
+                    client=call_client,
+                    ctx=call_ctx,
                     redaction_config=redaction_config,
                 )
 
@@ -105,6 +116,8 @@ class LangGraphTracer:
         async def traced_ainvoke(input: Any, config: Any = None, **kwargs: Any) -> Any:
             if _emitting.get():
                 return await original_ainvoke(input, config, **kwargs)
+
+            call_ctx, call_client = _resolve_ctx_client(ctx, client, surface="wrap_tools")
 
             async def _call(*_a: Any, **_kw: Any) -> Any:
                 # Set the guard around the original call so LangChain's
@@ -121,8 +134,8 @@ class LangGraphTracer:
                 args=(input,),
                 kwargs={},
                 tool_name=tool_name,
-                client=client,
-                ctx=ctx,
+                client=call_client,
+                ctx=call_ctx,
                 redaction_config=redaction_config,
             )
 
@@ -141,8 +154,8 @@ class LangGraphTracer:
     def wrap_tools(
         tools: list[Any],
         *,
-        ctx: SessionContext,
-        client: IngestClient,
+        ctx: SessionContext | None = None,
+        client: IngestClient | None = None,
         redaction_config: RedactionConfig | None = None,
     ) -> list[Any]:
         """Wrap a list of tools. Drop-in for `ToolNode([...])`.

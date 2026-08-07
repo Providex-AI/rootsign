@@ -46,31 +46,67 @@ def _envelope_base(
 @contextlib.asynccontextmanager
 async def session(
     *,
-    agent_id: UUID,
-    client: IngestClient,
+    agent_id: UUID | None = None,
+    client: IngestClient | None = None,
     objective: str | None = None,
     user_id: str | None = None,
 ) -> AsyncIterator[SessionContext]:
     """Open a rootsign session that auto-bounds SESSION_OPEN / SESSION_CLOSE.
 
-    Usage::
+    Facade form (ADR-012) — `rootsign.init()` supplies the agent and backend::
+
+        rootsign.init(agent="invoice-agent")
+
+        async with rootsign.session(objective="process batch"):
+            tools = rootsign.wrap_tools([my_tool])   # implicit ctx + client
+
+    Explicit form — unchanged, and still what tests and multi-agent processes
+    should use::
 
         async with rootsign.session(agent_id=..., client=client) as ctx:
             tools = rootsign.wrap_tools([my_tool], ctx=ctx, client=client)
-            # run your graph
 
     Args:
         agent_id: The registered agent's UUID. Use `rootsign.register_agent`
-            once to create it.
-        client: An IngestClient (typically a LocalIngestClient bound to your
-            DB session). The SESSION_OPEN/CLOSE envelopes flow through this.
+            once to create it. Omit it to have the agent get-or-created lazily
+            from `rootsign.init()`'s config on entry (ADR-012 Decision 2 — this
+            is where init()'s deferred I/O happens).
+        client: An IngestClient (typically a LocalIngestClient bound to your DB
+            session). The SESSION_OPEN/CLOSE envelopes flow through this. Omit
+            it to have the backend's client built from `init()`'s config; a
+            client this function builds itself is also closed on exit, while a
+            caller-supplied one is left alone.
         objective: Free-text description of what the agent is being asked to
             do. Persisted on the Session record.
         user_id: Logical end-user identifier, if your application has one.
 
+    While the body runs, `(ctx, client)` is published to a ContextVar so
+    `wrap_tools` / `@trace` / the MCP proxy resolve it implicitly. The
+    ContextVar is always reset on exit. Concurrent sessions in one process stay
+    isolated — each task sees only its own.
+
     The yielded SessionContext exposes `.session_id`, `.agent_id`, and the
     monotonic sequence counter.
+
+    Raises:
+        RootSignNotInitializedError: neither `rootsign.init()` was called nor
+            both `agent_id=` and `client=` were passed.
     """
+    from rootsign.sdk import facade
+
+    owns_client = False
+    if agent_id is None or client is None:
+        config = facade.get_init_config()
+        if config is None:
+            from rootsign.errors import RootSignNotInitializedError
+
+            raise RootSignNotInitializedError("rootsign.session()")
+        if agent_id is None:
+            agent_id = await facade._resolve_agent_id(config)
+        if client is None:
+            client = facade._build_client(config)
+            owns_client = True
+
     ctx = SessionContext(agent_id=agent_id)
     base = _envelope_base(agent_id=agent_id, session_id=ctx.session_id)
 
@@ -90,12 +126,18 @@ async def session(
         )
 
     close_status = "completed"
+    # Publish (ctx, client) for implicit resolution by the tracers (ADR-012
+    # Decision 3). Set AFTER SESSION_OPEN so nothing can emit an ACTION_RECORD
+    # into a session that hasn't been opened yet. Always reset in the finally —
+    # a leaked token shows up as cross-test pollution.
+    ambient_token = facade._set_current_session(ctx, client)
     try:
         yield ctx
     except BaseException:
         close_status = "failed"
         raise
     finally:
+        facade._reset_current_session(ambient_token)
         # Flush any buffered ACTION_RECORDs BEFORE emitting SESSION_CLOSE so
         # every action is persisted ahead of the session's terminal record
         # (ADR-009 Decision 5). Duck-typed — works with any client exposing
@@ -136,3 +178,7 @@ async def session(
                 ctx.session_id,
                 close_err,
             )
+        # Only a client this function built is ours to close — a caller-supplied
+        # one outlives the session by contract.
+        if owns_client:
+            await facade._maybe_close(client)

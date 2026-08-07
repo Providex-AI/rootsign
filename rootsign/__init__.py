@@ -10,6 +10,7 @@ from rootsign.errors import (
     HiTLRejectedError,
     HiTLTimeoutError,
     RootSignError,
+    RootSignNotInitializedError,
 )
 from rootsign.schemas.agent import (
     AgentEnvironment,
@@ -26,11 +27,13 @@ from rootsign.sdk.client import (
     HttpIngestClient,
     IngestClient,
     LocalIngestClient,
+    ManagedLocalIngestClient,
     get_ingest_client,
 )
 from rootsign.sdk.jsonl_client import JsonlIngestClient
 from rootsign.sdk.context import SessionContext
 from rootsign.sdk.decorator import trace
+from rootsign.sdk.facade import init
 from rootsign.sdk.frameworks.crewai import CrewAITracer
 from rootsign.sdk.frameworks.langgraph import LangGraphTracer
 from rootsign.sdk.redaction import (
@@ -48,14 +51,17 @@ from rootsign._version import __version__  # noqa: E402, F401  (re-export)
 def wrap_tools(
     tools: list,
     *,
-    ctx: SessionContext,
-    client: IngestClient,
+    ctx: SessionContext | None = None,
+    client: IngestClient | None = None,
     redaction_config: RedactionConfig | None = None,
 ) -> list:
     """Convenience wrapper — instrument a list of LangGraph tools.
 
     Drop-in replacement for the input list of `ToolNode([...])`. See
     ADR-004 for the wrapping strategy.
+
+    Inside `async with rootsign.session(...)`, `ctx`/`client` can be omitted —
+    each invocation resolves the ambient session (ADR-012). Explicit wins.
     """
     return LangGraphTracer.wrap_tools(
         tools, ctx=ctx, client=client, redaction_config=redaction_config
@@ -65,13 +71,14 @@ def wrap_tools(
 def wrap_crewai_tools(
     tools: list,
     *,
-    ctx: SessionContext,
-    client: IngestClient,
+    ctx: SessionContext | None = None,
+    client: IngestClient | None = None,
     redaction_config: RedactionConfig | None = None,
 ) -> list:
     """Convenience wrapper — instrument a list of CrewAI tools.
 
-    Drop-in for `Agent(tools=[...])`. See ADR-005.
+    Drop-in for `Agent(tools=[...])`. See ADR-005. `ctx`/`client` are
+    optional inside a `rootsign.session()` — see `wrap_tools`.
     """
     return CrewAITracer.wrap_tools(
         tools, ctx=ctx, client=client, redaction_config=redaction_config
@@ -94,12 +101,15 @@ __all__ = [
     "JsonlIngestClient",
     "LangGraphTracer",
     "LocalIngestClient",
+    "ManagedLocalIngestClient",
     "RedactionConfig",
     "RootSignError",
+    "RootSignNotInitializedError",
     "SessionContext",
     "StandardPIIConfig",
     "VerifyResult",
     "get_ingest_client",
+    "init",
     "register_agent",
     "session",
     "trace",

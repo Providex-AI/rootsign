@@ -47,7 +47,12 @@ class Agent(Base):
     )
 
     __table_args__ = (
-        UniqueConstraint("name", name="uq_agents_name"),
+        # Identity is (name, environment) since ADR-012 — the same name may
+        # exist independently per environment. Migration
+        # 0005_agents_name_env_unique replaced the original
+        # UNIQUE(name); the composite is also the ON CONFLICT target for
+        # `get_or_register_agent`.
+        UniqueConstraint("name", "environment", name="uq_agents_name_environment"),
         Index("ix_agents_environment_is_active", "environment", "is_active"),
         Index("ix_agents_risk_tier", "risk_tier"),
         Index("ix_agents_is_active", "is_active"),

@@ -126,9 +126,16 @@ class TestCrewAITracerWrapTools:
         assert twice is once
         assert twice._run is run_after_first
 
-    def test_wrap_tools_rejects_missing_ctx(self, mock_client):
-        with pytest.raises(TypeError):
-            CrewAITracer.wrap_tools([_make_double_tool()], client=mock_client)
+    def test_wrap_tools_without_ctx_defers_to_invocation(self, mock_client):
+        """ADR-012: a missing ctx is resolved from the ambient session at call
+        time, not rejected at wrap time — wrapping usually happens at import."""
+        from rootsign.errors import RootSignNotInitializedError
+
+        wrapped = CrewAITracer.wrap_tools([_make_double_tool()], client=mock_client)[0]
+        assert wrapped._rootsign_instrumented is True
+        # No `rootsign.session()` is open, so invoking raises the loud error.
+        with pytest.raises(RootSignNotInitializedError):
+            wrapped._run(value=2)
 
 
 class TestCrewAITracerDecoratorRouting:

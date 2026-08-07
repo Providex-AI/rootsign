@@ -49,8 +49,8 @@ class MCPProxyTracer:
         *,
         request_body: "dict[str, Any]",
         upstream_url: str,
-        ctx: "SessionContext",
-        client: "IngestClient",
+        ctx: "SessionContext | None" = None,
+        client: "IngestClient | None" = None,
         redaction_config: "RedactionConfig | None" = None,
         require_approval: bool = False,
         approval_context_builder: "Any | None" = None,
@@ -65,6 +65,10 @@ class MCPProxyTracer:
         `input_redacted` matches the wire shape rather than a synthetic
         args/kwargs wrapper. `func` forwards to upstream, so its return value
         becomes the recorded output.
+
+        `ctx`/`client` may be omitted when the proxy runs inside an
+        `async with rootsign.session(...)` — they resolve from the ambient
+        session per ADR-012. Explicit arguments always win.
         """
         # httpx is an optional (mcp-extra) dep — import lazily.
         import httpx
@@ -74,6 +78,9 @@ class MCPProxyTracer:
             _emit_hitl_action,
             _to_json_safe,
         )
+        from rootsign.sdk.facade import _resolve_ctx_client
+
+        ctx, client = _resolve_ctx_client(ctx, client, surface="MCPProxyTracer")
 
         params = request_body.get("params", {}) or {}
         tool_name = params.get("name", "unknown_mcp_tool")
@@ -123,8 +130,8 @@ class MCPProxyTracer:
 
 def create_proxy_app(
     upstream_url: str,
-    client: "IngestClient",
-    ctx: "SessionContext",
+    client: "IngestClient | None" = None,
+    ctx: "SessionContext | None" = None,
     redaction_config: "RedactionConfig | None" = None,
     require_approval: bool = False,
 ) -> Any:
