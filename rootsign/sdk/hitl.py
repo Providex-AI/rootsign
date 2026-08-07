@@ -45,18 +45,18 @@ from enum import Enum
 from typing import TYPE_CHECKING, Callable
 from uuid import UUID
 
-from sqlalchemy import select
-
-from rootsign.crud.approval import approval as approval_crud
 from rootsign.errors import (
     ActionAlreadyResolvedError,
     HiTLRejectedError,
     HiTLTimeoutError,
 )
-from rootsign.models.approval import Approval
 
 if TYPE_CHECKING:
+    # DB stack is the optional `postgres` extra (ADR-011); the postgres HiTL
+    # poll loop imports these for real inside the methods that use them.
     from sqlalchemy.ext.asyncio import AsyncSession
+
+    from rootsign.models.approval import Approval
 
 logger = logging.getLogger("rootsign.sdk.hitl")
 
@@ -182,6 +182,10 @@ class HiTLCheckpoint:
         the current loop and the CLI's external commit is immediately
         visible (READ COMMITTED).
         """
+        from sqlalchemy import select
+
+        from rootsign.models.approval import Approval
+
         async with self.session_factory() as poll_db:
             result = await poll_db.execute(
                 select(Approval)
@@ -203,6 +207,8 @@ class HiTLCheckpoint:
         `wait_for_approval` surfaces the human decision rather than a
         spurious timeout.
         """
+        from rootsign.crud.approval import approval as approval_crud
+
         try:
             async with self.session_factory() as db:
                 await approval_crud.create_with_chain_link(
