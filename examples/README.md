@@ -4,11 +4,14 @@ Self-contained, runnable apps demonstrating `@rootsign.trace` end-to-end.
 
 | Example | Framework | What it does |
 |---|---|---|
+| [`quickstart-jsonl`](quickstart-jsonl/) | none (plain `@rootsign.trace`) | **Start here.** Two traced tool calls, zero config — no Docker, no database, no API key. Ends in `rootsign verify --local` → `VALID ✓`. |
 | [`langgraph-invoice-agent`](langgraph-invoice-agent/) | LangGraph + OpenAI | A ReAct agent with three tools (`send_invoice`, `log_payment`, `notify_customer`). Every tool call lands on the hash chain. Verify with `rootsign verify <session-id>`. |
 
-More examples (CrewAI, AutoGen, raw `@rootsign.trace`) coming as the SDK lands those integrations. PRs welcome.
+More examples (CrewAI, AutoGen) coming as the SDK lands those integrations. PRs welcome.
 
 ## Prerequisites for any example
+
+`quickstart-jsonl` needs none of these — `pip install rootsign` and go. For the rest:
 
 - **Docker** — for the shared TimescaleDB container.
 - **Python 3.11 or 3.12** — CrewAI lags on 3.13 / 3.14 wheels.

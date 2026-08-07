@@ -157,7 +157,9 @@ def create_proxy_app(
     from fastapi import FastAPI, Request
     from fastapi.responses import JSONResponse
 
-    app = FastAPI(title="RootSign MCP Proxy", version="0.1.5")
+    from rootsign._version import __version__
+
+    app = FastAPI(title="RootSign MCP Proxy", version=__version__)
 
     @app.post("/")
     @app.post("/mcp")

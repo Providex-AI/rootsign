@@ -12,7 +12,7 @@
 [![LinkedIn](https://img.shields.io/badge/LinkedIn-Providex-0A66C2?logo=linkedin)](https://www.linkedin.com/company/providex)
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Providex-AI/rootsign/main/docs/demo.gif" alt="RootSign demo — three instrumented tool calls land on the hash chain, rootsign verify confirms VALID" width="780" />
+  <img src="https://raw.githubusercontent.com/Providex-AI/rootsign/main/docs/demo.gif" alt="RootSign demo — pip install with no database, three instrumented tool calls land on the hash chain, rootsign verify --local confirms VALID" width="780" />
 </p>
 
 ## What is RootSign?
@@ -27,57 +27,79 @@ Compliance-grade audit trails. Zero changes to your agent code.
 
 ## Status
 
-**v0.1.5.** LangGraph + CrewAI integrations, a framework-agnostic MCP proxy, `rootsign verify` CLI, PII redaction, human-in-the-loop checkpoints, opt-in decision capture (PRD-19 / ADR-008), and opt-in SDK micro-batching are all shipping.
+**v0.2.0.** `pip install rootsign` → a verified hash chain in under a minute: no Docker, no database, no plumbing. LangGraph + CrewAI integrations, a framework-agnostic MCP proxy, `rootsign verify` CLI, PII redaction, human-in-the-loop checkpoints, opt-in decision capture (PRD-19 / ADR-008), and opt-in SDK micro-batching are all shipping.
 
 | Phase | Scope | Status |
 |---|---|---|
 | 0 | Data model + storage + ingest handler | ✅ Complete |
 | 1 | Python SDK — `@rootsign.trace`, LangGraph + CrewAI + MCP proxy, `rootsign verify` CLI, redaction, HiTL checkpoint, decision capture, micro-batching | ✅ v0.1.5 |
+| 1.5 | Zero-dependency onboarding — JSONL default backend, `rootsign.init()` facade | ✅ v0.2.0 |
 | 2 | Hosted ingest backend + compliance dashboard | Planned |
 | 3 | Policy enforcement + incident workflow | Planned |
 | 4 | Cross-platform governance | Planned |
 
-## Quickstart — LangGraph
-
-### 1. Install
-
-> **Python 3.11 or 3.12 recommended.** RootSign itself supports 3.11+, but the `[crewai]` extra currently lags on 3.13/3.14 wheels. If you hit `No matching distribution found for crewai`, switch to Python 3.12 and reinstall.
+## Quickstart
 
 ```bash
-pip install rootsign[langgraph]
+pip install rootsign
 ```
 
-Start PostgreSQL + TimescaleDB locally and apply the schema:
-
-```bash
-rootsign-admin start-db   # docker run timescale/timescaledb:latest-pg16
-rootsign-admin init       # alembic upgrade head
-```
-
-`start-db` wraps a single `docker run` so you don't need to clone the repo. If you *have* cloned it, `docker-compose up -d db` is the equivalent developer path. Both reuse the same `rootsign-timescaledb` container name and `rootsign_pgdata` volume — pick either, not both.
-
-### 2. Register your agent (one-time setup)
+No extras, no database, no Docker. Three RootSign calls around your ordinary agent code:
 
 ```python
-import asyncio
-from rootsign import register_agent, AgentEnvironment, AgentRiskTier, AgentFramework
+import asyncio, rootsign
 
-agent = asyncio.run(register_agent(
-    name="my-invoice-agent",
-    owner="platform-team",
-    environment=AgentEnvironment.PRODUCTION,
-    risk_tier=AgentRiskTier.HIGH,
-    framework=AgentFramework.LANGGRAPH,
-))
-print(agent.agent_id)
+rootsign.init(agent="invoice-agent", risk_tier="high")        # 1. once, at startup
+
+@rootsign.trace()                                            # 2. per tool
+async def send_invoice(customer_id: str, amount: float) -> str:
+    return "sent"
+
+@rootsign.trace()
+async def log_payment(customer_id: str, amount: float) -> str:
+    return "logged"
+
+async def main():
+    async with rootsign.session(objective="invoice ACME") as ctx:   # 3. per run
+        await send_invoice("acme-corp", 1500.00)
+        await log_payment("acme-corp", 1500.00)
+    print(ctx.session_id)
+
+asyncio.run(main())
 ```
 
-### 3. Instrument your tools
+Then verify the chain — the session lives in `~/.rootsign/sessions/<session_id>.jsonl`:
+
+```bash
+$ rootsign verify --local ~/.rootsign/sessions/f758a636-7bcd-4f96-8940-eff7d80e760a.jsonl
+VALID ✓  —  2 records, chain intact
+  Session:  f758a636-7bcd-4f96-8940-eff7d80e760a
+```
+
+Exit code is `0` for VALID and `1` for TAMPERED, so this drops into CI or a cron audit. Change any character in any record and the verifier names the broken link:
+
+```bash
+$ rootsign verify --local ~/.rootsign/sessions/f758a636-7bcd-4f96-8940-eff7d80e760a.jsonl
+TAMPERED ✗  —  chain broken at record #1
+  Detail:   self_hash mismatch
+  Session:  f758a636-7bcd-4f96-8940-eff7d80e760a
+WARNING: This session log may have been tampered with.
+```
+
+That's the whole surface: **`init()` → `session()` → `@trace` / `wrap_tools()` → `verify`.** `init()` is synchronous and does no I/O, so it's safe at module scope and inside a running event loop (notebooks, FastAPI startup); the agent record is get-or-created on the first `session()` entry, keyed on `(name, environment)`. Re-running your script never re-registers.
+
+A runnable version of the above is [`examples/quickstart-jsonl`](examples/quickstart-jsonl/).
+
+### Framework integrations
+
+The three RootSign calls don't change — you only swap in the wrapper for your framework's tool list.
+
+```bash
+pip install rootsign[langgraph]     # or [crewai], or [mcp]
+```
 
 ```python
 import rootsign
-from rootsign import LocalIngestClient
-from rootsign.database import AsyncSessionLocal
 from langchain_core.tools import tool
 from langgraph.prebuilt import ToolNode
 
@@ -86,19 +108,39 @@ def send_invoice(customer_id: str, amount: float) -> str:
     """Send an invoice to a customer."""
     return "sent"
 
-async def run_graph(agent_id):
-    async with AsyncSessionLocal() as db:
-        client = LocalIngestClient(db=db)
-        async with rootsign.session(agent_id=agent_id, client=client) as ctx:
-            tools = rootsign.wrap_tools([send_invoice], ctx=ctx, client=client)
-            tool_node = ToolNode(tools)
-            # ...build and run your graph as normal
-        await db.commit()
+rootsign.init(agent="invoice-agent", risk_tier="high", framework="langgraph")
+
+async def run_graph():
+    async with rootsign.session(objective="invoice ACME") as ctx:
+        tool_node = ToolNode(rootsign.wrap_tools([send_invoice]))
+        # ...build and run your graph as normal
 ```
 
-Every tool call now produces a tamper-evident `Action` record on the hash chain.
+> **Python 3.11 or 3.12 recommended.** RootSign itself supports 3.11+, but the `[crewai]` extra currently lags on 3.13/3.14 wheels. If you hit `No matching distribution found for crewai`, switch to Python 3.12 and reinstall.
 
-### 4. Verify the chain
+See [docs/framework-support.md](docs/framework-support.md) for the version matrix and integration notes. A full runnable LangGraph example (ReAct agent, three instrumented tools, OpenAI-backed) lives in [`examples/langgraph-invoice-agent`](examples/langgraph-invoice-agent/).
+
+## Production backend (PostgreSQL / TimescaleDB)
+
+The default JSONL backend is a single-process, append-only writer — right for local development, evaluation, and single-process jobs. Switch to Postgres when you outgrow it:
+
+| Switch to `postgres` when you need | Why JSONL can't |
+|---|---|
+| **Multiple writer processes** on one audit trail | No cross-process file locking (ADR-011) — concurrent writers are out of contract |
+| **Cross-process human-in-the-loop** — `rootsign approve` from another terminal, or a web UI | Needs a shared store the poll loop can read; JSONL HiTL is an inline TTY prompt only |
+| **Queries across sessions** — "every action this agent took last week" | JSONL is one file per session, no index |
+| The **Phase 2 hosted dashboard** | Reads from the store, not from laptops |
+
+```bash
+pip install 'rootsign[postgres]'
+rootsign-admin start-db   # docker run timescale/timescaledb:latest-pg16
+rootsign-admin init       # alembic upgrade head
+export ROOTSIGN_BACKEND=postgres
+```
+
+`start-db` wraps a single `docker run` so you don't need to clone the repo. If you *have* cloned it, `docker-compose up -d db` is the equivalent developer path. Both reuse the same `rootsign-timescaledb` container name and `rootsign_pgdata` volume — pick either, not both.
+
+**Your application code does not change.** The same `init()` / `session()` / `wrap_tools()` above now writes to Postgres, and sessions are verified by id instead of by path:
 
 ```bash
 $ rootsign verify 660e8400-e29b-41d4-a716-446655440001
@@ -106,19 +148,29 @@ VALID ✓  —  3 records, chain intact
   Session:  660e8400-e29b-41d4-a716-446655440001
 ```
 
-Exit code is `0` for VALID, `1` for TAMPERED. Use `--local <path.jsonl>` for offline JSONL session files (no DB required).
+### Advanced: the explicit API
 
-If a record was modified, the verifier names the broken link:
+`init()` is a convenience over the real seams, which stay public, tested, and documented. Use them when one process drives several agents, or when you want to own the DB session and its transaction:
 
-```bash
-$ rootsign verify 660e8400-e29b-41d4-a716-446655440001
-TAMPERED ✗  —  chain broken at record #2
-  Detail:   self_hash mismatch on action <action_id>
-  Session:  660e8400-e29b-41d4-a716-446655440001
-WARNING: This session log may have been tampered with.
+```python
+import rootsign
+from rootsign import LocalIngestClient, register_agent
+from rootsign.database import AsyncSessionLocal
+
+agent = await register_agent(
+    name="my-invoice-agent", owner="platform-team",
+    environment="production", risk_tier="high", framework="langgraph",
+)
+
+async with AsyncSessionLocal() as db:
+    client = LocalIngestClient(db=db)
+    async with rootsign.session(agent_id=agent.agent_id, client=client) as ctx:
+        tools = rootsign.wrap_tools([send_invoice], ctx=ctx, client=client)
+        # ...run your graph
+    await db.commit()          # the caller owns the commit on this path
 ```
 
-See [docs/framework-support.md](docs/framework-support.md) for the version matrix and integration notes. A full runnable LangGraph example (ReAct agent, three instrumented tools, OpenAI-backed) lives in [`examples/langgraph-invoice-agent`](examples/langgraph-invoice-agent/).
+**Explicit arguments always win over the ambient session** — mixing the two is safe, and passing `ctx=`/`client=` never consults the implicit context. See [ADR-012](docs/adr/ADR-012-init-facade-contextvar-session.md).
 
 ## Decision capture (opt-in)
 
@@ -128,15 +180,14 @@ Record the *why* before each tool call — foundational for Phase 2 session repl
 import os
 os.environ["ROOTSIGN_CAPTURE_DECISIONS"] = "true"
 
-async with rootsign.session(agent_id=agent.agent_id, client=client) as ctx:
+async with rootsign.session(objective="invoice ACME") as ctx:
     # Record what the agent decided before calling the tool.
     await ctx.record_decision(
         selected_action="send_invoice",
         reasoning_summary="Amount within policy; recipient verified.",
         confidence=0.97,
-        ingest_client=client,
     )
-    tools = rootsign.wrap_tools([send_invoice], ctx=ctx, client=client)
+    tools = rootsign.wrap_tools([send_invoice])
     await tools[0].ainvoke({"customer_id": "acme", "amount": 1500.0})
     # The Action record now carries decision_id linking it to the reasoning above.
 ```
@@ -169,20 +220,16 @@ def send_invoice(customer_id: str, amount: float) -> str:
     """Send an invoice to a customer."""
     return "sent"
 
-async def run_crew(agent_id):
-    async with AsyncSessionLocal() as db:
-        client = LocalIngestClient(db=db)
-        async with rootsign.session(agent_id=agent_id, client=client) as ctx:
-            wrapped = rootsign.wrap_crewai_tools(
-                [send_invoice], ctx=ctx, client=client
-            )
-            agent = Agent(
-                role="Invoicing assistant",
-                goal="Send invoices",
-                tools=wrapped,
-            )
-            # ...run your crew as normal
-        await db.commit()
+rootsign.init(agent="invoice-crew", risk_tier="high", framework="crewai")
+
+async def run_crew():
+    async with rootsign.session(objective="send invoices") as ctx:
+        agent = Agent(
+            role="Invoicing assistant",
+            goal="Send invoices",
+            tools=rootsign.wrap_crewai_tools([send_invoice]),
+        )
+        # ...run your crew as normal
 ```
 
 Tested against CrewAI `0.28`, `0.40`, and `1.x` (see [CI matrix](https://github.com/Providex-AI/rootsign/actions/workflows/ci.yml)).
@@ -200,20 +247,18 @@ import rootsign
 import uvicorn
 from rootsign.mcp.proxy import create_proxy_app
 
-async def serve_proxy(agent_id):
-    async with AsyncSessionLocal() as db:
-        client = LocalIngestClient(db=db)
-        async with rootsign.session(agent_id=agent_id, client=client) as ctx:
-            app = create_proxy_app(
-                upstream_url="http://your-mcp-server:8001/mcp",
-                client=client,
-                ctx=ctx,
-                # require_approval=True  # gate every proxied call on human approval
-            )
-            # A uvicorn-compatible ASGI app. Point the agent's MCP_SERVER_URL
-            # here; tools/call is recorded and forwarded, other methods
-            # (initialize, tools/list, …) pass through unchanged.
-            await uvicorn.Server(uvicorn.Config(app, host="0.0.0.0", port=8000)).serve()
+rootsign.init(agent="mcp-proxied-agent", risk_tier="high")
+
+async def serve_proxy():
+    async with rootsign.session(objective="proxy MCP tool calls"):
+        app = create_proxy_app(
+            upstream_url="http://your-mcp-server:8001/mcp",
+            # require_approval=True  # gate every proxied call on human approval
+        )
+        # A uvicorn-compatible ASGI app. Point the agent's MCP_SERVER_URL
+        # here; tools/call is recorded and forwarded, other methods
+        # (initialize, tools/list, …) pass through unchanged.
+        await uvicorn.Server(uvicorn.Config(app, host="0.0.0.0", port=8000)).serve()
 ```
 
 `require_approval=True` gates every proxied tool call on a human decision — the same HiTL flow as `@rootsign.trace`, pausing before the call reaches the upstream server. See [ADR-010](docs/adr/ADR-010-mcp-interception-strategy.md).
@@ -237,8 +282,6 @@ High-risk actions can be gated on a human decision. Pass `require_approval=True`
 import rootsign
 
 @rootsign.trace(
-    ingest_client=client,
-    session_context=ctx,
     require_approval=True,
     timeout_seconds=300,   # 5 minutes
 )
@@ -260,6 +303,8 @@ $ rootsign approve <action-id> --reason "Verified with customer"
 
 The decorated function returns normally. Rejection (`--reject`) raises `HiTLRejectedError`; a 5-minute timeout raises `HiTLTimeoutError` and the action's authorization status becomes `'timed_out'` (a terminal forensic state distinct from `'human_rejected'`).
 
+The cross-process flow above needs the Postgres backend — `rootsign approve` runs in a different process than your agent. On the default JSONL backend, `require_approval=True` prompts inline on the terminal instead; a headless run raises `HiTLUnsupportedBackendError` on the tool's first call, before any work happens, naming the fix.
+
 See [ADR-007](docs/adr/ADR-007-hitl-checkpoint-design.md) for the design rationale (poll loop, timeout semantics, race tolerance).
 
 ## PII redaction
@@ -272,10 +317,7 @@ from rootsign import StandardPIIConfig, FinancialPIIConfig, HealthcarePIIConfig
 # Standard: email, phone, US SSN, credit card, UK NI number
 redaction = StandardPIIConfig()
 
-tools = rootsign.wrap_tools(
-    [send_invoice], ctx=ctx, client=client,
-    redaction_config=redaction,
-)
+tools = rootsign.wrap_tools([send_invoice], redaction_config=redaction)
 ```
 
 `FinancialPIIConfig` adds account / routing / IBAN patterns; `HealthcarePIIConfig` adds MRN / NPI / DOB. Each accepts `extra_rules={...}` for domain-specific patterns without subclassing. See [ADR-006](docs/adr/ADR-006-redaction-contract.md).
@@ -290,6 +332,10 @@ from rootsign import BufferedIngestClient, LocalIngestClient
 async with BufferedIngestClient(LocalIngestClient(db=db)) as client:
     async with rootsign.session(agent_id=agent_id, client=client) as ctx:
         ...  # session() flushes the buffer before SESSION_CLOSE
+
+# ROOTSIGN_BUFFERED=true also applies to the facade path — `init()` never
+# wraps the transport implicitly (ADR-012), so buffering stays a deliberate
+# opt-in.
 ```
 
 Only auto-authorized actions are buffered; HiTL, decision, and session records pass through synchronously, so approvals and hash-chain ordering are never deferred. See [ADR-009](docs/adr/ADR-009-buffered-ingest-client.md).
@@ -317,10 +363,11 @@ The `-m benchmark` marker keeps the performance suite opt-in. Run it **without**
 
 * **`@rootsign.trace`** wraps a tool callable and emits an `ACTION_RECORD` envelope per call. LangGraph `BaseTool` and CrewAI tools are detected automatically.
 * **MCP proxy** — `create_proxy_app` intercepts MCP `tools/call` at the protocol layer, so any MCP-compatible agent is instrumented without a framework adapter (ADR-010).
-* **`LocalIngestClient`** is the in-process ingest path for v0.1.x. A `HttpIngestClient` for the hosted backend lands in Phase 2. **`BufferedIngestClient`** optionally wraps either for async micro-batching (ADR-009).
+* **`rootsign.init()`** stores config with no I/O; `rootsign.session()` resolves the backend lazily on first entry and publishes `(ctx, client)` in a `ContextVar`, which is how `wrap_tools` / `@trace` / the MCP proxy find them without arguments (ADR-012).
+* **`JsonlIngestClient`** is the default transport: append-only JSONL under `~/.rootsign`, no dependencies (ADR-011). **`LocalIngestClient`** is the Postgres in-process path; a `HttpIngestClient` for the hosted backend lands in Phase 2. **`BufferedIngestClient`** optionally wraps any of them for async micro-batching (ADR-009).
 * **Hash chain** is per-session: each `Action` carries `prev_action_hash` so reconstructing the chain detects any after-the-fact modification.
 * **`HiTLCheckpoint`** is an async poll loop that opens its own DB session per cycle — see ADR-007 for the loop-binding rationale.
-* **Storage** is PostgreSQL 16 + TimescaleDB 2.14. The `actions` table is a hypertable; the chain stays intact across chunks.
+* **Storage** is either the JSONL writer (default, zero-dependency) or PostgreSQL 16 + TimescaleDB 2.14, where the `actions` table is a hypertable and the chain stays intact across chunks. Both use the same frozen canonical hash formula (ADR-001) — `rootsign verify` gives the same verdict either way.
 
 ## What's next
 
