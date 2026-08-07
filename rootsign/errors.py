@@ -192,3 +192,25 @@ class RootSignPostgresExtraRequired(RootSignError):
     def __init__(self, detail: str | None = None):
         message = self.INSTALL_HINT if detail is None else f"{self.INSTALL_HINT}  ({detail})"
         super().__init__(message)
+
+
+class HiTLUnsupportedBackendError(RootSignError):
+    """`require_approval=True` used with a backend that can't support it here.
+
+    The JSONL backend (ADR-011) offers *synchronous* HiTL only — an inline TTY
+    prompt (PRD 1.4). It has no shared store for the async poll loop / the
+    cross-process `rootsign approve` CLI. So a headless run (no TTY) with
+    `require_approval=True` on the JSONL backend raises this on the tool's first
+    invocation, before any work runs — with the fix in the message.
+    """
+
+    FIX_HINT = (
+        "Human-in-the-loop with require_approval=True needs either an interactive "
+        "terminal (JSONL backend prompts inline) or the shared store: set "
+        "ROOTSIGN_BACKEND=postgres for the async poll-loop / `rootsign approve` flow."
+    )
+
+    def __init__(self, tool_name: str | None = None):
+        prefix = f"HiTL not available for tool {tool_name!r} on this backend. " if tool_name else ""
+        super().__init__(prefix + self.FIX_HINT)
+        self.tool_name = tool_name

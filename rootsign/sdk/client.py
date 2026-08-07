@@ -125,11 +125,17 @@ def get_ingest_client(db: AsyncSession | None = None) -> IngestClient:
     from rootsign.sdk.config import SDKSettings
 
     s = SDKSettings()
-    if s.BACKEND == "cloud":
-        client: IngestClient = HttpIngestClient(base_url=s.CLOUD_URL, api_key=s.API_KEY)
+    if s.BACKEND == "jsonl":
+        # ADR-011 default: zero-dependency append-only local backend. Needs no db.
+        from rootsign.sdk.jsonl_client import JsonlIngestClient
+
+        client: IngestClient = JsonlIngestClient(data_dir=s.DATA_DIR, fsync=s.JSONL_FSYNC)
+    elif s.BACKEND == "cloud":
+        client = HttpIngestClient(base_url=s.CLOUD_URL, api_key=s.API_KEY)
     elif db is None:
         raise ValueError(
-            "LocalIngestClient requires a db session. Pass db= or set "
+            "The postgres backend requires a db session. Pass db=, set "
+            "ROOTSIGN_BACKEND=jsonl (default, no db needed), or "
             "ROOTSIGN_BACKEND=cloud (Phase 2 only)."
         )
     else:

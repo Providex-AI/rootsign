@@ -13,9 +13,11 @@ bundled docker-compose db using the local transport.
 
 from __future__ import annotations
 
+import warnings
 from enum import Enum
 from typing import Literal
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -44,15 +46,38 @@ class SDKSettings(BaseSettings):
         extra="ignore",
     )
 
-    # Transport selector. 'local' uses LocalIngestClient (Phase 1 default);
-    # 'cloud' would route through HttpIngestClient, which is stubbed until
-    # Phase 2 (calling .handle() raises NotImplementedError). See ADR-002.
-    BACKEND: Literal["local", "cloud"] = "local"
+    # Transport selector (ADR-011). Default is now 'jsonl' — the zero-dependency
+    # append-only local backend (no Docker, no Postgres). 'postgres' uses
+    # LocalIngestClient against PostgreSQL/TimescaleDB (requires the `postgres`
+    # extra). 'cloud' routes through HttpIngestClient (Phase 2 stub). 'local' is
+    # the pre-0.2.0 alias for 'postgres', accepted with a DeprecationWarning.
+    BACKEND: Literal["jsonl", "postgres", "cloud", "local"] = "jsonl"
+
+    # JSONL backend (ADR-011). Root directory for session files
+    # ($DATA_DIR/sessions/<session_id>.jsonl and $DATA_DIR/agents.jsonl).
+    DATA_DIR: str = "~/.rootsign"
+    # fsync policy: 'chain' (after ACTION/APPROVAL records — the default),
+    # 'always' (every record), 'never' (rely on the page cache).
+    JSONL_FSYNC: Literal["chain", "always", "never"] = "chain"
 
     # Hosted ingest endpoint (Phase 2). Default points at the Providex AI
     # cloud — RootSign products are hosted under getprovidex.com.
     CLOUD_URL: str = "https://ingest.getprovidex.com/v1"
     API_KEY: str = ""
+
+    @field_validator("BACKEND")
+    @classmethod
+    def _normalize_backend(cls, v: str) -> str:
+        # 'local' → 'postgres' (deprecated alias, ADR-011 Decision 1).
+        if v == "local":
+            warnings.warn(
+                "ROOTSIGN_BACKEND=local is deprecated; use 'postgres'. "
+                "'local' will be removed in a future release.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            return "postgres"
+        return v
 
     # When True, the decorator also emits DECISION_RECORD envelopes before
     # each ACTION_RECORD. Off by default because Decision payloads tend to

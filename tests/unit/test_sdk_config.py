@@ -8,9 +8,26 @@ from rootsign.sdk.config import SDKSettings
 
 
 class TestSDKSettingsDefaults:
-    def test_backend_defaults_to_local(self):
-        s = SDKSettings()
-        assert s.BACKEND == "local"
+    def test_backend_defaults_to_jsonl(self, monkeypatch):
+        # ADR-011: default flipped to jsonl in v0.2.0. delenv the conftest pin
+        # AND bypass any developer-local .env (_env_file=None) to observe the
+        # true default.
+        monkeypatch.delenv("ROOTSIGN_BACKEND", raising=False)
+        s = SDKSettings(_env_file=None)
+        assert s.BACKEND == "jsonl"
+
+    def test_jsonl_settings_defaults(self, monkeypatch):
+        monkeypatch.delenv("ROOTSIGN_BACKEND", raising=False)
+        s = SDKSettings(_env_file=None)
+        assert s.DATA_DIR == "~/.rootsign"
+        assert s.JSONL_FSYNC == "chain"
+
+    def test_local_backend_alias_deprecated_maps_to_postgres(self, monkeypatch):
+        # ADR-011: 'local' is the deprecated alias for 'postgres'.
+        monkeypatch.setenv("ROOTSIGN_BACKEND", "local")
+        with pytest.warns(DeprecationWarning, match="deprecated"):
+            s = SDKSettings()
+        assert s.BACKEND == "postgres"
 
     def test_cloud_url_default(self):
         s = SDKSettings()
@@ -42,8 +59,8 @@ class TestSDKSettingsEnvOverride:
         """A bare BACKEND env var (no ROOTSIGN_ prefix) must not leak in."""
         monkeypatch.delenv("ROOTSIGN_BACKEND", raising=False)
         monkeypatch.setenv("BACKEND", "cloud")  # should be ignored
-        s = SDKSettings()
-        assert s.BACKEND == "local"
+        s = SDKSettings(_env_file=None)
+        assert s.BACKEND == "jsonl"
 
     def test_invalid_backend_rejected(self, monkeypatch):
         monkeypatch.setenv("ROOTSIGN_BACKEND", "satellite")

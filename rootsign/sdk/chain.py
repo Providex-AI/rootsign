@@ -99,14 +99,8 @@ def verify_session_local(jsonl_path: str) -> VerifyResult:
     if not path.exists():
         raise FileNotFoundError(f"Session file not found: {path}")
 
-    records: list[dict[str, Any]] = []
-    with open(path) as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                records.append(json.loads(line))
-
-    if not records:
+    raw_lines = [ln.strip() for ln in path.read_text().splitlines() if ln.strip()]
+    if not raw_lines:
         return VerifyResult(
             valid=False,
             record_count=0,
@@ -114,8 +108,53 @@ def verify_session_local(jsonl_path: str) -> VerifyResult:
             error="No records found in file",
         )
 
+    # Parse each line. A malformed JSON line is corruption; a malformed *final*
+    # line is the tell-tale of a crash mid-write (partial append) — report it
+    # distinctly (ADR-011 Decision 4) rather than raising.
+    all_records: list[dict[str, Any]] = []
+    for idx, ln in enumerate(raw_lines):
+        try:
+            all_records.append(json.loads(ln))
+        except json.JSONDecodeError:
+            is_final = idx == len(raw_lines) - 1
+            return VerifyResult(
+                valid=False,
+                record_count=len(all_records),
+                session_id=all_records[0].get("session_id") if all_records else None,
+                error=(
+                    "truncated final line — incomplete write (crash mid-append?)"
+                    if is_final
+                    else f"malformed JSON at line {idx + 1}"
+                ),
+            )
+
+    session_id = all_records[0].get("session_id")
+
+    # ADR-011 Decision 2 / T2.7: a session file now holds all five event types.
+    # Rebuild the chain from ACTION_RECORD lines only. Legacy store-exports carry
+    # no `event_type` field and are all Actions — a missing `event_type` is
+    # therefore treated as an Action (backward compatible).
+    records = [r for r in all_records if r.get("event_type", "ACTION_RECORD") == "ACTION_RECORD"]
+
+    if not records:
+        # A session with no actions (only SESSION_OPEN/CLOSE, decisions,
+        # approvals) is a valid, empty chain — same verdict as the DB path.
+        return VerifyResult(valid=True, record_count=0, session_id=session_id)
+
     records.sort(key=lambda r: r["sequence_number"])
-    session_id = records[0].get("session_id")
+
+    # Duplicate sequence_number ⇒ TAMPERED (Decision 5): a re-appended chain
+    # (e.g. a restart re-using the same session file) collides on the sequence
+    # counter. Distinct error string so the cause is diagnosable.
+    for a, b in zip(records, records[1:]):
+        if a["sequence_number"] == b["sequence_number"]:
+            return VerifyResult(
+                valid=False,
+                record_count=len(records),
+                session_id=session_id,
+                first_invalid_sequence=b["sequence_number"],
+                error=f"duplicate sequence_number {b['sequence_number']} (chain replay/corruption)",
+            )
 
     expected_prev: str | None = None
     for record in records:

@@ -41,12 +41,16 @@ sys.meta_path.insert(0, _Blocker())
 """
 
 
-def _run(script: str) -> subprocess.CompletedProcess:
+def _run(script: str, extra_env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+    import os
+
+    env = {**os.environ, **(extra_env or {})}
     return subprocess.run(
         [sys.executable, "-c", _BLOCKER + script],
         capture_output=True,
         text=True,
         cwd=str(REPO_ROOT),
+        env=env,
     )
 
 
@@ -90,7 +94,9 @@ def test_import_mcp_server_without_db_stack():
 
 def test_postgres_backend_without_extra_raises_actionable_error():
     """Selecting postgres without the extra → RootSignPostgresExtraRequired
-    naming the install command, not a bare ModuleNotFoundError."""
+    naming the install command, not a bare ModuleNotFoundError. Explicitly
+    pin postgres — the default backend is now jsonl (ADR-011), which needs no
+    DB and would return a JsonlIngestClient instead."""
     result = _run(
         "from rootsign.errors import RootSignPostgresExtraRequired\n"
         "from rootsign.sdk.client import get_ingest_client\n"
@@ -100,7 +106,8 @@ def test_postgres_backend_without_extra_raises_actionable_error():
         "    print('NO_ERROR')\n"
         "except RootSignPostgresExtraRequired as e:\n"
         "    assert 'rootsign[postgres]' in str(e), str(e)\n"
-        "    print('RAISED_OK')\n"
+        "    print('RAISED_OK')\n",
+        extra_env={"ROOTSIGN_BACKEND": "postgres"},
     )
     assert result.returncode == 0, result.stderr
     assert "RAISED_OK" in result.stdout, result.stdout + result.stderr
