@@ -3,8 +3,16 @@
 A ReAct loop with three instrumented tools. Every tool call lands on the
 RootSign hash chain. Run, then `./verify.sh` to confirm the chain.
 
-Reads OPENAI_API_KEY and ROOTSIGN_DATABASE_URL[_SYNC] from .env. See
-.env.example for the expected shape.
+Reads OPENAI_API_KEY and DATABASE_URL[_SYNC] from .env. See .env.example for
+the expected shape. This example runs against Postgres/TimescaleDB
+(`ROOTSIGN_BACKEND=postgres`) because that's the production shape; the same
+code runs on the default JSONL backend with no other change — see
+`examples/quickstart-jsonl/`.
+
+The RootSign surface here is three calls: `init()`, `session()`, and
+`wrap_tools()`. The explicit form — building a `SessionContext` and an ingest
+client yourself — is still public and is what tests and multi-agent processes
+use; see the comment block at the bottom of this file.
 """
 
 from __future__ import annotations
@@ -12,31 +20,29 @@ from __future__ import annotations
 import asyncio
 import os
 from pathlib import Path
-from uuid import UUID
 
 from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
-from sqlalchemy import select
 
 import rootsign
-from rootsign import (
-    AgentEnvironment,
-    AgentFramework,
-    AgentRiskTier,
-    LocalIngestClient,
-    register_agent,
-)
-from rootsign.database import AsyncSessionLocal
-from rootsign.models.agent import Agent
 
 load_dotenv()
 
-AGENT_NAME = "langgraph-invoice-agent-example"
-AGENT_ID_CACHE = Path(".agent_id")
 LAST_SESSION_FILE = Path(".last_session")
+
+# One call, once, at startup. No I/O happens here — the agent record is
+# get-or-created on the first `rootsign.session()` entry, keyed on
+# (name, environment), so re-running this script never re-registers.
+rootsign.init(
+    agent="langgraph-invoice-agent-example",
+    owner="examples",
+    environment="production",
+    risk_tier="medium",
+    framework="langgraph",
+)
 
 
 @tool
@@ -57,84 +63,58 @@ async def notify_customer(customer_id: str, message: str) -> str:
     return f"notified {customer_id}: {message!r}"
 
 
-async def _ensure_agent() -> UUID:
-    """Get an agent_id for this example, idempotently.
-
-    Order of resolution:
-      1. The cached `.agent_id` file (fastest path on re-runs).
-      2. A row in the DB with `name == AGENT_NAME` (handles the case where
-         `.agent_id` was deleted but the row from a prior run is still
-         around — `agents.name` has a UNIQUE constraint, so a blind
-         re-register would crash).
-      3. Otherwise register fresh.
-    """
-    if AGENT_ID_CACHE.exists():
-        return UUID(AGENT_ID_CACHE.read_text().strip())
-
-    async with AsyncSessionLocal() as db:
-        existing = (
-            await db.execute(select(Agent).where(Agent.name == AGENT_NAME))
-        ).scalar_one_or_none()
-        if existing is not None:
-            AGENT_ID_CACHE.write_text(str(existing.agent_id))
-            return existing.agent_id
-
-    agent = await register_agent(
-        name=AGENT_NAME,
-        owner="examples",
-        environment=AgentEnvironment.PRODUCTION,
-        risk_tier=AgentRiskTier.MEDIUM,
-        framework=AgentFramework.LANGGRAPH,
-    )
-    AGENT_ID_CACHE.write_text(str(agent.agent_id))
-    print(f"registered agent: {agent.agent_id}")
-    return agent.agent_id
-
-
 async def main() -> None:
     if not os.environ.get("OPENAI_API_KEY"):
         raise SystemExit("OPENAI_API_KEY not set — copy .env.example to .env and fill it in")
 
-    agent_id = await _ensure_agent()
+    async with rootsign.session(objective="invoice acme and confirm payment") as ctx:
+        # No ctx= / client= — the tools resolve the ambient session per call.
+        tools = rootsign.wrap_tools([send_invoice, log_payment, notify_customer])
 
-    async with AsyncSessionLocal() as db:
-        client = LocalIngestClient(db=db)
+        graph = create_react_agent(
+            ChatOpenAI(model="gpt-4o-mini", temperature=0),
+            tools=tools,
+        )
 
-        async with rootsign.session(agent_id=agent_id, client=client) as ctx:
-            tools = rootsign.wrap_tools(
-                [send_invoice, log_payment, notify_customer],
-                ctx=ctx,
-                client=client,
-            )
+        user_request = (
+            "Customer acme owes 1500.00. Send the invoice, log payment "
+            "tx_001 for 1500.00 once it lands, then notify acme that the "
+            "invoice was sent. Use the three tools in that order. Don't "
+            "ask follow-up questions."
+        )
 
-            graph = create_react_agent(
-                ChatOpenAI(model="gpt-4o-mini", temperature=0),
-                tools=tools,
-            )
+        print(f"\n--- agent run, session {ctx.session_id} ---\n")
+        print(f"user: {user_request}\n")
 
-            user_request = (
-                "Customer acme owes 1500.00. Send the invoice, log payment "
-                "tx_001 for 1500.00 once it lands, then notify acme that the "
-                "invoice was sent. Use the three tools in that order. Don't "
-                "ask follow-up questions."
-            )
+        result = await graph.ainvoke({"messages": [HumanMessage(content=user_request)]})
 
-            print(f"\n--- agent run, session {ctx.session_id} ---\n")
-            print(f"user: {user_request}\n")
-
-            result = await graph.ainvoke(
-                {"messages": [HumanMessage(content=user_request)]}
-            )
-
-            final = result["messages"][-1].content
-            print(f"agent: {final}\n")
-
-        await db.commit()
+        final = result["messages"][-1].content
+        print(f"agent: {final}\n")
 
     LAST_SESSION_FILE.write_text(str(ctx.session_id))
     print(f"session: {ctx.session_id}")
     print(f"actions emitted: {ctx.current_sequence}")
     print("\nrun ./verify.sh to confirm the chain is intact.")
+
+
+# --------------------------------------------------------------------------
+# Advanced: the explicit API this example used before the facade landed.
+# Still public, still tested — use it when one process drives several agents,
+# or when you need to own the DB session / transaction yourself.
+#
+#     from rootsign import LocalIngestClient, register_agent
+#     from rootsign.database import AsyncSessionLocal
+#
+#     agent = await register_agent(name=..., owner=..., environment=...,
+#                                  risk_tier=..., framework=...)
+#
+#     async with AsyncSessionLocal() as db:
+#         client = LocalIngestClient(db=db)
+#         async with rootsign.session(agent_id=agent.agent_id, client=client) as ctx:
+#             tools = rootsign.wrap_tools([...], ctx=ctx, client=client)
+#             ...
+#         await db.commit()   # the caller owns the commit on this path
+# --------------------------------------------------------------------------
 
 
 if __name__ == "__main__":

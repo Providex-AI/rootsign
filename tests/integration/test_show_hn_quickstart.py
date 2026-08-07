@@ -1,16 +1,22 @@
 """CI-runnable Show HN reproducibility test (Sprint 4 §S4-TASK 9 / §5.2).
 
-Mirrors the README quickstart end-to-end:
+Mirrors both README quickstarts end-to-end.
 
-    pip install rootsign[langgraph]
-    tools = rootsign.wrap_tools([send_invoice, log_payment, notify_customer], ctx=ctx)
-    # ...run tools...
-    $ rootsign verify <session_id>
+`TestZeroConfigQuickstart` — the v0.2.0 headline path (ADR-011 + ADR-012).
+No Docker, no database, no extras:
+
+    pip install rootsign
+    rootsign.init(agent="invoice-agent")
+    async with rootsign.session(...): rootsign.wrap_tools([...])
+    $ rootsign verify --local ~/.rootsign/sessions/<id>.jsonl
     VALID ✓  —  3 records, chain intact
 
-If this test fails, the Show HN post is not publishable. The Sprint 4 DoD
-gate (Section 5.4 item 11) calls it out as the hard gate before the post
-goes live.
+`TestShowHNQuickstart` — the "Production backend" section, same code against
+PostgreSQL/TimescaleDB, verified by session id.
+
+If either fails, the README is not publishable. The Sprint 4 DoD gate
+(Section 5.4 item 11) calls it out as the hard gate before the post goes
+live.
 
 Sprint 4 flags applied here:
 * Flag 2 Rule A: every tool invocation goes through `await tool.ainvoke(...)`.
@@ -26,6 +32,7 @@ Sprint 4 flags applied here:
 from __future__ import annotations
 
 import asyncio
+import json
 from uuid import uuid4
 
 import pytest
@@ -33,7 +40,9 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 from typer.testing import CliRunner
 
+import rootsign
 from rootsign.config import settings
+from rootsign.sdk import facade
 from rootsign.crud.action import action as action_crud
 from rootsign.sdk.cli import app
 from rootsign.sdk.client import LocalIngestClient
@@ -95,6 +104,84 @@ def patched_cli_session(monkeypatch):
     factory = async_sessionmaker(bind=test_engine_local, expire_on_commit=False)
     monkeypatch.setattr("rootsign.sdk.cli.AsyncSessionLocal", factory)
     yield factory
+
+
+class TestZeroConfigQuickstart:
+    """The v0.2.0 README headline: `pip install rootsign` → `VALID ✓`.
+
+    Deliberately DB-free — if this needs a database to pass, the claim on the
+    front page of the README is false.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _jsonl_env(self, monkeypatch, tmp_path):
+        # The dev `.env` pins the postgres backend and conftest pins it in the
+        # environment for the rest of the suite; env vars beat `.env`.
+        monkeypatch.setenv("ROOTSIGN_BACKEND", "jsonl")
+        monkeypatch.setenv("ROOTSIGN_DATA_DIR", str(tmp_path))
+        facade._reset_init_config()
+        yield
+        facade._reset_init_config()
+
+    async def test_readme_zero_config_quickstart_end_to_end(self, tmp_path):
+        # Step 1-2: the three README calls. No agent registration, no client,
+        # no SessionContext, no ctx=/client= on wrap_tools.
+        rootsign.init(agent="invoice-agent", risk_tier="high", framework="langgraph")
+
+        async with rootsign.session(objective="Process invoice batch") as ctx:
+            tools = rootsign.wrap_tools(_make_quickstart_tools())
+
+            # Step 3: run the tools. `await tool.ainvoke(...)` — Flag 2 Rule A.
+            await tools[0].ainvoke({"customer_id": "acme", "amount": 1500.0})
+            await tools[1].ainvoke({"transaction_id": "tx_001", "amount": 1500.0})
+            await tools[2].ainvoke({"customer_id": "acme", "message": "Invoice sent"})
+
+        session_file = tmp_path / "sessions" / f"{ctx.session_id}.jsonl"
+        assert session_file.exists(), "the README's stated file layout changed"
+
+        # Step 4: verify via the CLI, exactly as the README prints it.
+        # Flag 2 Rule B: to_thread isolates the CLI's asyncio.run().
+        result = await asyncio.to_thread(
+            runner.invoke, app, ["verify", "--local", str(session_file)]
+        )
+        assert result.exit_code == 0, (
+            f"verify --local failed (exit={result.exit_code}):\n{result.output}"
+        )
+        assert "VALID" in result.output
+        assert "3" in result.output  # record count
+        assert "✓" in result.output
+
+        # Step 5: and mathematically, independent of the CLI's reporting.
+        chain_result = rootsign.verify_session_local(str(session_file))
+        assert chain_result.valid is True
+        assert chain_result.record_count == 3
+
+    async def test_tampering_a_record_flips_the_verdict(self, tmp_path):
+        """The other half of the README claim: tampering is *detected*."""
+        rootsign.init(agent="tamper-check")
+
+        async with rootsign.session(objective="Process invoice batch") as ctx:
+            tools = rootsign.wrap_tools(_make_quickstart_tools())
+            await tools[0].ainvoke({"customer_id": "acme", "amount": 1500.0})
+            await tools[1].ainvoke({"transaction_id": "tx_001", "amount": 1500.0})
+
+        session_file = tmp_path / "sessions" / f"{ctx.session_id}.jsonl"
+        lines = session_file.read_text().splitlines()
+        # Mutate the first ACTION_RECORD's output hash — the shape of
+        # after-the-fact log editing the hash chain exists to catch.
+        for i, line in enumerate(lines):
+            record = json.loads(line)
+            if record.get("event_type") == "ACTION_RECORD":
+                record["output_hash"] = "0" * 64
+                lines[i] = json.dumps(record)
+                break
+        session_file.write_text("\n".join(lines) + "\n")
+
+        result = await asyncio.to_thread(
+            runner.invoke, app, ["verify", "--local", str(session_file)]
+        )
+        assert result.exit_code == 1
+        assert "TAMPERED" in result.output
 
 
 class TestShowHNQuickstart:

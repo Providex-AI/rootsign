@@ -4,14 +4,16 @@
 # Prereqs:
 #   * vhs installed (brew install vhs)
 #   * the project venv at .venv/ with rootsign installed (uv sync)
-#   * TimescaleDB running on :5432 (rootsign-admin start-db)
+#
+# No database needed since v0.2.0 — the demo runs on the default JSONL
+# backend and writes to /tmp/rs_demo_data.
 
 Output docs/demo.gif
 
 Set FontFamily "Menlo"
 Set FontSize 16
 Set Width 1100
-Set Height 540
+Set Height 340
 Set Padding 24
 Set Theme "Catppuccin Mocha"
 Set TypingSpeed 60ms
@@ -27,17 +29,24 @@ Type "clear"
 Enter
 Show
 
-# Step 1: run the demo script
+# Step 1: the pitch. Shell comments, so nothing is actually installed here —
+# the venv already has rootsign (see Prereqs above).
 Type "# RootSign: tamper-evident provenance for AI agent tool calls"
 Sleep 500ms
 Enter
+Type "# pip install rootsign  —  no database, no Docker, no plumbing"
+Sleep 500ms
+Enter
+Sleep 800ms
+
+# Step 2: run an instrumented agent — init() + session() + @trace
 Type "python scripts/demo_for_gif.py"
 Sleep 300ms
 Enter
 Sleep 2500ms
 
-# Step 2: verify the chain
-Type "rootsign verify $(cat /tmp/rs_demo_session)"
+# Step 3: verify the chain offline
+Type "rootsign verify --local $(cat /tmp/rs_demo_session)"
 Sleep 300ms
 Enter
 Sleep 2500ms

@@ -8,6 +8,8 @@ A minimal but fully runnable LangGraph ReAct agent with three instrumented tools
 
 Every tool call lands on the RootSign hash chain. After the agent finishes, run `rootsign verify <session-id>` and you should see `VALID ✓ — 3 records, chain intact`.
 
+This example runs against **Postgres/TimescaleDB** because that's the production shape — hence the Docker step below. If you just want to see RootSign work, [`../quickstart-jsonl`](../quickstart-jsonl/) needs no database at all. The agent code is identical either way; only `ROOTSIGN_BACKEND` differs.
+
 ## Setup
 
 ```bash
@@ -56,6 +58,17 @@ VALID ✓  —  3 records, chain intact
 ```
 
 ## What's happening under the hood
+
+The RootSign surface in `agent.py` is three calls:
+
+```python
+rootsign.init(agent="langgraph-invoice-agent-example", ...)   # once, at import
+
+async with rootsign.session(objective="...") as ctx:
+    tools = rootsign.wrap_tools([send_invoice, log_payment, notify_customer])
+```
+
+`init()` does no I/O — the agent record is get-or-created on the first `session()` entry, keyed on `(name, environment)`, so re-running the script never re-registers (that's why there's no `.agent_id` cache file any more). `wrap_tools()` needs no `ctx=`/`client=`: the session publishes them and each tool call resolves them. The explicit form is still public — see the comment block at the bottom of `agent.py`.
 
 `rootsign.wrap_tools(...)` wraps each `BaseTool` so that every `tool.ainvoke(...)` call:
 
