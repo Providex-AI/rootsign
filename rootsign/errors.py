@@ -214,3 +214,26 @@ class HiTLUnsupportedBackendError(RootSignError):
         prefix = f"HiTL not available for tool {tool_name!r} on this backend. " if tool_name else ""
         super().__init__(prefix + self.FIX_HINT)
         self.tool_name = tool_name
+
+
+class RootSignNotInitializedError(RootSignError):
+    """A tracer needed a session context and found none (ADR-012).
+
+    Raised when `wrap_tools` / `@rootsign.trace` / the MCP proxy / decision
+    capture are used without explicit `ctx=`/`client=` *and* outside an
+    `async with rootsign.session(...)` block — i.e. the ContextVar is unset.
+    The message carries the two-line fix because this is, by construction, a
+    first-run error.
+    """
+
+    FIX_HINT = (
+        "No rootsign session is active. Either open one:\n"
+        "    rootsign.init(agent=\"my-agent\")\n"
+        "    async with rootsign.session(objective=\"...\"):  # then wrap/trace inside\n"
+        "or pass the context explicitly: ctx=<SessionContext>, client=<IngestClient>."
+    )
+
+    def __init__(self, surface: str | None = None):
+        prefix = f"{surface} requires a session context. " if surface else ""
+        super().__init__(prefix + self.FIX_HINT)
+        self.surface = surface

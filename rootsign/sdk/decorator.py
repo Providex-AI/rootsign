@@ -92,8 +92,8 @@ def _is_langchain_tool(func: Any) -> bool:
 
 def trace(
     *,
-    ingest_client: IngestClient,
-    session_context: SessionContext,
+    ingest_client: IngestClient | None = None,
+    session_context: SessionContext | None = None,
     tool_name: str | None = None,
     redaction_config: RedactionConfig | None = None,
     require_approval: bool = False,
@@ -104,11 +104,16 @@ def trace(
     """Decorator factory. Wraps a callable to emit an ACTION_RECORD per call.
 
     Args:
-        ingest_client: Where to send the envelope. See ADR-002.
+        ingest_client: Where to send the envelope. See ADR-002. Omit it to
+            resolve the ambient `rootsign.session()` client at call time
+            (ADR-012) — the decorator usually runs at import time, before any
+            session exists, so resolution is always deferred to invocation.
         session_context: Carries agent_id, session_id, and the monotonic
             sequence counter. A SESSION_OPEN must already have been sent for
             this session_id (use `rootsign.session(...)` to do this
-            automatically).
+            automatically). Omit it to resolve the ambient session, same as
+            `ingest_client`. Explicit arguments always win; when neither is
+            available at call time, `RootSignNotInitializedError` is raised.
         tool_name: Logical name for the tool. Defaults to the wrapped
             function's `__name__`. Ignored for the `BaseTool` path since
             LangGraph relies on the original `tool.name`.
@@ -184,13 +189,19 @@ def trace(
 
             @functools.wraps(func)
             async def hitl_wrapper(*args: Any, **kwargs: Any) -> Any:
+                # ADR-012: resolve at invocation, not decoration.
+                from rootsign.sdk.facade import _resolve_ctx_client
+
+                ctx, client = _resolve_ctx_client(
+                    session_context, ingest_client, surface="@rootsign.trace"
+                )
                 return await _emit_hitl_action(
                     func=func,
                     args=args,
                     kwargs=kwargs,
                     tool_name=_tool_name,
-                    client=ingest_client,
-                    ctx=session_context,
+                    client=client,
+                    ctx=ctx,
                     redaction_config=redaction_config,
                     approval_context_builder=approval_context_builder,
                     poll_interval_seconds=poll_interval_seconds,
@@ -201,13 +212,19 @@ def trace(
 
         @functools.wraps(func)
         async def wrapper(*args: Any, **kwargs: Any) -> Any:
+            # ADR-012: resolve at invocation, not decoration.
+            from rootsign.sdk.facade import _resolve_ctx_client
+
+            ctx, client = _resolve_ctx_client(
+                session_context, ingest_client, surface="@rootsign.trace"
+            )
             return await _emit_action_record(
                 func=func,
                 args=args,
                 kwargs=kwargs,
                 tool_name=_tool_name,
-                client=ingest_client,
-                ctx=session_context,
+                client=client,
+                ctx=ctx,
                 redaction_config=redaction_config,
             )
 

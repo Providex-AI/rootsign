@@ -64,7 +64,7 @@ class SessionContext:
         reasoning_summary: str | None = None,
         confidence: float | None = None,
         alternatives_considered: list[str] | None = None,
-        ingest_client: IngestClient,
+        ingest_client: IngestClient | None = None,
     ) -> UUID | None:
         """Emit a DECISION_RECORD and stash decision_id as the pending slot.
 
@@ -74,6 +74,11 @@ class SessionContext:
         decision_id in its payload. Silent no-op when CAPTURE_DECISIONS is
         False so the same codebase can ship to capture-on and capture-off
         environments without call-site conditionals. See ADR-008.
+
+        `ingest_client` may be omitted inside an `async with
+        rootsign.session(...)` — it then resolves from the ambient session
+        (ADR-012). Explicit wins. Resolution happens only on the capture-on
+        path, so the no-op path never raises.
 
         Keyword-only signature (Sprint 4 Flag 1).
         """
@@ -85,6 +90,13 @@ class SessionContext:
 
         if not sdk_settings.CAPTURE_DECISIONS:
             return None
+
+        from rootsign.sdk.facade import _resolve_ctx_client
+
+        # `self` is already the context; only the client needs resolving.
+        _, ingest_client = _resolve_ctx_client(
+            self, ingest_client, surface="record_decision"
+        )
 
         # _emit_decision_record is only imported on the capture-on path so
         # the no-op path stays free of dependency on the helper.

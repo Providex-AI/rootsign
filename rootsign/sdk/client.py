@@ -96,6 +96,71 @@ class LocalIngestClient(IngestClient):
             return await self._handler.handle(envelope)
 
 
+class ManagedLocalIngestClient(IngestClient):
+    """Postgres transport that owns its own AsyncSession per record (ADR-012).
+
+    `LocalIngestClient` takes a caller-supplied `AsyncSession` and never
+    commits — the application does (`await db.commit()` in the README example).
+    The `rootsign.init()` facade has no session to plumb and no natural commit
+    point, so it uses this instead: each `handle()` opens a short-lived
+    `AsyncSessionLocal`, runs the envelope through a `LocalIngestClient`, and
+    commits. Same per-call-session pattern as the HiTL poll loop and the audit
+    MCP server.
+
+    Consequences, both deliberate:
+
+    * Every record is durable the moment `handle()` returns, so
+      `rootsign approve` and the cross-process HiTL poll loop see pending
+      actions mid-run (a single run-long transaction would hide them).
+    * One short transaction per record instead of one per run. Chain-link
+      reads therefore see committed rows; the lock below keeps concurrent
+      tool calls from interleaving their sequence/hash reads.
+
+    The `IdempotencyStore` is owned here (not per session) so DUPLICATE_EVENT
+    detection spans the whole run.
+    """
+
+    def __init__(
+        self,
+        session_factory: Any | None = None,
+        idempotency: IdempotencyStore | None = None,
+    ) -> None:
+        self._session_factory = session_factory
+        self._idempotency = idempotency if idempotency is not None else IdempotencyStore()
+        # Serializes handle() calls so two concurrent tool calls can't
+        # interleave their read-chain-tail → insert transactions.
+        self._handle_lock = asyncio.Lock()
+
+    @property
+    def idempotency(self) -> IdempotencyStore:
+        """Exposed for tests that want to inspect or reset the cache."""
+        return self._idempotency
+
+    def _factory(self) -> Any:
+        if self._session_factory is not None:
+            return self._session_factory
+        # Lazy — the DB stack is the postgres extra (ADR-011). Translate a
+        # missing extra into the actionable error, same as get_ingest_client.
+        try:
+            from rootsign.database import AsyncSessionLocal
+        except ModuleNotFoundError as exc:
+            from rootsign.errors import RootSignPostgresExtraRequired
+
+            raise RootSignPostgresExtraRequired(f"missing module: {exc.name}") from exc
+        self._session_factory = AsyncSessionLocal
+        return self._session_factory
+
+    async def handle(self, envelope: dict[str, Any]) -> IngestResponse:
+        factory = self._factory()
+        async with self._handle_lock:
+            async with factory() as db:
+                response = await LocalIngestClient(
+                    db=db, idempotency=self._idempotency
+                ).handle(envelope)
+                await db.commit()
+                return response
+
+
 class HttpIngestClient(IngestClient):
     """HTTP transport — Phase 2 stub. See ADR-002.
 

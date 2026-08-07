@@ -73,20 +73,26 @@ class CrewAITracer:
 
         Sets `_rootsign_instrumented = True` and `_rootsign_context = ctx`
         so subsequent passes through `wrap_tools` skip re-wrapping.
-        """
-        if ctx is None or client is None:
-            raise TypeError(
-                "CrewAITracer.wrap_tool requires both ctx and client "
-                "(SessionContext and IngestClient)."
-            )
 
+        `ctx`/`client` may be omitted (ADR-012): they are then resolved from
+        the ambient `rootsign.session()` at each **invocation** rather than
+        here, since tools are typically built at import time. Explicit
+        arguments always win; if neither is available at call time,
+        `RootSignNotInitializedError` is raised.
+        """
         # Imported here so the SDK is loadable without crewai installed.
         from rootsign.sdk.decorator import _emit_action_record
+        from rootsign.sdk.facade import _resolve_ctx_client
 
         original_run = tool._run
         tool_name = tool.name
 
-        async def _emit(captured_args: tuple, captured_kwargs: dict) -> Any:
+        async def _emit(
+            captured_args: tuple,
+            captured_kwargs: dict,
+            call_ctx: SessionContext,
+            call_client: IngestClient,
+        ) -> Any:
             def _call(*_a: Any, **_kw: Any) -> Any:
                 return original_run(*captured_args, **captured_kwargs)
 
@@ -95,13 +101,18 @@ class CrewAITracer:
                 args=captured_args,
                 kwargs=captured_kwargs,
                 tool_name=tool_name,
-                client=client,
-                ctx=ctx,
+                client=call_client,
+                ctx=call_ctx,
                 redaction_config=redaction_config,
             )
 
         def traced_run(*args: Any, **kwargs: Any) -> Any:
-            return _run_sync(_emit(args, kwargs))
+            # Resolve in the caller's frame — `_run_sync` may hop threads, and
+            # the ambient session is guaranteed visible here.
+            call_ctx, call_client = _resolve_ctx_client(
+                ctx, client, surface="wrap_crewai_tools"
+            )
+            return _run_sync(_emit(args, kwargs, call_ctx, call_client))
 
         async def traced_arun(*args: Any, **kwargs: Any) -> Any:
             """Awaitable shadow of `_run`.
@@ -114,7 +125,10 @@ class CrewAITracer:
             part of the CrewAI BaseTool contract — it lives only on the
             instrumented instance.
             """
-            return await _emit(args, kwargs)
+            call_ctx, call_client = _resolve_ctx_client(
+                ctx, client, surface="wrap_crewai_tools"
+            )
+            return await _emit(args, kwargs, call_ctx, call_client)
 
         # CrewAI BaseTool is a Pydantic v2 model — direct attribute
         # assignment is rejected. `object.__setattr__` bypasses the
@@ -138,12 +152,10 @@ class CrewAITracer:
         Already-wrapped tools (those with `_rootsign_instrumented` truthy)
         are returned unchanged — same double-wrap guard as
         `LangGraphTracer.wrap_tools`.
+
+        `ctx`/`client` may be omitted — see `wrap_tool` for the ADR-012
+        implicit-resolution contract.
         """
-        if ctx is None or client is None:
-            raise TypeError(
-                "CrewAITracer.wrap_tools requires both ctx and client "
-                "(SessionContext and IngestClient)."
-            )
         return [
             t
             if getattr(t, "_rootsign_instrumented", False)
