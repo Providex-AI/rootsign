@@ -215,6 +215,10 @@ jobs:
           print("import rootsign OK, DB-free")
           PY
       - name: postgres backend without extra raises actionable error
+        # Pin BACKEND=postgres — the default is now jsonl (ADR-011), which would
+        # return a JsonlIngestClient (no error). We're testing the postgres path.
+        env:
+          ROOTSIGN_BACKEND: postgres
         run: |
           python - <<'PY'
           from rootsign.errors import RootSignPostgresExtraRequired
