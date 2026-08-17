@@ -45,6 +45,18 @@ class TestLogSafeNeutralizesControlChars:
         """A forgery attempt stays visible instead of silently vanishing."""
         assert _log_safe("a\nb") == "a\\x0ab"
 
+    def test_crlf_escapes_as_one_ordered_pair(self) -> None:
+        """CRLF is replaced before bare LF, so it renders as an ordered pair
+        rather than a double-escaped hybrid.
+
+        This also pins the explicit `.replace("\\r\\n", ...)` / `.replace("\\n", ...)`
+        chain in `_log_safe`. That shape is the only sanitizer CodeQL's
+        py/log-injection query recognizes; collapsing it back into the
+        `isprintable()` pass alone would reopen the alert on a call site that
+        is in fact safe.
+        """
+        assert _log_safe("a\r\nb") == "a\\x0d\\x0ab"
+
     def test_printable_text_is_untouched(self) -> None:
         assert _log_safe("search_flights") == "search_flights"
 

@@ -62,10 +62,24 @@ def _log_safe(value: Any, *, limit: int = _LOG_FIELD_LIMIT) -> str:
 
     Non-printable characters are escaped rather than dropped so a forgery
     attempt stays visible in the log instead of silently vanishing.
+
+    On the shape of the line-break handling below: the explicit `.replace()`
+    calls are load-bearing for static analysis, not just for runtime. CodeQL's
+    `py/log-injection` recognizes exactly one sanitizer — a `.replace()` whose
+    first argument is the literal `"\\n"` or `"\\r\\n"` (`ReplaceLineBreaksSanitizer`
+    in `LogInjectionCustomizations.qll`). The `isprintable()` pass afterwards is
+    strictly stronger (it also escapes NUL and ANSI escape sequences), but the
+    query cannot see through a generator expression, so expressing the guard
+    only that way leaves the alert open on a genuinely-fixed call site. Keeping
+    both means the property is enforced at runtime *and* machine-checkable.
     """
     text = str(value)
     if len(text) > limit:
         text = text[:limit] + "...(truncated)"
+    # Line breaks first and by name — a newline is the whole attack, since it
+    # is what ends one log record and begins a forged one.
+    text = text.replace("\r\n", "\\x0d\\x0a").replace("\n", "\\x0a").replace("\r", "\\x0d")
+    # Then everything else non-printable: NUL, ANSI escapes, control codes.
     return "".join(c if c.isprintable() else f"\\x{ord(c):02x}" for c in text)
 
 
