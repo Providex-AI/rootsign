@@ -45,8 +45,8 @@ jobs:
       TEST_DATABASE_URL: postgresql+asyncpg://rootsign:rootsign@localhost:5432/rootsign_test
       TEST_DATABASE_URL_SYNC: postgresql+psycopg2://rootsign:rootsign@localhost:5432/rootsign_test
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install
@@ -88,8 +88,8 @@ jobs:
       TEST_DATABASE_URL: postgresql+asyncpg://rootsign:rootsign@localhost:5432/rootsign_test
       TEST_DATABASE_URL_SYNC: postgresql+psycopg2://rootsign:rootsign@localhost:5432/rootsign_test
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       # mcp extra so the DB-backed MCP proxy integration test
@@ -125,8 +125,8 @@ jobs:
     env:
       ROOTSIGN_SKIP_DB_BOOTSTRAP: '1'
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - name: Install with langgraph extra
@@ -153,8 +153,8 @@ jobs:
     env:
       ROOTSIGN_SKIP_DB_BOOTSTRAP: '1'
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - name: Install with crewai extra
@@ -177,8 +177,8 @@ jobs:
     env:
       ROOTSIGN_SKIP_DB_BOOTSTRAP: '1'
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - name: Install with mcp extra
@@ -195,8 +195,8 @@ jobs:
     name: No-extras install (DB-free core)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - name: Install core only (no extras)
