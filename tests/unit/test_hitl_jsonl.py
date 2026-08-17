@@ -29,7 +29,7 @@ def _ctx():
 
 
 def _lines(client, sid):
-    return [json.loads(ln) for ln in open(client._session_path(str(sid)))]
+    return [json.loads(ln) for ln in client._session_path(str(sid)).read_text().splitlines()]
 
 
 async def test_headless_raises_before_tool_runs(tmp_path):

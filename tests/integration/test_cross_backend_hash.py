@@ -82,7 +82,7 @@ class TestCrossBackendHash:
         )
         rec = next(
             json.loads(ln)
-            for ln in open(client._session_path(str(sid)))
+            for ln in client._session_path(str(sid)).read_text().splitlines()
             if json.loads(ln).get("event_type") == "ACTION_RECORD"
         )
         assert rec["self_hash"] == compute_action_self_hash(rec)
@@ -119,15 +119,15 @@ class TestCrossBackendHash:
         sid = uuid4()
         for e in _scripted_envelopes(uuid4(), sid):
             await client.handle(e)
-        path = str(client._session_path(str(sid)))
-        lines = open(path).read().splitlines()
+        path = client._session_path(str(sid))
+        lines = path.read_text().splitlines()
         for i, ln in enumerate(lines):
             rec = json.loads(ln)
             if rec.get("event_type") == "ACTION_RECORD" and rec["sequence_number"] == 2:
                 rec["input_hash"] = "f" * 64  # break the canonical input at seq 2
                 lines[i] = json.dumps(rec)
                 break
-        open(path, "w").write("\n".join(lines) + "\n")
-        result = verify_session_local(path)
+        path.write_text("\n".join(lines) + "\n")
+        result = verify_session_local(str(path))
         assert result.valid is False
         assert result.first_invalid_sequence == 2
