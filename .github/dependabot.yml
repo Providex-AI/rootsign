@@ -1,0 +1,31 @@
+# Dependabot keeps the SHA-pinned GitHub Actions fresh.
+#
+# Why this file exists: `.github/workflows/release.yml` pins
+# pypa/gh-action-pypi-publish to an immutable commit SHA rather than the
+# mutable `release/v1` branch (CodeQL actions/unpinned-tag). That closes the
+# supply-chain hole on the step that mints our PyPI Trusted Publishing OIDC
+# token — but a hand-pinned SHA rots silently, which is its own risk. Dependabot
+# bumps the pin and rewrites the trailing `# vX.Y.Z` comment for us, so the pin
+# stays both immutable and current.
+#
+# Scope note: only `github-actions` is enabled. The Python dependency surface is
+# deliberately left to security alerts rather than routine version-update PRs —
+# the framework-contract CI jobs pin langgraph/crewai to specific minor ranges
+# on purpose, and version-bump PRs against those would be noise.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      # Matches the repo convention: type(scope): short description
+      prefix: "chore(ci)"
+    labels:
+      - dependencies
+    groups:
+      # One PR per week for routine action bumps instead of one per action.
+      # Security-relevant bumps still arrive on their own via alerts.
+      github-actions:
+        patterns:
+          - "*"

@@ -6,6 +6,13 @@ on:
   pull_request:
     branches: [main]
 
+# Least privilege for every job below. CI only ever reads the repo — no job
+# publishes, comments, or writes checks — so the read-only default holds for
+# all of them and no job needs an override. Without this block the workflow
+# inherits the repo-wide default token scopes (CodeQL actions/missing-workflow-permissions).
+permissions:
+  contents: read
+
 jobs:
   unit-tests:
     name: Unit tests (Python ${{ matrix.python-version }})

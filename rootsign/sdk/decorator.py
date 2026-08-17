@@ -38,6 +38,36 @@ from rootsign._version import SDK_VERSION  # noqa: F401  (re-exported via envelo
 
 SCHEMA_VERSION = "1.0"
 
+# Cap on a single interpolated log field. A hostile `tool_name` is otherwise an
+# unbounded write into the operator's log stream.
+_LOG_FIELD_LIMIT = 200
+
+
+def _log_safe(value: Any, *, limit: int = _LOG_FIELD_LIMIT) -> str:
+    """Neutralize control characters before *value* is interpolated into a log record.
+
+    `tool_name` is not always developer-authored. The MCP proxy reads it
+    straight off the wire — `params.get("name")` from the inbound `tools/call`
+    JSON-RPC body (`rootsign/mcp/proxy.py:86`) — so a caller upstream of the
+    proxy controls the exact string that lands in RootSign's own operational
+    log. Embedded CRLF would let them forge whole log lines, including lines
+    that impersonate RootSign's own WARNING output. That matters more here than
+    in a typical service: operators read these logs as corroboration alongside
+    the hash chain, so a forgeable log stream undercuts the audit story.
+
+    Sanitizing at the sink, not at the source, is deliberate — the ACTION_RECORD
+    must keep storing the byte-exact tool name it was called with, or the
+    self-hash would no longer bind the real request (ADR-001). Only the log
+    rendering is defanged.
+
+    Non-printable characters are escaped rather than dropped so a forgery
+    attempt stays visible in the log instead of silently vanishing.
+    """
+    text = str(value)
+    if len(text) > limit:
+        text = text[:limit] + "...(truncated)"
+    return "".join(c if c.isprintable() else f"\\x{ord(c):02x}" for c in text)
+
 
 def _to_json_safe(value: Any) -> Any:
     """Coerce a value into a JSON-serializable shape for storage + hashing.
@@ -384,14 +414,18 @@ async def _try_ingest(
             await ctx.next_sequence()
         logger.debug(
             "ACTION_RECORD tool=%s status=%s ingest=%s store_seq=%s",
-            tool_name,
+            _log_safe(tool_name),
             authorization_status,
             response.status if response is not None else "failed",
             response.sequence_number if response is not None else None,
         )
         return response
     except Exception as ingest_err:  # noqa: BLE001 — see failure isolation rule
-        logger.warning("rootsign ingest failed for tool %s: %s", tool_name, ingest_err)
+        logger.warning(
+            "rootsign ingest failed for tool %s: %s",
+            _log_safe(tool_name),
+            _log_safe(ingest_err),
+        )
         return None
 
 

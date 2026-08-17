@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -83,7 +84,7 @@ class TestChainAndResponse:
         await _drive_session(client, sid, tools=("a", "b"))
         actions = [
             json.loads(ln)
-            for ln in open(_path(client, sid))
+            for ln in Path(_path(client, sid)).read_text().splitlines()
             if json.loads(ln).get("event_type") == "ACTION_RECORD"
         ]
         assert actions[0]["prev_action_hash"] is None
@@ -112,7 +113,9 @@ class TestIdempotency:
         assert dup.error_code == ErrorCode.DUPLICATE_EVENT
         # Only one action line was written.
         actions = [
-            ln for ln in open(_path(client, sid)) if json.loads(ln).get("event_type") == "ACTION_RECORD"
+            ln
+            for ln in Path(_path(client, sid)).read_text().splitlines()
+            if json.loads(ln).get("event_type") == "ACTION_RECORD"
         ]
         assert len(actions) == 1
 
@@ -138,16 +141,16 @@ class TestTamperDetection:
         client = JsonlIngestClient(data_dir=tmp_path)
         sid = uuid4()
         await _drive_session(client, sid, tools=("a", "b"))
-        path = _path(client, sid)
-        lines = open(path).read().splitlines()
+        path = Path(_path(client, sid))
+        lines = path.read_text().splitlines()
         for i, ln in enumerate(lines):
             rec = json.loads(ln)
             if rec.get("event_type") == "ACTION_RECORD":
                 rec["tool_name"] = "TAMPERED"  # changes canonical input, not self_hash
                 lines[i] = json.dumps(rec)
                 break
-        open(path, "w").write("\n".join(lines) + "\n")
-        result = verify_session_local(path)
+        path.write_text("\n".join(lines) + "\n")
+        result = verify_session_local(str(path))
         assert result.valid is False
         assert result.first_invalid_sequence == 1
 
