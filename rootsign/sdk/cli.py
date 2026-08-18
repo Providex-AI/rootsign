@@ -20,15 +20,25 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
 import typer
 
-# Module-level so tests can monkeypatch it to bind to the test engine.
-# Production code goes through `_verify_remote`, which calls this factory
-# to open a fresh AsyncSession per invocation.
-from rootsign.database import AsyncSessionLocal  # noqa: E402
+# A test seam, deliberately NOT an import. Tests monkeypatch
+# `rootsign.sdk.cli.AsyncSessionLocal` to bind the CLI to the test engine
+# (tests/integration/test_verify_cli.py, test_approve_cli.py,
+# test_show_hn_quickstart.py), so the name has to exist at module scope.
+#
+# Importing `rootsign.database` here to provide it would drag SQLAlchemy in at
+# module-import time, and since ADR-011 the DB stack lives in the optional
+# `postgres` extra. On a no-extras install that made EVERY `rootsign ...`
+# invocation die with ModuleNotFoundError before Typer could dispatch —
+# including `rootsign version` and `rootsign verify --local`, neither of which
+# touches a database. That violates T1.2 / exit criterion 1.
+#
+# `_session_factory()` resolves the real factory on demand instead.
+AsyncSessionLocal: Any = None
 
 app = typer.Typer(
     name="rootsign",
@@ -36,6 +46,31 @@ app = typer.Typer(
     add_completion=False,
     no_args_is_help=True,
 )
+
+
+def _session_factory() -> Any:
+    """Return the AsyncSession factory, importing the DB stack on demand.
+
+    Mirrors `LocalIngestClient._factory` (rootsign/sdk/client.py): a missing
+    `postgres` extra becomes the actionable install hint rather than a bare
+    ModuleNotFoundError from deep in the import graph. Only the DB-backed
+    subcommands call this, so DB-free ones stay usable without the extra.
+    """
+    if AsyncSessionLocal is not None:
+        # Monkeypatched by tests, or already resolved.
+        return AsyncSessionLocal
+    try:
+        from rootsign.database import AsyncSessionLocal as factory
+    except ModuleNotFoundError as exc:
+        from rootsign.errors import RootSignPostgresExtraRequired
+
+        # Reuse the canonical error so the CLI hint can never drift from the SDK's.
+        typer.echo(
+            f"Error: {RootSignPostgresExtraRequired(f'missing module: {exc.name}')}",
+            err=True,
+        )
+        raise typer.Exit(code=1) from exc
+    return factory
 
 
 @app.command()
@@ -99,12 +134,17 @@ def _verify_local(path: Path, verbose: bool) -> None:
 
 
 def _verify_remote(session_id: UUID, verbose: bool) -> None:
-    # Imported at module level (below) so tests can monkeypatch the symbol
-    # to point at a test engine. See tests/integration/test_verify_cli.py.
+    # The session factory is resolved lazily via `_session_factory()`; tests
+    # monkeypatch the module-level `AsyncSessionLocal` seam to point at a test
+    # engine. See tests/integration/test_verify_cli.py.
     from rootsign.sdk.chain import verify_session
 
+    # Resolve the factory up front: a missing `postgres` extra should print the
+    # install hint and exit, not surface from inside asyncio.run().
+    factory = _session_factory()
+
     async def _run():
-        async with AsyncSessionLocal() as db:
+        async with factory() as db:
             return await verify_session(session_id, db)
 
     result = asyncio.run(_run())
@@ -204,12 +244,16 @@ def _list_pending_approvals() -> None:
     Phase 2 will add `--session` and `--owner` filters once multi-tenant
     auth ships.
     """
+    # Before any DB import — otherwise a no-extras install tracebacks on
+    # `from sqlalchemy import select` instead of getting the install hint.
+    factory = _session_factory()
+
     from sqlalchemy import select
 
     from rootsign.models.action import Action
 
     async def _run() -> list[Action]:
-        async with AsyncSessionLocal() as db:
+        async with factory() as db:
             result = await db.execute(
                 select(Action)
                 .where(Action.authorization_status == "pending")
@@ -241,6 +285,9 @@ def _submit_approval(*, action_id: UUID, decision: str, reason: str | None) -> N
     """
     import getpass
 
+    # Before any DB import — see _list_pending_approvals.
+    factory = _session_factory()
+
     from sqlalchemy import select
 
     from rootsign.crud.approval import approval as approval_crud
@@ -256,7 +303,7 @@ def _submit_approval(*, action_id: UUID, decision: str, reason: str | None) -> N
         approver_id = "cli:operator"
 
     async def _run() -> None:
-        async with AsyncSessionLocal() as db:
+        async with factory() as db:
             result = await db.execute(
                 select(Action).where(
                     Action.action_id == action_id,

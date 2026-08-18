@@ -5,6 +5,13 @@ use) and (b) derive the schema owner role from the DSN rather than hardcoding
 
 _drop_public_schema and alembic's command.upgrade are patched so the tests
 never touch a real database.
+
+The upgrade patch targets `alembic.command.upgrade` at its source rather than
+a name re-exported by `rootsign.cli`. Alembic lives in the optional `postgres`
+extra (ADR-011), so the operator CLI resolves it lazily via `_require()` and no
+longer binds `command` at module scope — binding it there made
+`rootsign-admin --help` crash on a bare install. `_require` returns the real
+module object, so patching the attribute on `alembic.command` still applies.
 """
 
 from __future__ import annotations
@@ -22,7 +29,7 @@ class TestInitResetConfirmation:
     def test_reset_aborts_without_confirmation(self):
         with (
             patch("rootsign.cli._drop_public_schema") as drop,
-            patch("rootsign.cli.command.upgrade"),
+            patch("alembic.command.upgrade"),
         ):
             result = runner.invoke(app, ["init", "--reset"], input="n\n")
         assert result.exit_code != 0  # typer.confirm(abort=True) → Abort
@@ -31,7 +38,7 @@ class TestInitResetConfirmation:
     def test_reset_yes_skips_prompt_and_drops(self):
         with (
             patch("rootsign.cli._drop_public_schema") as drop,
-            patch("rootsign.cli.command.upgrade"),
+            patch("alembic.command.upgrade"),
         ):
             result = runner.invoke(app, ["init", "--reset", "--yes"])
         assert result.exit_code == 0, result.output
@@ -40,7 +47,7 @@ class TestInitResetConfirmation:
     def test_reset_confirmed_interactively_drops(self):
         with (
             patch("rootsign.cli._drop_public_schema") as drop,
-            patch("rootsign.cli.command.upgrade"),
+            patch("alembic.command.upgrade"),
         ):
             result = runner.invoke(app, ["init", "--reset"], input="y\n")
         assert result.exit_code == 0, result.output
@@ -49,7 +56,7 @@ class TestInitResetConfirmation:
     def test_init_without_reset_never_drops(self):
         with (
             patch("rootsign.cli._drop_public_schema") as drop,
-            patch("rootsign.cli.command.upgrade"),
+            patch("alembic.command.upgrade"),
         ):
             result = runner.invoke(app, ["init"])
         assert result.exit_code == 0, result.output
