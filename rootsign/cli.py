@@ -18,7 +18,7 @@ import re
 import shutil
 import subprocess
 import time
-from importlib import resources
+from importlib import import_module, resources
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -50,10 +50,8 @@ def _require(module: str) -> Any:
     Mirrors `rootsign.sdk.cli._session_factory`: a missing `postgres` extra
     becomes a one-line actionable error and exit 1, never a raw traceback.
     """
-    import importlib
-
     try:
-        return importlib.import_module(module)
+        return import_module(module)
     except ModuleNotFoundError as exc:
         from rootsign.errors import RootSignPostgresExtraRequired
 
