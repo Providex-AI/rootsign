@@ -35,7 +35,6 @@ from uuid import UUID, uuid4
 
 import pytest
 
-import rootsign.hashing as rs_hashing
 from rootsign.crud import action as action_crud
 from rootsign.hashing import compute_action_self_hash
 from rootsign.sdk.chain import verify_session_local
@@ -83,7 +82,10 @@ class _CapturePreimages:
         self.preimages: list[bytes] = []
 
     def __enter__(self) -> "_CapturePreimages":
-        self._saved = rs_hashing.hashlib
+        # Reached via sys.modules, matching how _pin_action_ids gets at its
+        # patch targets, so the file keeps a single import style.
+        self._module = sys.modules["rootsign.hashing"]
+        self._saved = self._module.hashlib
         real_sha256 = self._saved.sha256
         capture = self
 
@@ -93,11 +95,11 @@ class _CapturePreimages:
                 capture.preimages.append(data)
                 return real_sha256(data)
 
-        rs_hashing.hashlib = _Shim
+        self._module.hashlib = _Shim
         return self
 
     def __exit__(self, *exc) -> bool:
-        rs_hashing.hashlib = self._saved
+        self._module.hashlib = self._saved
         return False
 
     def as_dicts(self) -> list[dict]:
