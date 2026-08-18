@@ -310,3 +310,27 @@ def make_envelope_fixture():
 #     from tests.conftest import make_envelope
 # rather than fixture injection so the test body reads like README code.
 make_envelope = _make_envelope
+
+
+def pytest_collection_modifyitems(config, items):
+    """Make the `benchmark` marker mean what CONTRIBUTING/CLAUDE.md claim: opt-in.
+
+    The marker was documentary only — nothing deselected it, so a bare
+    `python -m pytest` collected and ran `tests/performance/` alongside
+    everything else. Those tests assert wall-clock budgets calibrated on a
+    developer laptop, which makes them the most environment-sensitive thing in
+    the suite: `test_1000_actions_under_2_seconds` finishes in ~1.47s against a
+    2.0s limit, i.e. ~1.36x headroom, so a machine (or container, or loaded CI
+    runner) a third slower turns it red for reasons unrelated to any diff.
+
+    Benchmarks stay skipped unless the run explicitly asks for them with
+    `-m benchmark`. That keeps the budgets available and measurable without
+    letting hardware variance masquerade as a regression.
+    """
+    markexpr = config.getoption("markexpr", default="") or ""
+    if "benchmark" in markexpr:
+        return  # explicitly selected (or deselected) — let pytest decide
+    skip_benchmark = pytest.mark.skip(reason="performance benchmark — opt in with `-m benchmark`")
+    for item in items:
+        if "benchmark" in item.keywords:
+            item.add_marker(skip_benchmark)

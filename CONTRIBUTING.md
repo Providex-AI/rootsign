@@ -20,6 +20,7 @@ docker-compose up -d db          # PostgreSQL + TimescaleDB
 rootsign-admin init              # alembic upgrade head
 python -m pytest tests/unit/ -v          # unit tests (no DB needed at runtime — see note)
 python -m pytest tests/integration/ -v   # integration tests (needs DB)
+python -m pytest -m benchmark -v         # performance budgets (opt-in — see note)
 ```
 
 > **Python:** RootSign requires Python 3.11 or 3.12. We do not support 3.10 or below.
@@ -29,6 +30,8 @@ python -m pytest tests/integration/ -v   # integration tests (needs DB)
 > **Always invoke pytest as `python -m pytest`.** If you `brew install`-ed pytest, the system binary will resolve ahead of the venv's pytest on PATH and run under the system Python — which does not see your venv's site-packages and will fail with confusing `ModuleNotFoundError` (typically on `sqlalchemy` first). `python -m pytest` always uses the venv's interpreter.
 >
 > **Note on unit tests:** The session-scoped `_bootstrap_test_db` fixture in `tests/conftest.py` runs alembic against the test DB before any test (including unit tests). Bring `docker-compose up -d db` up first.
+>
+> **Performance benchmarks are opt-in.** Everything under `tests/performance/` is marked `benchmark` and is **skipped** by a default `python -m pytest` run; pass `-m benchmark` to execute it. These tests assert wall-clock budgets, so they are the most hardware-sensitive part of the suite — `test_1000_actions_under_2_seconds` has only ~1.36x headroom on a developer laptop. They are deliberately kept out of every CI gating job: a timing budget that reddens `main` for reasons unrelated to the diff teaches people to ignore red. Run them locally (or on purpose in CI) when touching the ingest, hashing, or verify paths, and treat a failure as a real signal rather than noise — but check the machine is otherwise idle first.
 
 ## Branch naming
 
