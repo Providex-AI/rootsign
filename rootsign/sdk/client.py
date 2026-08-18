@@ -141,12 +141,10 @@ class ManagedLocalIngestClient(IngestClient):
             return self._session_factory
         # Lazy — the DB stack is the postgres extra (ADR-011). Translate a
         # missing extra into the actionable error, same as get_ingest_client.
-        try:
-            from rootsign.database import AsyncSessionLocal
-        except ModuleNotFoundError as exc:
-            from rootsign.errors import RootSignPostgresExtraRequired
+        from rootsign.errors import postgres_extra_required
 
-            raise RootSignPostgresExtraRequired(f"missing module: {exc.name}") from exc
+        with postgres_extra_required():
+            from rootsign.database import AsyncSessionLocal
         self._session_factory = AsyncSessionLocal
         return self._session_factory
 

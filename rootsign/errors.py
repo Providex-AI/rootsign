@@ -24,6 +24,8 @@ import from here without back-edges.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from collections.abc import Iterator
 from uuid import UUID
 
 
@@ -192,6 +194,35 @@ class RootSignPostgresExtraRequired(RootSignError):
     def __init__(self, detail: str | None = None):
         message = self.INSTALL_HINT if detail is None else f"{self.INSTALL_HINT}  ({detail})"
         super().__init__(message)
+
+
+@contextmanager
+def postgres_extra_required() -> "Iterator[None]":
+    """Translate a missing DB stack into `RootSignPostgresExtraRequired`.
+
+    Wrap the lazy imports of any code path that needs Postgres::
+
+        with postgres_extra_required():
+            from sqlalchemy import select
+
+            from rootsign.database import AsyncSessionLocal
+
+    Since ADR-011 those imports are deferred into function bodies so the core
+    install stays DB-free. Deferring alone only moves *where* the failure
+    happens, though — without this, a user on `pip install rootsign` who calls
+    a DB-backed path gets `ModuleNotFoundError: No module named 'sqlalchemy'`
+    from somewhere deep in the import graph, with no hint that an extra exists.
+    `get_ingest_client` already translated; several SDK entry points did not,
+    so the same mistake produced a helpful message or a bare traceback
+    depending on which door you came through.
+
+    Only wrap the imports themselves. A `ModuleNotFoundError` from unrelated
+    application code inside the block would be mislabelled as a missing extra.
+    """
+    try:
+        yield
+    except ModuleNotFoundError as exc:
+        raise RootSignPostgresExtraRequired(f"missing module: {exc.name}") from exc
 
 
 class HiTLUnsupportedBackendError(RootSignError):

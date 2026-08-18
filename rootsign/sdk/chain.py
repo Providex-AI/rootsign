@@ -20,6 +20,8 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
+from rootsign.errors import postgres_extra_required
+
 
 @dataclass
 class VerifyResult:
@@ -53,7 +55,8 @@ async def verify_session(session_id: UUID, db: Any) -> VerifyResult:
     `db` is an `AsyncSession`. Returns a `VerifyResult`. Never raises on
     chain inconsistency — the result's `valid` field is the verdict.
     """
-    from rootsign.crud import action as action_crud
+    with postgres_extra_required():
+        from rootsign.crud import action as action_crud
 
     raw = await action_crud.verify_chain(db, session_id=session_id)
     return VerifyResult(

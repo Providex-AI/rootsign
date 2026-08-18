@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID, uuid4
 
+from rootsign.errors import postgres_extra_required
 from rootsign.ingest.schemas import EventType, IngestResponse
 from rootsign.sdk.client import IngestClient
 from rootsign.sdk.context import SessionContext
@@ -505,8 +506,9 @@ async def _emit_hitl_action(
 
     # Lazy imports — HiTL is a Sprint 4 surface and pulling these at
     # module load would pessimize cold start for non-HiTL users.
-    from rootsign.database import AsyncSessionLocal
-    from rootsign.sdk.hitl import HiTLCheckpoint
+    with postgres_extra_required():
+        from rootsign.database import AsyncSessionLocal
+        from rootsign.sdk.hitl import HiTLCheckpoint
 
     # 1. Hash + redact input. `_to_json_safe` defangs non-JSON values
     #    (LangChain BaseMessage, dataclasses, arbitrary objects) BEFORE they
