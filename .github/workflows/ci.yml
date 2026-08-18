@@ -238,6 +238,65 @@ jobs:
               assert "rootsign[postgres]" in str(e), e
               print("RootSignPostgresExtraRequired raised OK")
           PY
+      - name: Console scripts run DB-free (CLI tripwire)
+        # `import rootsign` passing is NOT sufficient. The console script entry
+        # point imports `rootsign.sdk.cli`, a different import graph that the
+        # checks above never touch — a module-level `from rootsign.database
+        # import AsyncSessionLocal` there crashed EVERY `rootsign ...`
+        # invocation on a bare install (even `version` and `verify --local`,
+        # neither of which needs a DB) while this job stayed green. This step
+        # exercises the script itself so that class of regression fails here.
+        run: |
+          set -euo pipefail
+          rootsign version
+          rootsign --help > /dev/null
+          # The operator CLI is a separate entry point (rootsign.cli:app) with
+          # its own import graph. --help and the docker-only subcommands must
+          # work without the postgres extra.
+          rootsign-admin --help > /dev/null
+          rootsign-admin start-db --help > /dev/null
+          rootsign-admin stop-db --help > /dev/null
+          # Store-exported fixture, not a checked-in file: let the JSONL backend
+          # write a real session so the chain is produced by the same code path
+          # that verifies it. Never hand-construct a self_hash (ADR-001).
+          SESSION_ID="$(python - <<'PY'
+          import asyncio, rootsign
+
+          rootsign.init(agent="ci-tripwire")
+
+          @rootsign.trace()
+          async def add(a: int, b: int) -> int:
+              return a + b
+
+          async def main():
+              async with rootsign.session() as ctx:
+                  await add(2, 3)
+                  return ctx.session_id
+
+          print(asyncio.run(main()))
+          PY
+          )"
+          rootsign verify --local "$HOME/.rootsign/sessions/$SESSION_ID.jsonl"
+          echo "console scripts OK, DB-free"
+      - name: DB-backed subcommands fail with the install hint, not a traceback
+        # The other half of the same bug: these commands legitimately need the
+        # extra, but must say so in one line and exit 1 rather than dumping a
+        # ModuleNotFoundError traceback at the user.
+        run: |
+          set -uo pipefail
+          # Every DB-backed subcommand across BOTH console scripts.
+          for cmd in "rootsign verify 550e8400-e29b-41d4-a716-446655440001" \
+                     "rootsign approve --list" \
+                     "rootsign approve 550e8400-e29b-41d4-a716-446655440001" \
+                     "rootsign-admin status" \
+                     "rootsign-admin init"; do
+            out="$($cmd 2>&1)" && { echo "expected failure: $cmd"; exit 1; }
+            echo "$out" | grep -q "rootsign\[postgres\]" || {
+              echo "missing install hint for: $cmd"; echo "$out"; exit 1; }
+            echo "$out" | grep -qi "Traceback" && {
+              echo "leaked traceback for: $cmd"; echo "$out"; exit 1; }
+            echo "$cmd -> actionable error OK"
+          done
       # NOTE: we deliberately do NOT run `pytest tests/contract/no_extras/`
       # here — the root tests/conftest.py imports sqlalchemy at module level
       # (for the DB fixtures), so pytest cannot even collect in a DB-free env.

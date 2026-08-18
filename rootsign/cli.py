@@ -20,13 +20,21 @@ import subprocess
 import time
 from importlib import resources
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
-import psycopg2
 import typer
-from alembic import command
-from alembic.config import Config
 
 from rootsign.config import settings
+
+if TYPE_CHECKING:
+    from alembic.config import Config
+
+# psycopg2 and alembic live in the optional `postgres` extra (ADR-011), so they
+# are imported inside the commands that need them via `_require()`. At module
+# level they made `rootsign-admin` unusable on a bare install — even
+# `rootsign-admin --help` and the docker-only `start-db` / `stop-db` died with
+# ModuleNotFoundError before Typer could dispatch. Same defect class as the
+# `rootsign` console script (rootsign/sdk/cli.py).
 
 app = typer.Typer(
     name="rootsign-admin",
@@ -34,6 +42,26 @@ app = typer.Typer(
     add_completion=False,
     no_args_is_help=True,
 )
+
+
+def _require(module: str) -> Any:
+    """Import an optional DB-stack module, or exit with the install hint.
+
+    Mirrors `rootsign.sdk.cli._session_factory`: a missing `postgres` extra
+    becomes a one-line actionable error and exit 1, never a raw traceback.
+    """
+    import importlib
+
+    try:
+        return importlib.import_module(module)
+    except ModuleNotFoundError as exc:
+        from rootsign.errors import RootSignPostgresExtraRequired
+
+        typer.echo(
+            f"Error: {RootSignPostgresExtraRequired(f'missing module: {exc.name}')}",
+            err=True,
+        )
+        raise typer.Exit(code=1) from exc
 
 # Default container name + image. Mirrors docker-compose.yml so devs can swap
 # freely between `rootsign-admin start-db` and `docker-compose up -d db`.
@@ -61,7 +89,7 @@ def _alembic_config(sync_url: str | None = None) -> Config:
     are set directly, so PyPI users (who have no alembic.ini) and devs in the
     repo root behave identically.
     """
-    cfg = Config()
+    cfg = _require("alembic.config").Config()
     cfg.set_main_option("script_location", str(_migrations_dir()))
     cfg.set_main_option("sqlalchemy.url", sync_url or settings.DATABASE_URL_SYNC)
     return cfg
@@ -77,7 +105,8 @@ def _dsn_role() -> str:
 
 
 def _drop_public_schema() -> None:
-    from psycopg2 import sql
+    psycopg2 = _require("psycopg2")
+    sql = _require("psycopg2.sql")
 
     dsn = _strip_driver(settings.DATABASE_URL_SYNC)
     role = sql.Identifier(_dsn_role())
@@ -211,6 +240,9 @@ def init(
     ),
 ) -> None:
     """Apply migrations to the dev database. Use --reset to start from scratch."""
+    # Resolve the DB stack before any output or the destructive --reset prompt,
+    # so a missing extra fails cleanly instead of half-way through.
+    alembic_command = _require("alembic.command")
     start = time.perf_counter()
     if reset:
         # audit #11b: --reset drops the ENTIRE public schema. Require an
@@ -225,7 +257,7 @@ def init(
         typer.echo("Dropping public schema...")
         _drop_public_schema()
     typer.echo("Running alembic upgrade head...")
-    command.upgrade(_alembic_config(), "head")
+    alembic_command.upgrade(_alembic_config(), "head")
     elapsed = time.perf_counter() - start
     typer.echo(f"Done in {elapsed:.2f}s")
 
@@ -233,6 +265,7 @@ def init(
 @app.command()
 def status() -> None:
     """Print row counts for every RootSign table."""
+    psycopg2 = _require("psycopg2")
     dsn = _strip_driver(settings.DATABASE_URL_SYNC)
     conn = psycopg2.connect(dsn)
     try:
