@@ -28,6 +28,8 @@ from rootsign.schemas import (
     SessionStatus,
 )
 
+from tests.performance._bench import format_samples, median_seconds
+
 pytestmark = [pytest.mark.benchmark, pytest.mark.integration]
 
 
@@ -53,30 +55,56 @@ async def _bootstrap_session(db: AsyncSession):
 class TestActionThroughput:
     # AC-2.10
     async def test_1000_actions_under_2_seconds(self, clean_db: AsyncSession):
-        s = await _bootstrap_session(clean_db)
-        session_id = s.session_id
+        """Tightest budget in the repo — ~1.47s measured against a 2.0s limit,
+        roughly 1.36x headroom, and it measures raw insert throughput, which is
+        disk- and Postgres-tuning dependent. Sampled 3x and asserted on the
+        median so one stalled run can't fail the build; the 2.0s threshold is
+        AC-2.10 and stays exactly as specified.
 
-        start = time.perf_counter()
-        for i in range(1000):
-            await crud.action.create_with_hash(
-                clean_db,
-                obj_in=ActionCreate(
-                    session_id=session_id,
-                    tool_name=f"tool_{i}",
-                    input_hash="a" * 64,
-                    output_hash="b" * 64,
-                    authorization_status=ActionAuthorizationStatus.AUTO_AUTHORIZED,
-                ),
-            )
-        await clean_db.commit()
-        elapsed = time.perf_counter() - start
+        Sampled 5x despite each run costing ~1.5s. A trial run produced
+        samples 1.6s / 2.4s / 1.4s — the 2.4s sample alone exceeds the budget
+        and would have failed the build under the old single-sample scheme.
+        With the least headroom of any budget here, this one earns the extra
+        samples: 3 tolerates one outlier, 5 tolerates two.
+        """
 
-        # Verify all 1000 made it.
-        chain = await crud.action.get_session_chain(clean_db, session_id=session_id)
-        assert len(chain) == 1000, f"Inserted only {len(chain)} of 1000"
-        assert elapsed < 2.0, f"1000 inserts took {elapsed:.3f}s — exceeds 2.0s limit"
+        async def measure() -> float:
+            # Fresh session per sample — untimed, and it keeps each run
+            # inserting into an empty chain rather than an ever-growing one.
+            s = await _bootstrap_session(clean_db)
+            session_id = s.session_id
 
-        print(f"\n  1000 inserts: {elapsed:.3f}s ({1000 / elapsed:.0f} inserts/s)")
+            start = time.perf_counter()
+            for i in range(1000):
+                await crud.action.create_with_hash(
+                    clean_db,
+                    obj_in=ActionCreate(
+                        session_id=session_id,
+                        tool_name=f"tool_{i}",
+                        input_hash="a" * 64,
+                        output_hash="b" * 64,
+                        authorization_status=ActionAuthorizationStatus.AUTO_AUTHORIZED,
+                    ),
+                )
+            await clean_db.commit()
+            elapsed = time.perf_counter() - start
+
+            # Verify all 1000 made it (untimed).
+            chain = await crud.action.get_session_chain(clean_db, session_id=session_id)
+            assert len(chain) == 1000, f"Inserted only {len(chain)} of 1000"
+            return elapsed
+
+        median, samples = await median_seconds(measure, repeats=5)
+        print(
+            f"\n  1000 inserts: median {median:.3f}s ({1000 / median:.0f} inserts/s)"
+            f"  samples: {format_samples(samples, unit='s')}"
+        )
+        assert median < 2.0, (
+            f"1000 inserts median {median:.3f}s — exceeds 2.0s limit (AC-2.10). "
+            f"Samples: {format_samples(samples, unit='s')}. "
+            "Budgets here are hardware/environment dependent — confirm the machine "
+            "is idle before treating this as a regression."
+        )
 
     async def test_session_chain_retrieval_under_500ms(self, clean_db: AsyncSession):
         s = await _bootstrap_session(clean_db)
@@ -93,13 +121,23 @@ class TestActionThroughput:
             )
         await clean_db.commit()
 
-        start = time.perf_counter()
-        chain = await crud.action.get_session_chain(clean_db, session_id=session_id)
-        elapsed = time.perf_counter() - start
+        # Seeded once above; only the read is sampled.
+        async def measure() -> float:
+            start = time.perf_counter()
+            chain = await crud.action.get_session_chain(clean_db, session_id=session_id)
+            elapsed = time.perf_counter() - start
+            assert len(chain) == 1000
+            return elapsed
 
-        assert len(chain) == 1000
-        assert elapsed < 0.5, f"Chain retrieval took {elapsed:.3f}s — exceeds 500ms"
-        print(f"\n  1000-row chain retrieval: {elapsed * 1000:.1f}ms")
+        median, samples = await median_seconds(measure, repeats=5)
+        print(
+            f"\n  1000-row chain retrieval: median {median * 1000:.1f}ms"
+            f"  samples: {format_samples(samples)}"
+        )
+        assert median < 0.5, (
+            f"Chain retrieval median {median:.3f}s — exceeds 500ms. "
+            f"Samples: {format_samples(samples)}. Hardware/environment dependent."
+        )
 
     async def test_verify_chain_under_2_seconds(self, clean_db: AsyncSession):
         s = await _bootstrap_session(clean_db)
@@ -116,10 +154,25 @@ class TestActionThroughput:
             )
         await clean_db.commit()
 
-        start = time.perf_counter()
-        result = await crud.action.verify_chain(clean_db, session_id=session_id)
-        elapsed = time.perf_counter() - start
+        # Seeded once above; only verify_chain is sampled.
+        async def measure() -> float:
+            start = time.perf_counter()
+            result = await crud.action.verify_chain(clean_db, session_id=session_id)
+            elapsed = time.perf_counter() - start
+            assert result["valid"] is True
+            assert result["record_count"] == 1000
+            return elapsed
 
-        assert result["valid"] is True
-        assert result["record_count"] == 1000
-        print(f"\n  verify_chain(1000): {elapsed * 1000:.1f}ms")
+        median, samples = await median_seconds(measure, repeats=5)
+        print(
+            f"\n  verify_chain(1000): median {median * 1000:.1f}ms"
+            f"  samples: {format_samples(samples)}"
+        )
+        # The 2s budget the test name promises was never actually asserted —
+        # elapsed was measured, printed, and dropped. Enforced now. There is
+        # ~42x headroom (median ~47ms), so this is closing a gap rather than
+        # tightening anything.
+        assert median < 2.0, (
+            f"verify_chain(1000) median {median:.3f}s — exceeds 2.0s limit. "
+            f"Samples: {format_samples(samples)}. Hardware/environment dependent."
+        )

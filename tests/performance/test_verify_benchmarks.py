@@ -28,6 +28,8 @@ from rootsign.schemas import (
     AgentRiskTier,
 )
 
+from tests.performance._bench import format_samples, median_seconds
+
 pytestmark = pytest.mark.benchmark
 
 
@@ -96,13 +98,21 @@ class TestVerifyBenchmark:
         seed_elapsed = time.perf_counter() - seed_start
         print(f"\nseeded 10,000 records in {seed_elapsed:.2f}s")
 
-        verify_start = time.perf_counter()
-        result = await action_crud.verify_chain(clean_db, session_id=session_id)
-        verify_elapsed = time.perf_counter() - verify_start
+        # The 41s seed above runs once and is not part of the budget; only
+        # verify_chain is sampled, so repeating it is nearly free.
+        async def measure() -> float:
+            verify_start = time.perf_counter()
+            result = await action_crud.verify_chain(clean_db, session_id=session_id)
+            verify_elapsed = time.perf_counter() - verify_start
+            assert result["valid"] is True
+            assert result["record_count"] == 10_000
+            return verify_elapsed
 
-        assert result["valid"] is True
-        assert result["record_count"] == 10_000
-        assert verify_elapsed < 5.0, (
-            f"verify_chain took {verify_elapsed:.2f}s — exceeds 5s budget"
+        median, samples = await median_seconds(measure, repeats=5)
+        print(
+            f"10,000-record verify: median {median:.3f}s  samples: {format_samples(samples)}"
         )
-        print(f"10,000-record verify took {verify_elapsed:.3f}s")
+        assert median < 5.0, (
+            f"verify_chain median {median:.2f}s — exceeds 5s budget. "
+            f"Samples: {format_samples(samples)}. Hardware/environment dependent."
+        )

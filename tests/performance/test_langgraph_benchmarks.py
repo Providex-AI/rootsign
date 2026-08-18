@@ -41,6 +41,14 @@ def noop_tool(x: int) -> int:
 class TestLangGraphOverhead:
     @pytest.mark.benchmark
     def test_p99_overhead_under_5ms(self):
+        """Left on a single pass deliberately — unlike the other budgets here,
+        this one is already a distribution: it takes 1,000 samples and asserts
+        on the p99, so a stray stall is absorbed by construction. It also has
+        ~15x headroom (p99 ~0.33ms against 5ms), and re-running 1,000 calls
+        several times would cost far more than it buys. Still hardware- and
+        environment-dependent: treat a failure as a prompt to investigate on an
+        idle machine, not as proof of a regression.
+        """
         mock_client = AsyncMock()
         mock_client.handle.return_value = MagicMock(
             status="accepted",
