@@ -30,6 +30,8 @@ import logging
 from typing import TYPE_CHECKING, Any, Callable
 from uuid import UUID
 
+from rootsign.errors import postgres_extra_required
+
 if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager
 
@@ -45,7 +47,8 @@ logger = logging.getLogger("rootsign.mcp.server")
 def _default_session_factory() -> Any:
     """Lazily resolve the app's AsyncSessionLocal so importing this module
     never constructs a DB engine. Only touched when a tool actually runs."""
-    from rootsign.database import AsyncSessionLocal
+    with postgres_extra_required():
+        from rootsign.database import AsyncSessionLocal
 
     return AsyncSessionLocal()
 
@@ -63,9 +66,10 @@ async def _list_sessions(
     limit: int = 20,
 ) -> list[dict[str, Any]]:
     """Most-recent sessions, optionally filtered by agent, newest first."""
-    from sqlalchemy import select
+    with postgres_extra_required():
+        from sqlalchemy import select
 
-    from rootsign.models.session import AgentSession
+        from rootsign.models.session import AgentSession
 
     async with session_factory() as db:
         stmt = select(AgentSession).order_by(AgentSession.start_time.desc()).limit(limit)
@@ -92,7 +96,8 @@ async def _query_session_chain(
     session_id: str,
 ) -> list[dict[str, Any]]:
     """The ordered Action chain for a session (metadata + hashes, no payloads)."""
-    from rootsign.crud import action as action_crud
+    with postgres_extra_required():
+        from rootsign.crud import action as action_crud
 
     async with session_factory() as db:
         actions = await action_crud.get_session_chain(db, session_id=UUID(session_id))
@@ -118,7 +123,8 @@ async def _verify_session_chain(
     session_id: str,
 ) -> dict[str, Any]:
     """Recompute + verify the chain — identical result to `rootsign verify`."""
-    from rootsign.crud import action as action_crud
+    with postgres_extra_required():
+        from rootsign.crud import action as action_crud
 
     async with session_factory() as db:
         return await action_crud.verify_chain(db, session_id=UUID(session_id))
@@ -130,9 +136,10 @@ async def _get_approval_records(
     action_id: str,
 ) -> list[dict[str, Any]]:
     """All approval rows for an action (a list — escalation can yield several)."""
-    from sqlalchemy import select
+    with postgres_extra_required():
+        from sqlalchemy import select
 
-    from rootsign.models.approval import Approval
+        from rootsign.models.approval import Approval
 
     async with session_factory() as db:
         stmt = (

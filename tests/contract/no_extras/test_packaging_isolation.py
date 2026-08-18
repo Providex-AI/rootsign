@@ -215,3 +215,59 @@ def test_postgres_backend_without_extra_raises_actionable_error():
     )
     assert result.returncode == 0, result.stderr
     assert "RAISED_OK" in result.stdout, result.stdout + result.stderr
+
+
+def test_db_backed_sdk_entry_points_raise_actionable_error():
+    """Every DB-backed SDK path must name the extra, not leak ModuleNotFoundError.
+
+    Deferring the DB imports (ADR-011) only moves *where* the failure happens.
+    `get_ingest_client` translated the error from the start, but the SDK entry
+    points did not — so the same mistake produced a helpful install hint or a
+    bare traceback depending on which door you came through. A user hitting
+    `rootsign.init()` on a bare install saw `ModuleNotFoundError: No module
+    named 'sqlalchemy'` from inside `get_or_register_agent`, with nothing
+    pointing at `pip install 'rootsign[postgres]'`.
+    """
+    result = _run(
+        "import asyncio\n"
+        "from uuid import uuid4\n"
+        "from rootsign.errors import RootSignPostgresExtraRequired\n"
+        "from rootsign.sdk.registration import get_or_register_agent, register_agent\n"
+        "from rootsign.sdk.chain import verify_session\n"
+        "from rootsign.mcp import server as mcp_server\n"
+        "\n"
+        "async def check(label, fn):\n"
+        "    try:\n"
+        "        await fn()\n"
+        "    except RootSignPostgresExtraRequired as e:\n"
+        "        assert 'rootsign[postgres]' in str(e), (label, str(e))\n"
+        "        return\n"
+        "    except ModuleNotFoundError as e:\n"
+        "        raise AssertionError(f'{label} leaked ModuleNotFoundError: {e}')\n"
+        "    raise AssertionError(f'{label} did not raise')\n"
+        "\n"
+        "async def main():\n"
+        "    await check('get_or_register_agent', lambda: get_or_register_agent(\n"
+        "        name='agent-x', owner='team-o', environment='development',\n"
+        "        risk_tier='medium', framework='custom', description=None,\n"
+        "        model_version=None, permitted_tools=None, regulatory_categories=None))\n"
+        "    await check('register_agent', lambda: register_agent(\n"
+        "        name='agent-y', owner='team-o', environment='development',\n"
+        "        risk_tier='medium', framework='custom'))\n"
+        "    await check('verify_session', lambda: verify_session(uuid4(), db=None))\n"
+        "\n"
+        "asyncio.run(main())\n"
+        "\n"
+        "try:\n"
+        "    mcp_server._default_session_factory()\n"
+        "except RootSignPostgresExtraRequired as e:\n"
+        "    assert 'rootsign[postgres]' in str(e)\n"
+        "except ModuleNotFoundError as e:\n"
+        "    raise AssertionError(f'mcp session factory leaked: {e}')\n"
+        "else:\n"
+        "    raise AssertionError('mcp session factory did not raise')\n"
+        "print('OK')\n",
+        extra_env={"ROOTSIGN_BACKEND": "postgres"},
+    )
+    assert result.returncode == 0, result.stderr
+    assert "OK" in result.stdout

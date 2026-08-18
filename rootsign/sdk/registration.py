@@ -15,6 +15,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
+from rootsign.errors import postgres_extra_required
 from rootsign.schemas.agent import (
     AgentCreate,
     AgentEnvironment,
@@ -63,8 +64,9 @@ async def register_agent(
     # Lazy imports — the DB stack is the postgres extra (ADR-011). Registration
     # only runs on the postgres path today; the jsonl backend gets its own
     # get-or-create in Sprint A Workstream 2.
-    from rootsign.crud import agent as agent_crud
-    from rootsign.database import AsyncSessionLocal
+    with postgres_extra_required():
+        from rootsign.crud import agent as agent_crud
+        from rootsign.database import AsyncSessionLocal
 
     obj_in = AgentCreate(
         name=name,
@@ -211,11 +213,12 @@ async def get_or_register_agent(
     )
 
     # Lazy imports — the DB stack is the postgres extra (ADR-011).
-    from sqlalchemy import select
-    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    with postgres_extra_required():
+        from sqlalchemy import select
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-    from rootsign.database import AsyncSessionLocal
-    from rootsign.models.agent import Agent
+        from rootsign.database import AsyncSessionLocal
+        from rootsign.models.agent import Agent
 
     values = obj_in.model_dump(mode="json")
     # The schema field is `metadata`; the ORM attribute is `extra_metadata`
