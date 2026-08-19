@@ -27,7 +27,7 @@ Compliance-grade audit trails. Zero changes to your agent code.
 
 ## Status
 
-**v0.2.0.** `pip install rootsign` → a verified hash chain in under a minute: no Docker, no database, no plumbing. LangGraph + CrewAI integrations, a framework-agnostic MCP proxy, `rootsign verify` CLI, PII redaction, human-in-the-loop checkpoints, opt-in decision capture (PRD-19 / ADR-008), and opt-in SDK micro-batching are all shipping.
+**v0.2.1.** `pip install rootsign` → a verified hash chain in under a minute: no Docker, no database, no plumbing. LangGraph + CrewAI integrations, a framework-agnostic MCP proxy, `rootsign verify` CLI, PII redaction, human-in-the-loop checkpoints, opt-in decision capture (PRD-19 / ADR-008), and opt-in SDK micro-batching are all shipping.
 
 | Phase | Scope | Status |
 |---|---|---|
