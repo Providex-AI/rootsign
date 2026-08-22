@@ -101,7 +101,8 @@ VALID — 2 records, chain intact
             manifest.json
 
   manifest.json SHA-256:  a1d61338d0f793ea03ac472863fadea5660e1e94846913ce7613d8c117d67cc5
-  Record that hash outside the bundle (ticket, email, chain-of-custody log). It is what proves a bundle received later is this one.
+  Record that hash outside the bundle — a ticket, an email, a chain-of-custody log.
+  It is what proves a bundle you receive later is the one that was generated.
 ```
 
 Open `report.html` in any browser — [see below](#evidence-bundles).
@@ -385,7 +386,8 @@ $ rootsign export --check ./bundles/evidence-<session_id>
 ✓  INTACT — 5 file(s) match manifest.json
 
   manifest.json SHA-256:  a1d61338d0f793ea03ac472863fadea5660e1e94846913ce7613d8c117d67cc5
-  Compare this against the hash recorded when the bundle was exported. The file checks above cannot detect an edit that also updated the manifest.
+  Compare this against the hash recorded when the bundle was exported.
+  The file checks above cannot detect an edit that also updated the manifest.
 ```
 
 Re-hashing files against the manifest proves the bundle is internally consistent — nothing more. Someone who edits a file *and* updates the manifest passes that check trivially. The out-of-band manifest hash is the only anchor they cannot forge, which is why `--check` prints it whether or not anything is wrong.

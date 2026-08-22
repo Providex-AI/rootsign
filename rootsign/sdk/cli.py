@@ -407,10 +407,12 @@ def _finish_export(bundle: Any, out: Path, *, fmt: str, force: bool) -> None:
     # The anchor. Everything else in the bundle can be recomputed from the
     # bundle; this is the one value that has to leave with the human.
     typer.echo(typer.style(f"  manifest.json SHA-256:  {bundle.manifest_hash}", bold=True))
+    # Two lines, not one: at 130 characters this wrapped mid-word in an
+    # 80-100 column terminal, which is where it is actually read.
     typer.echo(
-        "  Record that hash outside the bundle (ticket, email, chain-of-custody log). "
-        "It is what proves a bundle received later is this one."
+        "  Record that hash outside the bundle — a ticket, an email, a chain-of-custody log."
     )
+    typer.echo("  It is what proves a bundle you receive later is the one that was generated.")
 
 
 def _print_verdict_banner(verification: dict) -> None:
@@ -465,10 +467,8 @@ def _check_bundle(directory: Path) -> None:
     if result.manifest_hash:
         typer.echo("")
         typer.echo(typer.style(f"  manifest.json SHA-256:  {result.manifest_hash}", bold=True))
-        typer.echo(
-            "  Compare this against the hash recorded when the bundle was exported. "
-            "The file checks above cannot detect an edit that also updated the manifest."
-        )
+        typer.echo("  Compare this against the hash recorded when the bundle was exported.")
+        typer.echo("  The file checks above cannot detect an edit that also updated the manifest.")
     raise typer.Exit(code=0 if result.intact else 1)
 
 

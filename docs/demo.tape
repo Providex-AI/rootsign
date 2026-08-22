@@ -6,14 +6,16 @@
 #   * the project venv at .venv/ with rootsign installed (uv sync)
 #
 # No database needed since v0.2.0 — the demo runs on the default JSONL
-# backend and writes to /tmp/rs_demo_data.
+# backend and writes to /tmp/rs_demo_data. The export beat writes a bundle to
+# /tmp/rs_demo_bundles; demo_for_gif.py wipes both, because `export` refuses to
+# overwrite an existing bundle and a second take would otherwise fail.
 
 Output docs/demo.gif
 
 Set FontFamily "Menlo"
 Set FontSize 16
 Set Width 1100
-Set Height 340
+Set Height 560
 Set Padding 24
 Set Theme "Catppuccin Mocha"
 Set TypingSpeed 60ms
@@ -50,6 +52,14 @@ Type "rootsign verify --local $(cat /tmp/rs_demo_session)"
 Sleep 300ms
 Enter
 Sleep 2500ms
+
+# Step 4: the beat that leaves engineering — hand the session to someone who
+# will never open a JSONL file. The manifest hash is the line worth pausing on,
+# so it gets the longest sleep in the tape.
+Type "rootsign export --local $(cat /tmp/rs_demo_session) --out /tmp/rs_demo_bundles"
+Sleep 300ms
+Enter
+Sleep 4000ms
 
 # Final breath before the loop restarts
 Sleep 1500ms
