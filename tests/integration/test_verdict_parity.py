@@ -144,11 +144,12 @@ async def _damage_postgres(db, session_id: UUID, *, drop: set[int], tamper: set[
         else:
             await db.execute(update(Action).where(*pk).values(tool_name=TAMPERED_TOOL))
     await db.commit()
-    # These are Core statements, so the ORM identity map still holds the
-    # pre-damage instances and `expire_on_commit=False` will happily hand them
-    # back to the next SELECT. Detach them: the verifier must read what is
-    # actually on disk, which is also what an out-of-band edit looks like.
-    db.expunge_all()
+    # No expunge/expire needed, and adding one would imply a hazard that does
+    # not exist here: these are ORM-enabled DML statements executed through the
+    # session, so SQLAlchemy synchronizes the identity map (synchronize_session
+    # defaults to "auto") and the verifier's next SELECT sees the damage even
+    # with `expire_on_commit=False`. A raw `text()` UPDATE would NOT synchronize
+    # — that is the case worth a comment, on the day someone writes one.
 
 
 async def _drive_both_backends(*, agent_id: UUID, session_id: UUID, db, jsonl_dir: Path) -> Path:
