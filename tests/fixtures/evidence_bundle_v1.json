@@ -1,0 +1,186 @@
+{
+  "manifest.json": {
+    "bundle_version": "1.0",
+    "generator": "<generator>",
+    "generated_at": "<generated_at>",
+    "session_id": "22222222-2222-4222-8222-222222222222",
+    "agent": {
+      "agent_id": "11111111-1111-4111-8111-111111111111"
+    },
+    "source": {
+      "backend": "jsonl",
+      "location": "<location>"
+    },
+    "verdict": "VALID",
+    "files": {
+      "redaction.json": "d1ba7b041838a3e45d3a10512f5dd962533432ca734057699aa5cdd94dfe2d3b",
+      "timeline.json": "4428f0ed48979e74438cb34486942a5d3039d5b1eb8ce2a05b1a52a334df09a2",
+      "verification.json": "1e6f930ca44f9c8d069c55a3079d0c8081a6cd06bd505785a38d2cd2588776a7"
+    },
+    "compliance": {}
+  },
+  "verification.json": {
+    "verdict": "VALID",
+    "valid": true,
+    "summary": "VALID — 2 records, chain intact",
+    "record_count": 2,
+    "first_invalid_sequence": null,
+    "missing_ranges": [],
+    "error": null,
+    "hash": {
+      "algorithm": "sha256",
+      "canonical_spec": "ADR-001",
+      "note": "Each record's self_hash is recomputed from its canonical fields and checked against the stored value; each record's prev_action_hash must equal its predecessor's self_hash."
+    },
+    "records": [
+      {
+        "sequence_number": 1,
+        "action_id": "00000002-0000-4000-8000-000000000000",
+        "timestamp": "2026-08-21T09:00:00+00:00",
+        "tool_name": "send_email",
+        "prev_action_hash": null,
+        "self_hash": "d4811c41c86b62ad2d94ba1f6b7f9ce8dd24e28e177878235e9134d93ffbfebf",
+        "chain_status": "verified"
+      },
+      {
+        "sequence_number": 2,
+        "action_id": "00000003-0000-4000-8000-000000000000",
+        "timestamp": "2026-08-21T09:00:00+00:00",
+        "tool_name": "wire_transfer",
+        "prev_action_hash": "d4811c41c86b62ad2d94ba1f6b7f9ce8dd24e28e177878235e9134d93ffbfebf",
+        "self_hash": "4090a54494bb553408254fcdc691d0898e0d3ed47045ab7c30184071c7d36bea",
+        "chain_status": "verified"
+      }
+    ]
+  },
+  "timeline.json": {
+    "session": {
+      "session_id": "22222222-2222-4222-8222-222222222222",
+      "agent_id": "11111111-1111-4111-8111-111111111111",
+      "objective": "close the Q3 ledger",
+      "user_id": "finance-bot",
+      "status": "completed",
+      "start_time": "2026-08-21T09:00:00+00:00",
+      "end_time": "2026-08-21T09:00:00+00:00",
+      "action_count": 2,
+      "decision_count": 1,
+      "approval_count": 1
+    },
+    "previews": {
+      "included": true,
+      "note": null,
+      "withheld_fields": [],
+      "withheld_from_events": 0
+    },
+    "events": [
+      {
+        "type": "SESSION_OPEN",
+        "timestamp": "2026-08-21T09:00:00+00:00",
+        "objective": "close the Q3 ledger",
+        "user_id": "finance-bot"
+      },
+      {
+        "type": "DECISION",
+        "timestamp": "2026-08-21T09:00:00+00:00",
+        "decision_id": "00000001-0000-4000-8000-000000000000",
+        "selected_action": "escalate_to_human",
+        "confidence": 0.41,
+        "alternatives_considered": [
+          "auto_approve",
+          "reject"
+        ],
+        "reasoning_summary": "transfer exceeds the unattended threshold",
+        "inputs_summary": null
+      },
+      {
+        "type": "ACTION",
+        "timestamp": "2026-08-21T09:00:00+00:00",
+        "sequence_number": 1,
+        "action_id": "00000002-0000-4000-8000-000000000000",
+        "tool_name": "send_email",
+        "authorization_status": "auto_authorized",
+        "duration_ms": 412,
+        "decision_id": null,
+        "input_hash": "a65990476751e54101b8be215d0e724eb7431ede8044e86ef0c9624e61fbaf4a",
+        "output_hash": "e610d4e5d4a621dc4c4658b077ddacdba11fecd3a78150a6dc7af515ef95b9b9",
+        "input_preview": {
+          "to": "[REDACTED]",
+          "subject": "Q3 invoice",
+          "cc": [
+            "ops@example.com"
+          ]
+        },
+        "output_preview": {
+          "status": "sent"
+        }
+      },
+      {
+        "type": "ACTION",
+        "timestamp": "2026-08-21T09:00:00+00:00",
+        "sequence_number": 2,
+        "action_id": "00000003-0000-4000-8000-000000000000",
+        "tool_name": "wire_transfer",
+        "authorization_status": "human_rejected",
+        "duration_ms": null,
+        "decision_id": null,
+        "input_hash": "fc2917086d6fe1c2331777cf9aaf35e79b1f176a5fa92c6bd43847669658e574",
+        "output_hash": null,
+        "input_preview": {
+          "account": "[REDACTED]",
+          "amount": 250000,
+          "currency": "GBP"
+        },
+        "output_preview": null
+      },
+      {
+        "type": "APPROVAL",
+        "timestamp": "2026-08-21T09:00:00+00:00",
+        "approval_id": "00000004-0000-4000-8000-000000000000",
+        "action_id": "00000003-0000-4000-8000-000000000000",
+        "approver_id": "sile",
+        "approver_type": "human",
+        "decision": "rejected",
+        "decision_reason": "over the mandate for an unattended run",
+        "response_latency_ms": 91000,
+        "context_presented": {
+          "tool_name": "wire_transfer",
+          "amount": "[REDACTED]"
+        }
+      },
+      {
+        "type": "SESSION_CLOSE",
+        "timestamp": "2026-08-21T09:00:00+00:00",
+        "status": "completed"
+      }
+    ]
+  },
+  "redaction.json": {
+    "sentinel": "[REDACTED]",
+    "rule_set": {
+      "name": null,
+      "provenance": "RootSign does not record which redaction rule set was active when a session ran, and it is not derivable from stored records. The paths below are the fields that carry the redaction sentinel in the stored payloads — evidence that redaction happened, not evidence of which rule caused it."
+    },
+    "totals": {
+      "actions_with_redactions": 2,
+      "redacted_fields": 2
+    },
+    "records": [
+      {
+        "sequence_number": 1,
+        "action_id": "00000002-0000-4000-8000-000000000000",
+        "input_paths": [
+          "to"
+        ],
+        "output_paths": []
+      },
+      {
+        "sequence_number": 2,
+        "action_id": "00000003-0000-4000-8000-000000000000",
+        "input_paths": [
+          "account"
+        ],
+        "output_paths": []
+      }
+    ]
+  }
+}

@@ -69,12 +69,37 @@ docs(adr): add ADR-004 for retry strategy
 - Framework integrations must pass contract tests on all supported framework versions (see CI matrix)
 - Run `ruff check .` and `ruff format .` before pushing
 
+### Golden fixtures
+
+Three fixtures in `tests/fixtures/` freeze contracts that other people's code
+depends on. A failure against one is a decision, not a bug:
+
+| Fixture | Freezes | If it fails |
+| --- | --- | --- |
+| `hash_vectors.json` | the canonical Action hash (ADR-001) | stop — a new ADR is required, see below |
+| `redaction_vectors.json` | the PII rule-set mappings (ADR-006) | confirm the mapping change is intended |
+| `evidence_bundle_v1.json` | the `rootsign export` bundle schema (ADR-014) | see below |
+
+The bundle schema is read by Phase 2 tooling and by anything a partner builds
+on an exported bundle. **Additive** changes (a new optional field, content in
+the reserved `compliance` block) are fine — regenerate and commit the diff:
+
+```bash
+ROOTSIGN_UPDATE_GOLDEN=1 python -m pytest tests/unit/test_export_golden.py
+```
+
+Renaming or removing a field is a **bundle version bump**: change
+`EVIDENCE_BUNDLE_VERSION` in `rootsign/sdk/export.py` in the same PR, and say
+why in the description. Never regenerate a fixture to make a red test green
+without first deciding which of the two you are doing.
+
 ## What we will NOT merge
 
 - Changes to `compute_action_self_hash` canonical spec (see [ADR-001](docs/adr/ADR-001-hash-canonical-spec.md)) without a new ADR approved by the maintainer
 - Synchronous SQLAlchemy in any non-Alembic code
 - Mock-based integration tests (real PostgreSQL + TimescaleDB only — see [the data model rationale](AGENTS.md))
 - Any PR that reduces test coverage below 85% overall
+- A regenerated `evidence_bundle_v1.json` that renames or removes a field without a matching `EVIDENCE_BUNDLE_VERSION` bump (see [ADR-014](docs/adr/ADR-014-export-evidence-bundle.md))
 - Code that swallows ingest failures silently (RootSign's promise is that ingest never raises into the agent, but failures *must* be logged at WARNING level — see [ADR-002](docs/adr/ADR-002-transport-agnostic-client.md))
 
 ## Adding a new framework integration
