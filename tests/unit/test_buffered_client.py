@@ -22,10 +22,23 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 from rootsign.sdk.buffered_client import BufferedIngestClient, _BufferedResponse, _should_buffer
+from rootsign.sdk.client import IngestClient
+
+
+def _sequential_inner() -> AsyncMock:
+    """A transport with `handle()` and nothing else.
+
+    `spec=IngestClient` is load-bearing, not decoration: an unspec'd
+    `AsyncMock` auto-creates *every* attribute, so it would answer the
+    duck-typed `handle_batch` / `owns_retry` probes (ADR-013) affirmatively
+    and route these tests down the batch path they are not testing. Spec'ing
+    to the ABC models the real jsonl / postgres inners, which have neither.
+    """
+    return AsyncMock(spec=IngestClient)
 
 
 def make_mock_inner() -> AsyncMock:
-    inner = AsyncMock()
+    inner = _sequential_inner()
     inner.handle.return_value = MagicMock(status="accepted")
     return inner
 
@@ -119,7 +132,7 @@ class TestBufferedIngestClientUnit:
         assert inner.handle.call_count == 1
 
     async def test_retry_on_inner_failure(self):
-        inner = AsyncMock()
+        inner = _sequential_inner()
         # Fail twice, succeed on the third attempt.
         inner.handle.side_effect = [
             Exception("fail"),
@@ -136,7 +149,7 @@ class TestBufferedIngestClientUnit:
     async def test_failed_send_requeued_to_front(self):
         # After max_retries are exhausted the record is re-queued (never
         # silently lost mid-session) — it rides the next flush.
-        inner = AsyncMock()
+        inner = _sequential_inner()
         inner.handle.side_effect = RuntimeError("boom")  # always fails
         client = BufferedIngestClient(inner, max_retries=1, flush_interval_seconds=999)
         await client.handle(auto_action())  # lazily starts the background loop

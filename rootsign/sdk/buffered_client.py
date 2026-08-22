@@ -22,6 +22,18 @@ envelope — `SESSION_OPEN`/`SESSION_CLOSE`, `DECISION_RECORD`,
 buffer (preserving chain order) then passes straight through to the inner
 client, returning the store's real response.
 
+**Batch flush (ADR-013).** A flush forwards the whole batch in one call when
+the inner client exposes `handle_batch(list) -> list` — which the cloud
+transport does, turning an N-record flush into one HTTP round-trip. The probe
+is duck-typed on purpose: `handle_batch` is deliberately NOT on the
+`IngestClient` ABC, so third-party transports (and the jsonl / postgres inners,
+which have no batch API) keep routing through sequential `handle()` untouched.
+
+**Exactly one layer retries.** A transport that owns its own retry loop sets
+`owns_retry = True`; this client then makes a single attempt per flush instead
+of stacking `max_retries` on top of the transport's, which would multiply into
+3 x 3 requests per flush (ADR-013 Decision 3).
+
 Use as an async context manager to guarantee a final flush on exit.
 """
 
@@ -68,6 +80,19 @@ def _should_buffer(envelope: dict[str, Any]) -> bool:
         return False
     payload = envelope.get("payload") or {}
     return payload.get("authorization_status") == "auto_authorized"
+
+
+def _needs_retry(response: Any) -> bool:
+    """True for a rejection the server marked retryable.
+
+    Honors the wire `retryable` flag rather than the code (ingest-spec-v1
+    §9.3), so an `error_code` this SDK predates is still classified the way
+    the server intended. Anything that isn't a rejection — including the
+    synthetic `_BufferedResponse` — is left alone.
+    """
+    return getattr(response, "status", None) == "rejected" and bool(
+        getattr(response, "retryable", False)
+    )
 
 
 class BufferedIngestClient(IngestClient):
@@ -135,34 +160,87 @@ class BufferedIngestClient(IngestClient):
                 return
             batch = list(self._buffer)
             self._buffer.clear()
-        failed: list[dict[str, Any]] = []
-        for envelope in batch:
-            if not await self._send_with_retry(envelope):
-                failed.append(envelope)
+        failed = await self._send(batch)
         if failed:
             # Re-queue at the FRONT so FIFO order is preserved on next flush.
             async with self._lock:
                 self._buffer.extendleft(reversed(failed))
 
+    def _attempts(self) -> int:
+        """How many times this client may send before giving up.
+
+        One, when the inner transport runs its own retry loop — stacking two
+        bounded retries multiplies them (ADR-013 Decision 3). The probe is
+        duck-typed: an inner without the flag keeps the historical behavior.
+        """
+        return 1 if getattr(self._inner, "owns_retry", False) else self._max_retries
+
+    async def _send(self, batch: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Forward a drained batch; return the envelopes that must be re-queued."""
+        handle_batch = getattr(self._inner, "handle_batch", None)
+        if callable(handle_batch):
+            return await self._send_batch_with_retry(handle_batch, batch)
+        failed: list[dict[str, Any]] = []
+        for envelope in batch:
+            if not await self._send_with_retry(envelope):
+                failed.append(envelope)
+        return failed
+
+    async def _send_batch_with_retry(
+        self, handle_batch: Any, batch: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Forward the whole batch in one call; retry only the failed elements.
+
+        Returns the envelopes still unsent after the last attempt. Never
+        raises (ADR-002). A non-retryable rejection is NOT re-queued — it is
+        deterministic, so replaying it only re-walks the same failure.
+        """
+        pending = list(batch)
+        attempts = self._attempts()
+        delay = 0.1
+        for attempt in range(attempts):
+            try:
+                responses = list(await handle_batch(pending))
+            except Exception as e:  # noqa: BLE001 — see failure-isolation rule
+                logger.warning("rootsign: buffered batch flush raised: %s", e)
+                responses = []
+            failed = [env for env, resp in zip(pending, responses) if _needs_retry(resp)]
+            # A short response array is a protocol violation (spec §7.1); treat
+            # the unanswered tail as unsent rather than silently dropping it.
+            failed.extend(pending[len(responses) :])
+            if not failed:
+                return []
+            pending = failed
+            if attempt < attempts - 1:
+                await asyncio.sleep(delay)
+                delay *= 2
+        logger.error(
+            "rootsign: buffered batch flush left %d record(s) unsent after %d attempt(s)",
+            len(pending),
+            attempts,
+        )
+        return pending
+
     async def _send_with_retry(self, envelope: dict[str, Any]) -> bool:
         """Forward one envelope with bounded exponential backoff.
 
-        Returns True on success, False after `max_retries` failures. Never
-        raises — the never-crash-the-agent contract (ADR-002).
+        Returns True on success, False after the attempt budget is spent.
+        Never raises — the never-crash-the-agent contract (ADR-002).
         """
+        attempts = self._attempts()
         delay = 0.1
-        for attempt in range(self._max_retries):
+        for attempt in range(attempts):
             try:
                 await self._inner.handle(envelope)
                 return True
             except Exception as e:  # noqa: BLE001 — see failure-isolation rule
-                if attempt < self._max_retries - 1:
+                if attempt < attempts - 1:
                     await asyncio.sleep(delay)
                     delay *= 2
                 else:
                     logger.error(
-                        "rootsign: buffered flush failed after %d retries: %s",
-                        self._max_retries,
+                        "rootsign: buffered flush failed after %d attempt(s): %s",
+                        attempts,
                         e,
                     )
         return False
@@ -176,7 +254,13 @@ class BufferedIngestClient(IngestClient):
                 logger.warning("rootsign: background flush error: %s", e)
 
     async def close(self) -> None:
-        """Cancel the background task and perform a final flush."""
+        """Cancel the background task, flush, then close the inner client.
+
+        The inner close is duck-typed and best-effort. Only the cloud
+        transport currently owns closable resources (an `httpx.AsyncClient`
+        connection pool) — the jsonl and postgres inners have no `close`, so
+        this is a no-op for them.
+        """
         self._closed = True
         if self._flush_task is not None:
             self._flush_task.cancel()
@@ -186,6 +270,14 @@ class BufferedIngestClient(IngestClient):
                 pass
             self._flush_task = None
         await self.flush()
+        inner_close = getattr(self._inner, "close", None)
+        if callable(inner_close):
+            try:
+                result = inner_close()
+                if asyncio.iscoroutine(result):
+                    await result
+            except Exception as e:  # noqa: BLE001 — close must never raise
+                logger.warning("rootsign: inner client close failed: %s", e)
 
     async def __aenter__(self) -> BufferedIngestClient:
         await self.start()

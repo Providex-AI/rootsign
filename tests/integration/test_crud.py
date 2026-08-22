@@ -212,10 +212,88 @@ class TestHashChain:
         result = await crud.action.verify_chain(db, session_id=s.session_id)
         assert result == {
             "valid": True,
+            # `verdict` / `missing_ranges` joined additively in v0.3.0 (ADR-013
+            # Decision 4b). This dict is published as an MCP tool result, so the
+            # exact-equality assertion is deliberate: it fails loudly if a key is
+            # ever renamed or dropped rather than added.
+            "verdict": "VALID",
             "record_count": 0,
             "first_invalid_sequence": None,
+            "missing_ranges": [],
             "error": None,
         }
+
+    async def test_a_deleted_row_verifies_as_incomplete(self, db: AsyncSession):
+        """Gaps are as real in Postgres as they are offline (ADR-013 D4b).
+
+        A deleted row is arguably the more audit-relevant INCOMPLETE: it is
+        what a partial sync upload, or someone with table access, leaves
+        behind. Before the verdict contract this reported TAMPERED, because
+        the next row's `prev_action_hash` names a row that is gone.
+        """
+        from sqlalchemy import delete
+
+        from rootsign.models.action import Action
+
+        agent = await _make_agent(db)
+        s = await _make_session(db, agent.agent_id)
+        rows = [
+            await crud.action.create_with_hash(
+                db, obj_in=_action_create(s.session_id, tool_name=f"t{i}"), session_obj=s
+            )
+            for i in range(4)
+        ]
+
+        victim = rows[1]  # sequence 2
+        # Hypertable-safe two-column form (action_id, timestamp).
+        await db.execute(
+            delete(Action).where(
+                Action.action_id == victim.action_id, Action.timestamp == victim.timestamp
+            )
+        )
+        await db.flush()
+
+        result = await crud.action.verify_chain(db, session_id=s.session_id)
+
+        assert result["verdict"] == "INCOMPLETE"
+        assert result["valid"] is False
+        assert result["missing_ranges"] == [(2, 2)]
+        assert result["record_count"] == 3
+        assert "missing" in (result["error"] or "")
+
+    async def test_a_deleted_row_plus_an_altered_row_reports_tampered(self, db: AsyncSession):
+        """Worst verdict wins, and the gap is still listed in the detail."""
+        from sqlalchemy import delete, update
+
+        from rootsign.models.action import Action
+
+        agent = await _make_agent(db)
+        s = await _make_session(db, agent.agent_id)
+        rows = [
+            await crud.action.create_with_hash(
+                db, obj_in=_action_create(s.session_id, tool_name=f"t{i}"), session_obj=s
+            )
+            for i in range(5)
+        ]
+
+        gone, forged = rows[1], rows[3]  # sequences 2 and 4
+        await db.execute(
+            delete(Action).where(
+                Action.action_id == gone.action_id, Action.timestamp == gone.timestamp
+            )
+        )
+        await db.execute(
+            update(Action)
+            .where(Action.action_id == forged.action_id, Action.timestamp == forged.timestamp)
+            .values(tool_name="ATTACKER_REWROTE_THIS")
+        )
+        await db.flush()
+
+        result = await crud.action.verify_chain(db, session_id=s.session_id)
+
+        assert result["verdict"] == "TAMPERED"
+        assert result["first_invalid_sequence"] == 4
+        assert result["missing_ranges"] == [(2, 2)]
 
     # AC-2.11
     async def test_get_session_chain_orders_by_sequence_number(

@@ -201,14 +201,17 @@ jobs:
           python-version: '3.12'
       - name: Install core only (no extras)
         run: pip install .
-      - name: Zero database packages resolved
+      - name: Zero database or cloud packages resolved
+        # httpx is in the `test`/`dev`/`mcp` extras, so a developer env always
+        # has it — this job is the only place its absence can be asserted
+        # (ADR-013 Decision 2).
         run: |
           python - <<'PY'
           import importlib.util as u
-          bad = [m for m in ("sqlalchemy","asyncpg","psycopg2","greenlet","alembic")
+          bad = [m for m in ("sqlalchemy","asyncpg","psycopg2","greenlet","alembic","httpx")
                  if u.find_spec(m) is not None]
-          assert not bad, f"core install pulled DB packages: {bad}"
-          print("no DB packages installed — OK")
+          assert not bad, f"core install pulled optional-extra packages: {bad}"
+          print("no DB or cloud packages installed — OK")
           PY
       - name: import rootsign + facade surface works DB-free
         run: |
@@ -238,6 +241,24 @@ jobs:
               assert "rootsign[postgres]" in str(e), e
               print("RootSignPostgresExtraRequired raised OK")
           PY
+      - name: cloud backend without extra raises actionable error
+        # The `cloud` extra's twin of the postgres check above (ADR-013 D2 /
+        # Sprint B T2.1). HttpIngestClient must stay importable without httpx
+        # and fail with the install command when it is actually selected.
+        env:
+          ROOTSIGN_BACKEND: cloud
+        run: |
+          python - <<'PY'
+          from rootsign.errors import RootSignCloudExtraRequired
+          from rootsign.sdk.client import HttpIngestClient, get_ingest_client
+          assert HttpIngestClient.owns_retry is True  # importable without the extra
+          try:
+              get_ingest_client()
+              raise SystemExit("expected RootSignCloudExtraRequired")
+          except RootSignCloudExtraRequired as e:
+              assert "rootsign[cloud]" in str(e), e
+              print("RootSignCloudExtraRequired raised OK")
+          PY
       - name: Console scripts run DB-free (CLI tripwire)
         # `import rootsign` passing is NOT sufficient. The console script entry
         # point imports `rootsign.sdk.cli`, a different import graph that the
@@ -256,6 +277,12 @@ jobs:
           rootsign-admin --help > /dev/null
           rootsign-admin start-db --help > /dev/null
           rootsign-admin stop-db --help > /dev/null
+          # `sync` is the cloud-extra command (ADR-013 D4 / T2.5). Its --help
+          # and its --dry-run must work on a bare install: reading the spool
+          # needs no extra, and --dry-run is how an operator finds out what is
+          # waiting before deciding whether to install anything.
+          rootsign-admin sync --help > /dev/null
+          rootsign-admin sync --dry-run > /dev/null
           # Store-exported fixture, not a checked-in file: let the JSONL backend
           # write a real session so the chain is produced by the same code path
           # that verifies it. Never hand-construct a self_hash (ADR-001).
@@ -277,6 +304,36 @@ jobs:
           PY
           )"
           rootsign verify --local "$HOME/.rootsign/sessions/$SESSION_ID.jsonl"
+          # Evidence export is a bare-install path too (ADR-014 / T3.5): it is
+          # how a cloud-mode user turns a spooled session into something they
+          # can hand to a compliance officer, and it must not need a database.
+          rootsign export --local "$HOME/.rootsign/sessions/$SESSION_ID.jsonl" \
+            --out "$HOME/bundles" | tee /tmp/export.out
+          grep -q "manifest.json SHA-256" /tmp/export.out || {
+            echo "export did not print the manifest anchor"; exit 1; }
+          rootsign export --check "$HOME/bundles/evidence-$SESSION_ID" | grep -q "INTACT" || {
+            echo "a freshly written bundle failed its own --check"; exit 1; }
+          # Verifying a *spooled* copy of that session must print the replay
+          # breadcrumb — `sync` lives on the operator CLI, so the developer CLI
+          # is where it has to be discoverable (ADR-013 Decision 4).
+          mkdir -p "$HOME/.rootsign/spool/sessions"
+          cp "$HOME/.rootsign/sessions/$SESSION_ID.jsonl" \
+             "$HOME/.rootsign/spool/sessions/$SESSION_ID.jsonl"
+          rootsign verify --local "$HOME/.rootsign/spool/sessions/$SESSION_ID.jsonl" \
+            | grep -q "rootsign-admin sync" || {
+              echo "verify --local on a spool file lost the sync breadcrumb"; exit 1; }
+          # And syncing it on a bare install must name the cloud extra rather
+          # than dying inside httpx's import graph.
+          out="$(ROOTSIGN_API_KEY=sk-ci rootsign-admin sync 2>&1)" && {
+            echo "expected sync to fail without the cloud extra"; exit 1; }
+          echo "$out" | grep -q "rootsign\[cloud\]" || {
+            echo "missing cloud install hint:"; echo "$out"; exit 1; }
+          # `if`, not `&& { }`: this block runs under `set -e`, where a
+          # grep that finds nothing would end the whole step with status 1.
+          if echo "$out" | grep -qi "Traceback"; then
+            echo "leaked traceback from sync"; echo "$out"; exit 1
+          fi
+          rm -rf "$HOME/.rootsign/spool"
           echo "console scripts OK, DB-free"
       - name: DB-backed subcommands fail with the install hint, not a traceback
         # The other half of the same bug: these commands legitimately need the
@@ -286,6 +343,7 @@ jobs:
           set -uo pipefail
           # Every DB-backed subcommand across BOTH console scripts.
           for cmd in "rootsign verify 550e8400-e29b-41d4-a716-446655440001" \
+                     "rootsign export 550e8400-e29b-41d4-a716-446655440001" \
                      "rootsign approve --list" \
                      "rootsign approve 550e8400-e29b-41d4-a716-446655440001" \
                      "rootsign-admin status" \

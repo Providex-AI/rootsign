@@ -87,6 +87,24 @@ def _run_alembic_on_test_db() -> None:
     )
 
 
+@pytest.fixture(autouse=True)
+def _isolate_rootsign_data_dir(tmp_path_factory, monkeypatch):
+    """No test may write into the developer's real `~/.rootsign`.
+
+    Most paths take an explicit `data_dir=`, but anything that resolves one
+    from `SDKSettings` does not — the cloud transport's spool root (ADR-013
+    Decision 4) is the first such path, and it wrote real files under the
+    author's home directory the first time its tests ran. Redirecting
+    `ROOTSIGN_DATA_DIR` per test makes that structurally impossible;
+    `ROOTSIGN_SPOOL_DIR` is cleared so it derives from the redirect.
+
+    Tests that assert on the *defaults* delenv these first (see
+    `test_sdk_config.py`).
+    """
+    monkeypatch.setenv("ROOTSIGN_DATA_DIR", str(tmp_path_factory.mktemp("rootsign-home")))
+    monkeypatch.delenv("ROOTSIGN_SPOOL_DIR", raising=False)
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _bootstrap_test_db():
     """Bootstrap the test DB once per session.

@@ -8,11 +8,18 @@ is a drop-in at every call site — including as the inner of
 
 **Client-side chain compute (ADR-011 Decision 3).** In Postgres mode the store
 assigns `sequence_number` / `prev_action_hash` and computes `self_hash` under a
-row lock. There is no store here, so this client replicates that logic in
-memory per session — `prev = chain tail`, `seq = count + 1`, `action_id =
-uuid4()` — and computes `self_hash` with the **same frozen canonical formula**
-(`rootsign.hashing.compute_action_self_hash`, ADR-001). No second hash formula
-is written; the cross-backend contract test pins byte-identical results.
+row lock. There is no store here, so the chain is advanced in memory per
+session by the shared `rootsign.chain_state.ChainRegistry` — the same helper
+the cloud transport uses (ADR-013 Decision 1), so there is one client-side
+sealer rather than one per backend, and one place that mints `action_id`.
+`self_hash` still comes from the **frozen canonical formula**
+(`rootsign.hashing.compute_action_self_hash`, ADR-001); the cross-backend
+contract test pins byte-identical results across all three backends.
+
+A payload that arrives **already sealed** keeps its seal (see
+`ChainState.seal`): that is how a spooled cloud envelope lands in a session
+file under the identity it was sealed with, instead of being re-minted into a
+chain that never existed.
 
 **Record shape.** ACTION_RECORD lines are written *flat* — the eight canonical
 fields at the top level — so `verify_session_local` can recompute the hash
@@ -35,11 +42,11 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import json
 
-from rootsign.hashing import compute_action_self_hash
+from rootsign.chain_state import ChainRegistry, new_record_id
 from rootsign.ingest.idempotency import IdempotencyStore
 from rootsign.ingest.schemas import ErrorCode, EventType, IngestResponse
 from rootsign.sdk.client import IngestClient
@@ -53,16 +60,6 @@ _FSYNC_MODES = ("chain", "always", "never")
 _CHAIN_CRITICAL = {EventType.ACTION_RECORD.value, EventType.APPROVAL_RECORD.value}
 
 
-class _ChainState:
-    """Per-session in-memory tail of the hash chain."""
-
-    __slots__ = ("tail", "count")
-
-    def __init__(self) -> None:
-        self.tail: str | None = None
-        self.count: int = 0
-
-
 class JsonlIngestClient(IngestClient):
     """Append-only JSONL local backend. See ADR-011."""
 
@@ -72,13 +69,16 @@ class JsonlIngestClient(IngestClient):
         data_dir: str | os.PathLike[str] | None = None,
         fsync: str = "chain",
         idempotency: IdempotencyStore | None = None,
+        chains: ChainRegistry | None = None,
     ) -> None:
         if fsync not in _FSYNC_MODES:
             raise ValueError(f"ROOTSIGN_JSONL_FSYNC must be one of {_FSYNC_MODES}, got {fsync!r}")
         self._data_dir = Path(data_dir if data_dir is not None else DEFAULT_DATA_DIR).expanduser()
         self._fsync = fsync
         self._idempotency = idempotency if idempotency is not None else IdempotencyStore()
-        self._chains: dict[str, _ChainState] = {}
+        # Shared with the cloud transport when this client is its spool
+        # (ADR-013 Decision 4) — pass a registry in to share one chain.
+        self._chains = chains if chains is not None else ChainRegistry()
         # Serializes sequence assignment + file writes (mirrors
         # LocalIngestClient._handle_lock). Single writer per session file.
         self._lock = asyncio.Lock()
@@ -111,7 +111,9 @@ class JsonlIngestClient(IngestClient):
             if event_type == EventType.ACTION_RECORD.value:
                 response, record = self._build_action(envelope, event_id, session_id)
             else:
-                response, record = self._build_non_action(envelope, event_id, event_type, session_id)
+                response, record = self._build_non_action(
+                    envelope, event_id, event_type, session_id
+                )
             self._append_line(session_id, record, do_fsync=self._should_fsync(event_type))
 
         await self._idempotency.set(event_id, response, emitted_at)
@@ -121,25 +123,14 @@ class JsonlIngestClient(IngestClient):
         self, envelope: dict[str, Any], event_id: UUID, session_id: str
     ) -> tuple[IngestResponse, dict[str, Any]]:
         payload = envelope.get("payload") or {}
-        state = self._chains.setdefault(session_id, _ChainState())
-        action_id = uuid4()
-        seq = state.count + 1
-        prev = state.tail
-        # Same 8 canonical fields the store feeds compute_action_self_hash.
-        self_hash = compute_action_self_hash(
-            {
-                "action_id": action_id,
-                "session_id": session_id,
-                "tool_name": payload["tool_name"],
-                "input_hash": payload["input_hash"],
-                "output_hash": payload.get("output_hash"),
-                "prev_action_hash": prev,
-                "timestamp": payload["timestamp"],
-                "sequence_number": seq,
-            }
-        )
-        state.tail = self_hash
-        state.count = seq
+        # One sealer for every client-side backend (T2.3). Mints the id,
+        # assigns the sequence, links prev -> self via the frozen formula —
+        # or adopts a seal the payload already carries.
+        sealed = self._chains.seal(session_id, payload)
+        action_id = sealed.action_id
+        seq = sealed.sequence_number
+        prev = sealed.prev_action_hash
+        self_hash = sealed.self_hash
 
         # Flat record — verify_session_local reads the canonical fields at the
         # top level. Envelope metadata + redacted payloads ride along so the
@@ -164,6 +155,14 @@ class JsonlIngestClient(IngestClient):
             "output_redacted": payload.get("output_redacted"),
             "authorization_status": payload.get("authorization_status", "auto_authorized"),
             "decision_id": payload.get("decision_id"),
+            # Non-canonical (excluded from `self_hash` by ADR-001) but part of
+            # the wire payload, so they have to be here or the spool is lossy:
+            # `rootsign-admin sync` rebuilds its envelopes from this line, and a
+            # field the writer dropped is a field the store never receives. The
+            # SDK does not emit either today — only the Phase 0 ingest API
+            # accepts them — which is exactly why it would have gone unnoticed.
+            "duration_ms": payload.get("duration_ms"),
+            "policy_id": payload.get("policy_id"),
         }
         response = IngestResponse.accepted(
             event_id=event_id,
@@ -183,13 +182,26 @@ class JsonlIngestClient(IngestClient):
         record = dict(envelope)
         entity_id: UUID | None = None
         if event_type == EventType.DECISION_RECORD.value:
-            entity_id = uuid4()
+            entity_id = new_record_id()
             record = {**record, "decision_id": str(entity_id)}
         elif event_type == EventType.APPROVAL_RECORD.value:
-            entity_id = uuid4()
+            entity_id = new_record_id()
             record = {**record, "approval_id": str(entity_id)}
         response = IngestResponse.accepted(event_id=event_id, entity_id=entity_id)
         return response, record
+
+    def append_annotation(self, session_id: str, record: dict[str, Any]) -> None:
+        """Append a non-envelope line to a session file.
+
+        Used by the cloud transport's loss ledger (ADR-013 Decision 4a) to
+        document records that never reached disk. Not an ingest path: no
+        idempotency, no chain advance, no response. Both verifiers rebuild the
+        chain from ACTION_RECORD lines, so an annotation is inert to them.
+
+        Raises `OSError` if the file is still unwritable — the caller decides
+        what to do about a session file that cannot even take its own epitaph.
+        """
+        self._append_line(session_id, record, do_fsync=True)
 
     def _should_fsync(self, event_type: str) -> bool:
         if self._fsync == "always":

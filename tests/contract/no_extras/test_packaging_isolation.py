@@ -1,9 +1,10 @@
 """Packaging-isolation contract tests (ADR-011, Workstream 1).
 
-The core install (`pip install rootsign`, no extras) must be dependency-light
-and **DB-free**: `import rootsign` and the whole facade surface must work with
-the SQLAlchemy/asyncpg/alembic stack absent, and selecting the Postgres
-backend without the `postgres` extra must raise an actionable error.
+The core install (`pip install rootsign`, no extras) must be dependency-light,
+**DB-free**, and **httpx-free**: `import rootsign` and the whole facade surface
+must work with the SQLAlchemy/asyncpg/alembic stack absent, and selecting a
+backend whose extra is missing — `postgres` (ADR-011) or `cloud` (ADR-013) —
+must raise an actionable error naming the install command.
 
 Two layers here:
 
@@ -41,6 +42,10 @@ DB_DRIVERS = ("sqlalchemy", "asyncpg", "psycopg2", "greenlet", "alembic")
 # above stayed green.
 DB_STACK_MODULES = ("rootsign.database", "rootsign.crud", "rootsign.models")
 
+# The cloud transport's dependency (ADR-013). Same discipline as the DB stack:
+# lazy imports only, and an actionable error when the extra is missing.
+CLOUD_DEPS = ("httpx",)
+
 # Installed at the top of a fresh interpreter to make the DB stack look absent.
 _BLOCKER = """
 import sys, importlib.abc
@@ -54,12 +59,25 @@ sys.meta_path.insert(0, _Blocker())
 """
 
 
-def _run(script: str, extra_env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+# Hides the DB stack *and* httpx — a true bare install. Kept separate from
+# `_BLOCKER` so the existing DB-free tests are unaffected: several of them
+# import modules (the MCP server) that may legitimately reach for httpx.
+_BLOCKER_BARE = _BLOCKER.replace(
+    '{"sqlalchemy", "asyncpg", "psycopg2", "greenlet", "alembic"}',
+    '{"sqlalchemy", "asyncpg", "psycopg2", "greenlet", "alembic", "httpx"}',
+)
+
+
+def _run(
+    script: str,
+    extra_env: dict[str, str] | None = None,
+    blocker: str = _BLOCKER,
+) -> subprocess.CompletedProcess:
     import os
 
     env = {**os.environ, **(extra_env or {})}
     return subprocess.run(
-        [sys.executable, "-c", _BLOCKER + script],
+        [sys.executable, "-c", blocker + script],
         capture_output=True,
         text=True,
         cwd=str(REPO_ROOT),
@@ -268,6 +286,253 @@ def test_db_backed_sdk_entry_points_raise_actionable_error():
         "    raise AssertionError('mcp session factory did not raise')\n"
         "print('OK')\n",
         extra_env={"ROOTSIGN_BACKEND": "postgres"},
+    )
+    assert result.returncode == 0, result.stderr
+    assert "OK" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# Cloud extra (ADR-013 / Sprint B T2.1)
+# ---------------------------------------------------------------------------
+
+
+def test_no_module_level_httpx_imports_in_sdk_or_mcp():
+    """Guard-rail: httpx is the `cloud` extra — import it inside functions only.
+
+    `rootsign/sdk/client.py` defines `HttpIngestClient`, and the class must
+    stay importable on a bare install: `import rootsign` walks this module,
+    so a module-level `import httpx` would break every bare-install path the
+    way `import sqlalchemy` once did.
+    """
+    offenders = []
+    for base in SDK_DIRS:
+        for py in base.rglob("*.py"):
+            for lineno, line in enumerate(py.read_text().splitlines(), start=1):
+                stripped = line.lstrip()
+                if stripped != line:
+                    continue  # indented → deferred inside a function → allowed
+                for dep in CLOUD_DEPS:
+                    if stripped.startswith((f"import {dep}", f"from {dep} ")):
+                        offenders.append(f"{py.relative_to(REPO_ROOT)}:{lineno}: {stripped}")
+    assert not offenders, "module-level cloud-extra imports found:\n" + "\n".join(offenders)
+
+
+def test_import_client_module_without_httpx():
+    """`HttpIngestClient` must be importable with the cloud extra absent."""
+    result = _run(
+        "from rootsign.sdk.client import HttpIngestClient\n"
+        "assert HttpIngestClient.owns_retry is True\n"
+        "print('OK')\n",
+        blocker=_BLOCKER_BARE,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "OK" in result.stdout
+
+
+def test_cloud_backend_without_extra_raises_actionable_error():
+    """Selecting cloud without the extra → RootSignCloudExtraRequired.
+
+    The twin of the postgres check above: the failure must name
+    `pip install 'rootsign[cloud]'`, not surface a ModuleNotFoundError from
+    inside httpx's import graph.
+    """
+    result = _run(
+        "from rootsign.errors import RootSignCloudExtraRequired\n"
+        "from rootsign.sdk.client import get_ingest_client\n"
+        "try:\n"
+        "    get_ingest_client()\n"
+        "    print('NO_ERROR')\n"
+        "except RootSignCloudExtraRequired as e:\n"
+        "    assert 'rootsign[cloud]' in str(e), str(e)\n"
+        "    print('RAISED_OK')\n",
+        extra_env={"ROOTSIGN_BACKEND": "cloud"},
+        blocker=_BLOCKER_BARE,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "RAISED_OK" in result.stdout, result.stdout + result.stderr
+
+
+def test_export_local_works_without_the_db_stack(tmp_path):
+    """`rootsign export --local` is the bare-install evidence path.
+
+    It is also the only way a cloud-mode user turns a spooled session into
+    something they can hand over, so a module-level DB import anywhere in the
+    export graph would strand exactly the users who need it most. Runs the real
+    command against a real session file with sqlalchemy hidden.
+    """
+    import json
+    from uuid import uuid4
+
+    session_id = str(uuid4())
+    sessions = tmp_path / "sessions"
+    sessions.mkdir(parents=True)
+    # Store-shaped ACTION_RECORD line: flat canonical fields, as ADR-011 writes
+    # them. Hand-built here because the writer cannot run in the blocked env.
+    (sessions / f"{session_id}.jsonl").write_text(
+        json.dumps(
+            {
+                "schema_version": "1.1",
+                "sdk_version": "0.3.0",
+                "event_type": "SESSION_OPEN",
+                "event_id": str(uuid4()),
+                "emitted_at": "2026-08-21T09:00:00+00:00",
+                "agent_id": str(uuid4()),
+                "session_id": session_id,
+                "payload": {"objective": "bare install"},
+            }
+        )
+        + "\n"
+    )
+
+    result = _run(
+        "import rootsign.sdk.cli as cli\n"
+        "from typer.testing import CliRunner\n"
+        f"r = CliRunner().invoke(cli.app, ['export', '--local', {str(sessions / (session_id + '.jsonl'))!r},"
+        f" '--out', {str(tmp_path / 'out')!r}])\n"
+        "assert r.exit_code == 0, r.output\n"
+        "assert 'manifest.json SHA-256' in r.output, r.output\n"
+        "print('OK')\n",
+    )
+    assert result.returncode == 0, result.stderr
+    assert "OK" in result.stdout
+    assert (tmp_path / "out" / f"evidence-{session_id}" / "manifest.json").is_file()
+
+
+def test_export_check_works_without_the_db_stack(tmp_path):
+    """Checking a bundle someone sent must not require anything but Python."""
+    import json
+    from uuid import uuid4
+
+    session_id = str(uuid4())
+    sessions = tmp_path / "sessions"
+    sessions.mkdir(parents=True)
+    (sessions / f"{session_id}.jsonl").write_text(
+        json.dumps(
+            {
+                "schema_version": "1.1",
+                "sdk_version": "0.3.0",
+                "event_type": "SESSION_OPEN",
+                "event_id": str(uuid4()),
+                "emitted_at": "2026-08-21T09:00:00+00:00",
+                "agent_id": str(uuid4()),
+                "session_id": session_id,
+                "payload": {},
+            }
+        )
+        + "\n"
+    )
+    out = tmp_path / "out"
+
+    result = _run(
+        "import rootsign.sdk.cli as cli\n"
+        "from typer.testing import CliRunner\n"
+        "runner = CliRunner()\n"
+        f"e = runner.invoke(cli.app, ['export', '--local', {str(sessions / (session_id + '.jsonl'))!r},"
+        f" '--out', {str(out)!r}])\n"
+        "assert e.exit_code == 0, e.output\n"
+        f"c = runner.invoke(cli.app, ['export', '--check', {str(out / ('evidence-' + session_id))!r}])\n"
+        "assert c.exit_code == 0, c.output\n"
+        "assert 'INTACT' in c.output, c.output\n"
+        "print('OK')\n",
+    )
+    assert result.returncode == 0, result.stderr
+    assert "OK" in result.stdout
+
+
+def test_export_from_postgres_without_the_extra_names_the_extra():
+    """`export <session_id>` legitimately needs the extra — and must say so in
+    one line rather than dying inside sqlalchemy's import graph."""
+    result = _run(
+        "import rootsign.sdk.cli as cli\n"
+        "from typer.testing import CliRunner\n"
+        "r = CliRunner().invoke(cli.app, ['export', '550e8400-e29b-41d4-a716-446655440001'])\n"
+        "assert r.exit_code == 1, r.output\n"
+        "assert 'rootsign[postgres]' in r.output, r.output\n"
+        "assert 'Traceback' not in r.output, r.output\n"
+        "print('OK')\n",
+    )
+    assert result.returncode == 0, result.stderr
+    assert "OK" in result.stdout
+
+
+def test_admin_sync_is_reachable_without_the_cloud_extra():
+    """`rootsign-admin sync --help` and `--dry-run` must work on a bare install.
+
+    `sync` is the one operator command that needs the `cloud` extra to do its
+    job — but not to be *found*, and not to inspect the spool. An operator
+    deciding whether to install anything reads the help and runs the dry run
+    first, and Typer builds the whole command tree on any invocation, so a
+    module-level httpx import in the sync path would break `rootsign-admin`
+    entirely (the ADR-011 console-script defect, one extra over).
+    """
+    result = _run(
+        "import rootsign.cli as admin\n"
+        "from typer.testing import CliRunner\n"
+        "runner = CliRunner()\n"
+        "assert runner.invoke(admin.app, ['sync', '--help']).exit_code == 0\n"
+        "r = runner.invoke(admin.app, ['sync', '--dry-run', '--spool-dir', '/nonexistent'])\n"
+        "assert r.exit_code == 0, r.output\n"
+        "assert 'Nothing to sync' in r.output, r.output\n"
+        "print('OK')\n",
+        blocker=_BLOCKER_BARE,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "OK" in result.stdout
+
+
+def test_admin_sync_without_the_cloud_extra_names_the_extra(tmp_path):
+    """Uploading without the extra must print the install command, not a traceback.
+
+    Reaching the transport requires something to upload, so this writes one
+    spooled session file first — the same shape the JSONL writer produces,
+    since the spool *is* that writer (ADR-013 Decision 4).
+    """
+    import json
+    from uuid import uuid4
+
+    session_id = str(uuid4())
+    sessions = tmp_path / "sessions"
+    sessions.mkdir(parents=True)
+    (sessions / f"{session_id}.jsonl").write_text(
+        json.dumps(
+            {
+                "schema_version": "1.1",
+                "sdk_version": "0.3.0",
+                "event_type": "SESSION_OPEN",
+                "event_id": str(uuid4()),
+                "emitted_at": "2026-08-21T09:00:00+00:00",
+                "agent_id": str(uuid4()),
+                "session_id": session_id,
+                "payload": {"objective": "bare install"},
+            }
+        )
+        + "\n"
+    )
+
+    result = _run(
+        "import rootsign.cli as admin\n"
+        "from typer.testing import CliRunner\n"
+        f"r = CliRunner().invoke(admin.app, ['sync', '--spool-dir', {str(tmp_path)!r}])\n"
+        "assert r.exit_code == 1, r.output\n"
+        "assert 'rootsign[cloud]' in r.output, r.output\n"
+        "assert 'Traceback' not in r.output, r.output\n"
+        "print('OK')\n",
+        extra_env={"ROOTSIGN_API_KEY": "sk-bare-install"},
+        blocker=_BLOCKER_BARE,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "OK" in result.stdout
+
+
+def test_jsonl_default_still_works_without_httpx():
+    """The bare install's default path must not have acquired a cloud dependency."""
+    result = _run(
+        "from rootsign.sdk.client import get_ingest_client\n"
+        "from rootsign.sdk.jsonl_client import JsonlIngestClient\n"
+        "assert isinstance(get_ingest_client(), JsonlIngestClient)\n"
+        "print('OK')\n",
+        extra_env={"ROOTSIGN_BACKEND": "jsonl"},
+        blocker=_BLOCKER_BARE,
     )
     assert result.returncode == 0, result.stderr
     assert "OK" in result.stdout

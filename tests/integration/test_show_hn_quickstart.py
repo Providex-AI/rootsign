@@ -10,6 +10,13 @@ No Docker, no database, no extras:
     async with rootsign.session(...): rootsign.wrap_tools([...])
     $ rootsign verify --local ~/.rootsign/sessions/<id>.jsonl
     VALID ✓  —  3 records, chain intact
+    $ rootsign export --local ~/.rootsign/sessions/<id>.jsonl
+    VALID — 3 records, chain intact  ...  manifest.json SHA-256: <anchor>
+
+The export step is part of the gate, not a bonus: the README's bundle-contents
+table and its promise that the printed anchor is the value `--check` reports
+are both claims a reader will test in their terminal within a minute of
+finishing the quickstart.
 
 `TestShowHNQuickstart` — the "Production backend" section, same code against
 PostgreSQL/TimescaleDB, verified by session id.
@@ -156,6 +163,43 @@ class TestZeroConfigQuickstart:
         assert chain_result.valid is True
         assert chain_result.record_count == 3
 
+        # Step 6: the README's last quickstart line — export the same session
+        # as an evidence bundle, and prove the printed anchor is real by
+        # checking the bundle with it (T4.1 / ADR-014).
+        bundles = tmp_path / "bundles"
+        export = await asyncio.to_thread(
+            runner.invoke,
+            app,
+            ["export", "--local", str(session_file), "--out", str(bundles)],
+        )
+        assert export.exit_code == 0, (
+            f"export --local failed (exit={export.exit_code}):\n{export.output}"
+        )
+        assert "manifest.json SHA-256:" in export.output, (
+            "the README promises the anchor is printed at export"
+        )
+
+        directory = bundles / f"evidence-{ctx.session_id}"
+        assert {p.name for p in directory.iterdir()} == {
+            "manifest.json",
+            "verification.json",
+            "timeline.json",
+            "redaction.json",
+            "report.md",
+            "report.html",
+        }, "the README's bundle-contents table no longer matches what export writes"
+
+        check = await asyncio.to_thread(runner.invoke, app, ["export", "--check", str(directory)])
+        assert check.exit_code == 0, check.output
+        assert "INTACT" in check.output
+        # The anchor an operator writes down has to be the one --check reports.
+        anchor = next(
+            line.split(":", 1)[1].strip()
+            for line in export.output.splitlines()
+            if "manifest.json SHA-256:" in line
+        )
+        assert anchor in check.output
+
     async def test_tampering_a_record_flips_the_verdict(self, tmp_path):
         """The other half of the README claim: tampering is *detected*."""
         rootsign.init(agent="tamper-check")
@@ -192,9 +236,7 @@ class TestShowHNQuickstart:
     `rootsign verify <session_id>` command produces `VALID ✓  —  3 records`.
     """
 
-    async def test_readme_quickstart_end_to_end(
-        self, clean_db, seeded_agent, patched_cli_session
-    ):
+    async def test_readme_quickstart_end_to_end(self, clean_db, seeded_agent, patched_cli_session):
         # Step 1: open the session (README §3 — implicit via rootsign.session()
         # in the final README copy; here we drive the envelope directly so the
         # test reads against a known fixed shape regardless of context-manager
@@ -225,15 +267,9 @@ class TestShowHNQuickstart:
 
         # Step 3: run the tools (simulating agent execution).
         # `await tool.ainvoke(...)` — Flag 2 Rule A pinned.
-        await tools[0].ainvoke(
-            {"customer_id": "acme", "amount": 1500.0}
-        )
-        await tools[1].ainvoke(
-            {"transaction_id": "tx_001", "amount": 1500.0}
-        )
-        await tools[2].ainvoke(
-            {"customer_id": "acme", "message": "Invoice sent"}
-        )
+        await tools[0].ainvoke({"customer_id": "acme", "amount": 1500.0})
+        await tools[1].ainvoke({"transaction_id": "tx_001", "amount": 1500.0})
+        await tools[2].ainvoke({"customer_id": "acme", "message": "Invoice sent"})
 
         # Close the session and commit so the CLI's separate connection
         # can read what we wrote.
@@ -250,12 +286,8 @@ class TestShowHNQuickstart:
         # Step 4: verify via the CLI (README §4). Flag 2 Rule B:
         # asyncio.to_thread isolates the CLI's `asyncio.run` from the
         # test's running loop.
-        result = await asyncio.to_thread(
-            runner.invoke, app, ["verify", str(session_id)]
-        )
-        assert result.exit_code == 0, (
-            f"verify failed (exit={result.exit_code}):\n{result.output}"
-        )
+        result = await asyncio.to_thread(runner.invoke, app, ["verify", str(session_id)])
+        assert result.exit_code == 0, f"verify failed (exit={result.exit_code}):\n{result.output}"
         # The exact terminal output a Show HN reader will see. Locking
         # these three substrings means a README screenshot stays accurate
         # across SDK refactors.
@@ -266,8 +298,6 @@ class TestShowHNQuickstart:
         # Step 5: belt-and-braces — also verify the chain mathematically
         # via the underlying CRUD. If the CLI lies about VALID for some
         # reason, this catches it.
-        chain_result = await action_crud.verify_chain(
-            clean_db, session_id=session_id
-        )
+        chain_result = await action_crud.verify_chain(clean_db, session_id=session_id)
         assert chain_result["valid"] is True
         assert chain_result["record_count"] == 3

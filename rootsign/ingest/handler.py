@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from rootsign import crud
 from rootsign.errors import (
     IngestError,
+    IngestValidationError,
     SessionAlreadyExistsError,
     SessionClosedError,
     SessionNotFoundError,
@@ -185,6 +186,18 @@ class IngestHandler:
     async def _handle_action_record(
         self, env: IngestEnvelope, payload: ActionRecordPayload
     ) -> IngestResponse:
+        # Client-sealed records are the cloud contract (ADR-013 Decision 1),
+        # where the server verifies the seal. This store assigns chain identity
+        # itself, under a row lock, so it has no way to honor one — and
+        # accepting-then-recomputing would fork the chain silently, leaving the
+        # client holding a self_hash the store never stored. Reject loudly.
+        if payload.self_hash is not None or payload.action_id is not None:
+            raise IngestValidationError(
+                "client-sealed ACTION_RECORD (action_id / sequence_number / "
+                "self_hash) is cloud-mode only; the Postgres store assigns chain "
+                "identity under a row lock. See docs/ingest-spec-v1.md §8.2."
+            )
+
         session = await self._require_running_session(env.session_id)
 
         action = await crud.action.create_with_hash(

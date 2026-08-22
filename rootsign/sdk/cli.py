@@ -4,10 +4,16 @@ Subcommands:
 
 * `rootsign version` — print the installed package version.
 * `rootsign verify <session_id>` — verify the tamper-evident hash chain for
-  a session stored in the configured Postgres. Exit 0 = VALID, exit 1 =
-  TAMPERED or error. See Sprint Plan §3.3 and ADR-001/ADR-005.
+  a session stored in the configured Postgres. Exit 0 = VALID, 1 = TAMPERED
+  (a record was altered), 2 = INCOMPLETE (a record is missing); usage errors
+  also exit 1. The three-verdict vocabulary is ADR-013 Decision 4b; see also
+  Sprint Plan §3.3 and ADR-001/ADR-005.
 * `rootsign verify --local <path.jsonl>` — verify a session stored offline
   in a JSONL file. No DB required.
+* `rootsign export <session_id>` — write a self-contained evidence bundle for
+  a session (ADR-014), printing the manifest hash that anchors it. Postgres
+  only in v0.3.0; `--local <path.jsonl>` exports a session file or a spool file
+  with no database at all, and `--check <dir>` re-hashes a bundle that arrived.
 * `rootsign approve <id>` — approve or reject a pending HiTL action.
   `--list` lists all pending approvals; `--reject` flips the decision;
   `--reason` attaches a free-form note. Sprint 4 / ADR-007.
@@ -127,10 +133,39 @@ def verify(
 
 def _verify_local(path: Path, verbose: bool) -> None:
     from rootsign.sdk.chain import verify_session_local
+    from rootsign.verdict import exit_code
 
     result = verify_session_local(str(path))
     _print_result(result, verbose=verbose)
-    raise typer.Exit(code=0 if result.valid else 1)
+    _spool_breadcrumb(path)
+    raise typer.Exit(code=exit_code(result.verdict))
+
+
+def _spool_breadcrumb(path: Path) -> None:
+    """Point at `rootsign-admin sync` when the file being verified is spooled.
+
+    The person who verifies a spool file is usually the developer whose laptop
+    went offline, and `sync` lives on the *operator* CLI (ADR-013 Decision 4) —
+    a command they have no reason to have read the help for. Verifying the file
+    is the moment they are looking straight at the evidence that something is
+    waiting to be uploaded, so the pointer belongs here.
+
+    Never fatal: a breadcrumb that could break `verify` would be a bad trade,
+    and this reads settings, which a misconfigured environment can refuse.
+    """
+    try:
+        from rootsign.sdk.spool import SYNC_BREADCRUMB, is_spool_path
+
+        if not is_spool_path(path):
+            return
+    except Exception:  # noqa: BLE001 - a hint is never worth failing verify over
+        return
+
+    typer.echo(
+        "\nThis is a spooled session — recorded locally because the cloud endpoint was "
+        f"unreachable.\nUpload it (and everything else waiting) with:\n\n    "
+        f"{SYNC_BREADCRUMB}\n"
+    )
 
 
 def _verify_remote(session_id: UUID, verbose: bool) -> None:
@@ -147,12 +182,42 @@ def _verify_remote(session_id: UUID, verbose: bool) -> None:
         async with factory() as db:
             return await verify_session(session_id, db)
 
+    from rootsign.verdict import exit_code
+
     result = asyncio.run(_run())
     _print_result(result, verbose=verbose)
-    raise typer.Exit(code=0 if result.valid else 1)
+    raise typer.Exit(code=exit_code(result.verdict))
 
 
 def _print_result(result, *, verbose: bool) -> None:
+    from rootsign.verdict import Verdict
+
+    if result.verdict is Verdict.INCOMPLETE:
+        # Distinct from TAMPERED on purpose: "records are missing" and "records
+        # were altered" call for different responses, and conflating them
+        # either cries wolf or misses a theft. Yellow, not red — what is here
+        # is intact.
+        typer.echo(
+            typer.style(
+                f"INCOMPLETE ⚠  —  {result.record_count} records present and intact, "
+                f"but the chain is missing records",
+                fg=typer.colors.YELLOW,
+                bold=True,
+            )
+        )
+        if result.error:
+            typer.echo(f"  Detail:   {result.error}")
+        typer.echo(f"  Session:  {result.session_id}")
+        typer.echo(
+            typer.style(
+                "The records present verify cleanly; the gap is proven by the chain itself. "
+                "Check for a spooled session that was never synced "
+                "(`rootsign-admin sync`) or a deleted row.",
+                fg=typer.colors.YELLOW,
+            )
+        )
+        return
+
     if result.valid:
         typer.echo(
             typer.style(
@@ -178,6 +243,11 @@ def _print_result(result, *, verbose: bool) -> None:
     )
     if result.error:
         typer.echo(f"  Detail:   {result.error}")
+    if getattr(result, "missing_ranges", None):
+        # Worst verdict wins, but the gaps are still the operator's problem.
+        from rootsign.verdict import describe_missing
+
+        typer.echo(f"  Missing:  sequence {describe_missing(result.missing_ranges)}")
     typer.echo(f"  Session:  {result.session_id}")
     typer.echo(
         typer.style(
@@ -185,6 +255,221 @@ def _print_result(result, *, verbose: bool) -> None:
             fg=typer.colors.YELLOW,
         )
     )
+
+
+@app.command()
+def export(
+    session_id: Optional[str] = typer.Argument(
+        None, help="Session ID to export (UUID). Reads the configured Postgres."
+    ),
+    local: Optional[Path] = typer.Option(
+        None,
+        "--local",
+        "-l",
+        help="Export from a local JSONL session file (or a spool file). No DB required.",
+    ),
+    check: Optional[Path] = typer.Option(
+        None,
+        "--check",
+        help="Verify a received bundle directory instead of exporting.",
+    ),
+    out: Path = typer.Option(
+        Path("."), "--out", "-o", help="Directory to write evidence-<session_id>/ into."
+    ),
+    fmt: str = typer.Option(
+        "all",
+        "--format",
+        "-f",
+        help="Which renderings to include: all (default), json, md, html.",
+    ),
+    redact_previews: bool = typer.Option(
+        False,
+        "--redact-previews",
+        help="Withhold stored payload content (previews, approval context, decision summaries).",
+    ),
+    force: bool = typer.Option(False, "--force", help="Overwrite an existing bundle directory."),
+) -> None:
+    """Export one session as a self-contained evidence bundle (ADR-014).
+
+    The bundle is a directory of JSON documents plus human-readable reports,
+    with a SHA-256 for every file in `manifest.json`. The manifest's own hash is
+    printed here — note it somewhere outside the bundle, because it is the only
+    value that proves a bundle you receive later is the one that was generated.
+
+    `export <session_id>` reads **Postgres only** in this release. Cloud-backed
+    export needs a server read API that does not exist yet, so a cloud-mode user
+    exports from the spool with `--local`.
+
+    Examples:
+
+        rootsign export 550e8400-e29b-41d4-a716-446655440001
+        rootsign export --local ~/.rootsign/sessions/my_session.jsonl
+        rootsign export --local ~/.rootsign/spool/sessions/my_session.jsonl --redact-previews
+        rootsign export --check ./evidence-550e8400-e29b-41d4-a716-446655440001
+    """
+    if check is not None:
+        _check_bundle(check)
+        return
+    if fmt not in _EXPORT_FORMATS:
+        typer.echo(
+            f"Error: --format must be one of {', '.join(_EXPORT_FORMATS)}, got {fmt!r}.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    if local is not None:
+        _export_local(local, out, fmt=fmt, redact_previews=redact_previews, force=force)
+        return
+    if session_id is not None:
+        try:
+            parsed = UUID(session_id)
+        except ValueError:
+            typer.echo(f"Error: {session_id!r} is not a valid UUID.", err=True)
+            raise typer.Exit(code=1) from None
+        _export_remote(parsed, out, fmt=fmt, redact_previews=redact_previews, force=force)
+        return
+    typer.echo(
+        "Error: provide a session_id, --local <path>, or --check <dir>.",
+        err=True,
+    )
+    raise typer.Exit(code=1)
+
+
+#: `all` writes the JSON documents plus both reports. The narrower values drop
+#: the renderings, never the machine truth — a bundle without `verification.json`
+#: would be a report, not evidence.
+_EXPORT_FORMATS = ("all", "json", "md", "html")
+
+
+def _export_local(path: Path, out: Path, *, fmt: str, redact_previews: bool, force: bool) -> None:
+    from rootsign.sdk.export import export_local
+
+    try:
+        bundle = export_local(path, redact_previews=redact_previews)
+    except FileNotFoundError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from None
+    _finish_export(bundle, out, fmt=fmt, force=force)
+
+
+def _export_remote(
+    session_id: UUID, out: Path, *, fmt: str, redact_previews: bool, force: bool
+) -> None:
+    from rootsign.errors import RootSignPostgresExtraRequired
+    from rootsign.sdk.export import export_session
+
+    # Resolve the factory first so a missing `postgres` extra prints the install
+    # hint here rather than surfacing from inside asyncio.run() (same shape as
+    # `verify`).
+    factory = _session_factory()
+
+    async def _run():
+        async with factory() as db:
+            return await export_session(session_id, db, redact_previews=redact_previews)
+
+    try:
+        bundle = asyncio.run(_run())
+    except RootSignPostgresExtraRequired as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from None
+    except LookupError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from None
+    _finish_export(bundle, out, fmt=fmt, force=force)
+
+
+def _finish_export(bundle: Any, out: Path, *, fmt: str, force: bool) -> None:
+    """Render, write, and print the anchor."""
+    from rootsign.sdk.export import BundleExists, write_bundle
+    from rootsign.sdk.report import HTML_FILE, MARKDOWN_FILE, attach_reports
+
+    if fmt != "json":
+        attach_reports(bundle)
+        if fmt == "md":
+            bundle.rendered.pop(HTML_FILE, None)
+        elif fmt == "html":
+            bundle.rendered.pop(MARKDOWN_FILE, None)
+
+    try:
+        directory = write_bundle(bundle, out, overwrite=force)
+    except BundleExists as exc:
+        typer.echo(f"Error: {exc}  (use --force to overwrite)", err=True)
+        raise typer.Exit(code=1) from None
+    except OSError as exc:
+        typer.echo(f"Error: could not write the bundle ({exc})", err=True)
+        raise typer.Exit(code=1) from None
+
+    _print_verdict_banner(bundle.verification)
+    typer.echo(f"  Bundle:   {directory}")
+    for name in sorted(bundle.files()):
+        typer.echo(f"            {name}")
+    typer.echo("            manifest.json")
+    typer.echo("")
+    # The anchor. Everything else in the bundle can be recomputed from the
+    # bundle; this is the one value that has to leave with the human.
+    typer.echo(typer.style(f"  manifest.json SHA-256:  {bundle.manifest_hash}", bold=True))
+    # Two lines, not one: at 130 characters this wrapped mid-word in an
+    # 80-100 column terminal, which is where it is actually read.
+    typer.echo(
+        "  Record that hash outside the bundle — a ticket, an email, a chain-of-custody log."
+    )
+    typer.echo("  It is what proves a bundle you receive later is the one that was generated.")
+
+
+def _print_verdict_banner(verification: dict) -> None:
+    """The verdict leads the output, as it leads the report."""
+    from rootsign.verdict import Verdict
+
+    verdict = verification.get("verdict")
+    colors = {
+        Verdict.VALID.value: typer.colors.GREEN,
+        Verdict.TAMPERED.value: typer.colors.RED,
+        Verdict.INCOMPLETE.value: typer.colors.YELLOW,
+    }
+    # `summary` already leads with the verdict (`VALID — 3 records, ...`), so
+    # printing both would stutter.
+    typer.echo(
+        typer.style(
+            verification.get("summary") or str(verdict),
+            fg=colors.get(str(verdict), typer.colors.WHITE),
+            bold=True,
+        )
+    )
+
+
+def _check_bundle(directory: Path) -> None:
+    """`rootsign export --check DIR` — re-hash a received bundle.
+
+    Exit 0 when the bundle is internally consistent, 1 otherwise. The manifest
+    hash is printed either way: per-file agreement proves only that nobody
+    edited a file *without* updating the manifest, and the out-of-band hash is
+    the only check an attacker cannot satisfy from inside the bundle.
+    """
+    from rootsign.sdk.export import check_bundle
+
+    result = check_bundle(directory)
+
+    # `summary` already leads with INTACT / ALTERED / UNREADABLE, so the marker
+    # is all that is added here.
+    typer.echo(
+        typer.style(
+            f"{'✓' if result.intact else '✗'}  {result.summary}",
+            fg=typer.colors.GREEN if result.intact else typer.colors.RED,
+            bold=True,
+        )
+    )
+    for name in result.altered:
+        typer.echo(f"  altered:     {name}")
+    for name in result.missing:
+        typer.echo(f"  missing:     {name}")
+    for name in result.unexpected:
+        typer.echo(f"  unexpected:  {name}  (not listed in manifest.json)")
+
+    if result.manifest_hash:
+        typer.echo("")
+        typer.echo(typer.style(f"  manifest.json SHA-256:  {result.manifest_hash}", bold=True))
+        typer.echo("  Compare this against the hash recorded when the bundle was exported.")
+        typer.echo("  The file checks above cannot detect an edit that also updated the manifest.")
+    raise typer.Exit(code=0 if result.intact else 1)
 
 
 @app.command()

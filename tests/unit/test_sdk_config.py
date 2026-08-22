@@ -18,9 +18,27 @@ class TestSDKSettingsDefaults:
 
     def test_jsonl_settings_defaults(self, monkeypatch):
         monkeypatch.delenv("ROOTSIGN_BACKEND", raising=False)
+        # The conftest data-dir isolation must be lifted to see the real default.
+        monkeypatch.delenv("ROOTSIGN_DATA_DIR", raising=False)
         s = SDKSettings(_env_file=None)
         assert s.DATA_DIR == "~/.rootsign"
         assert s.JSONL_FSYNC == "chain"
+
+    def test_spool_dir_derives_from_data_dir(self, monkeypatch):
+        """ADR-013 Decision 4: moving DATA_DIR must move the spool with it."""
+        monkeypatch.delenv("ROOTSIGN_SPOOL_DIR", raising=False)
+        monkeypatch.setenv("ROOTSIGN_DATA_DIR", "/var/lib/agent")
+        assert SDKSettings(_env_file=None).SPOOL_DIR == "/var/lib/agent/spool"
+
+    def test_spool_dir_default_sits_under_the_default_data_dir(self, monkeypatch):
+        monkeypatch.delenv("ROOTSIGN_SPOOL_DIR", raising=False)
+        monkeypatch.delenv("ROOTSIGN_DATA_DIR", raising=False)
+        assert SDKSettings(_env_file=None).SPOOL_DIR == "~/.rootsign/spool"
+
+    def test_spool_dir_can_be_split_from_data_dir(self, monkeypatch):
+        monkeypatch.setenv("ROOTSIGN_DATA_DIR", "/var/lib/agent")
+        monkeypatch.setenv("ROOTSIGN_SPOOL_DIR", "/mnt/durable/spool")
+        assert SDKSettings(_env_file=None).SPOOL_DIR == "/mnt/durable/spool"
 
     def test_local_backend_alias_deprecated_maps_to_postgres(self, monkeypatch):
         # ADR-011: 'local' is the deprecated alias for 'postgres'.

@@ -26,8 +26,8 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID, uuid4
 
-from rootsign.errors import postgres_extra_required
-from rootsign.ingest.schemas import EventType, IngestResponse
+from rootsign.errors import RecordPersistenceError, postgres_extra_required
+from rootsign.ingest.schemas import SCHEMA_VERSION, EventType, IngestResponse
 from rootsign.sdk.client import IngestClient
 from rootsign.sdk.context import SessionContext
 from rootsign.sdk.hashing import compute_payload_hash
@@ -37,7 +37,9 @@ logger = logging.getLogger("rootsign.sdk")
 
 from rootsign._version import SDK_VERSION  # noqa: F401  (re-exported via envelopes)
 
-SCHEMA_VERSION = "1.0"
+# SCHEMA_VERSION is re-exported from rootsign.ingest.schemas — the wire version
+# belongs with the wire schema, and two copies of it drift (it lived here and in
+# session.py). Imported above; kept in this module's namespace for callers.
 
 # Cap on a single interpolated log field. A hostile `tool_name` is otherwise an
 # unbounded write into the operator's log stream.
@@ -435,6 +437,14 @@ async def _try_ingest(
             response.sequence_number if response is not None else None,
         )
         return response
+    except RecordPersistenceError:
+        # The one exception to the failure-isolation rule (ADR-013 Decision
+        # 4a): the record could not be persisted *anywhere*. For a HiTL
+        # submission this must reach the caller before the gated tool runs;
+        # for telemetry it only gets here under ON_RECORD_LOSS=fail, which is
+        # an explicit opt-in to a halted agent. Swallowing either would defeat
+        # the setting that exists to prevent it.
+        raise
     except Exception as ingest_err:  # noqa: BLE001 — see failure isolation rule
         logger.warning(
             "rootsign ingest failed for tool %s: %s",
@@ -775,6 +785,14 @@ async def _emit_approval_record(
             decision,
             approver_type,
         )
+    except RecordPersistenceError:
+        # The one exception to the failure-isolation rule (ADR-013 Decision
+        # 4a): the record could not be persisted *anywhere*. For a HiTL
+        # submission this must reach the caller before the gated tool runs;
+        # for telemetry it only gets here under ON_RECORD_LOSS=fail, which is
+        # an explicit opt-in to a halted agent. Swallowing either would defeat
+        # the setting that exists to prevent it.
+        raise
     except Exception as ingest_err:  # noqa: BLE001 — see failure isolation rule
         logger.warning(
             "rootsign: _emit_approval_record failed for action_id=%s: %s",
@@ -867,6 +885,14 @@ async def _emit_decision_record(
             depth.value,
         )
         return response.entity_id
+    except RecordPersistenceError:
+        # The one exception to the failure-isolation rule (ADR-013 Decision
+        # 4a): the record could not be persisted *anywhere*. For a HiTL
+        # submission this must reach the caller before the gated tool runs;
+        # for telemetry it only gets here under ON_RECORD_LOSS=fail, which is
+        # an explicit opt-in to a halted agent. Swallowing either would defeat
+        # the setting that exists to prevent it.
+        raise
     except Exception as ingest_err:  # noqa: BLE001 — see failure isolation rule
         logger.warning(
             "rootsign: _emit_decision_record failed for selected_action=%s: %s",

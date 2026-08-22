@@ -6,7 +6,7 @@ No LLM, no API key, no database — the v0.2.0 quickstart exactly:
   3. call three @rootsign.trace-decorated tools
   4. close the session
   5. write the session file path to /tmp/rs_demo_session for the tape's
-     `rootsign verify --local` step
+     `rootsign verify --local` and `rootsign export --local` steps
 
 Records land under /tmp/rs_demo_data (wiped on each run) so the GIF's record
 count is deterministic and the developer's own ~/.rootsign is left alone.
@@ -24,9 +24,13 @@ from pathlib import Path
 
 DATA_DIR = Path("/tmp/rs_demo_data")
 SESSION_FILE = Path("/tmp/rs_demo_session")
+BUNDLE_DIR = Path("/tmp/rs_demo_bundles")
 
 # Set before importing rootsign so init() picks these up.
 shutil.rmtree(DATA_DIR, ignore_errors=True)
+# Export refuses to overwrite an existing bundle, so a re-record would fail on
+# the second take without this.
+shutil.rmtree(BUNDLE_DIR, ignore_errors=True)
 os.environ["ROOTSIGN_BACKEND"] = "jsonl"
 os.environ["ROOTSIGN_DATA_DIR"] = str(DATA_DIR)
 

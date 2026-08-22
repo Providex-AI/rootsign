@@ -36,12 +36,26 @@ Python's `ContextVar`. Changing the shape of any of the five is a
 cross-SDK-breaking change and needs a new ADR. See
 [ADR-012](adr/ADR-012-init-facade-contextvar-session.md) Decision 4.
 
-Two rules hold across every language binding:
+Three rules hold across every language binding:
 
 1. **Explicit arguments always win** over the ambient session.
 2. **The canonical hash formula is never re-implemented** — one module owns it
    per language, and cross-backend/cross-language vectors must agree
    ([ADR-001](adr/ADR-001-hash-canonical-spec.md)).
+3. **The wire format is the spec, not the Python types.** Every binding emits
+   envelopes conforming to [the ingest specification](ingest-spec-v1.md) —
+   envelope fields, the five event types, the error-code registry,
+   idempotency by `event_id`, batch semantics, and the client-side hashing
+   contract. `IngestEnvelope` / `IngestResponse` are Python's *rendering* of
+   that document, not its definition; a second language binding implements
+   the spec, never a port of the Pydantic models.
+
+The frozen surface therefore has two halves: the five calls above are the
+**API** contract, changed only by a new ADR; [ingest-spec-v1.md](ingest-spec-v1.md)
+is the **wire** contract, and its §9 governs how *that* half may change —
+additive fields are a minor `schema_version` bump, anything breaking is a major
+bump plus `SCHEMA_VERSION_MISMATCH`, and the canonical hash formula is frozen
+under that same policy.
 
 ## LangGraph integration notes
 
