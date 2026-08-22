@@ -6,7 +6,7 @@ Public re-exports:
     RedactionConfig     — per-field regex redaction for tool payloads
     IngestClient        — transport-agnostic ABC (ADR-002)
     LocalIngestClient   — in-process transport (Phase 1 default)
-    HttpIngestClient    — HTTP transport stub (raises until Phase 2)
+    HttpIngestClient    — cloud transport: batched HTTP ingest (ADR-013)
     get_ingest_client   — env-var-driven factory (reads ROOTSIGN_BACKEND)
     SDKSettings         — pydantic-settings model, env_prefix=ROOTSIGN_
     sdk_settings        — SDKSettings() singleton

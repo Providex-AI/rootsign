@@ -1,7 +1,7 @@
-"""T2.8 — cross-backend hash contract (ADR-011, the sprint's cardinal test).
+"""Cross-backend hash contract (ADR-011 T2.8, extended to cloud by ADR-013 T2.3).
 
-Drives the *same* scripted session through both backends and proves they share
-one hash formula:
+Drives the *same* scripted session through **all three** backends — jsonl,
+postgres, cloud — and proves they share one hash formula:
 
   * The JSONL client's stored `self_hash` equals `compute_action_self_hash`
     recomputed from the record's canonical fields — i.e. the client assembles
@@ -17,28 +17,38 @@ one hash formula:
     (`input_redacted` -> `input_hash`) is caught on BOTH backends, with the
     same verdict and the same sequence number.
 
-Note on "byte-identical": each backend mints its own `action_id` (`uuid4()`),
-so for an unpinned run the two chains' hashes are not literally equal
-action-for-action. `test_canonical_hash_input_is_byte_identical` pins the
-assigned ids so that identity assignment is held constant and any *remaining*
-difference would be a genuine canonicalization divergence — field set,
-ordering, or value normalization. That turns this note from an assumption into
-an assertion. `seeded_agent` (committed) for the Postgres side (Flag 3).
+Note on "byte-identical": every backend mints its own `action_id`, so for an
+unpinned run the chains' hashes are not literally equal action-for-action.
+`test_canonical_hash_input_is_byte_identical` pins identity so that any
+*remaining* difference is a genuine canonicalization divergence — field set,
+ordering, or value normalization. That turns the note from an assumption into
+an assertion.
+
+**Shape of this harness (T2.3).** Backends are entries in `BACKEND_BUILDERS`
+and identity is pinned once, at `rootsign.chain_state.uuid4` — the single
+minting point. Before that extraction the harness patched `uuid4` in two
+modules, so each new backend meant another patch and a harness that quietly
+proved less as it grew. Adding a fourth backend is now one dict entry.
+
+`seeded_agent` (committed) for the Postgres side (Flag 3).
 """
 
 from __future__ import annotations
 
+import copy
 import json
 import sys
 from datetime import datetime, timezone
+from typing import Any
 from uuid import UUID, uuid4
 
+import httpx
 import pytest
 
 from rootsign.crud import action as action_crud
 from rootsign.hashing import compute_action_self_hash
 from rootsign.sdk.chain import verify_session_local
-from rootsign.sdk.client import LocalIngestClient
+from rootsign.sdk.client import HttpIngestClient, LocalIngestClient
 from rootsign.sdk.hashing import compute_payload_hash
 from rootsign.sdk.jsonl_client import JsonlIngestClient
 from tests.conftest import make_envelope
@@ -82,8 +92,8 @@ class _CapturePreimages:
         self.preimages: list[bytes] = []
 
     def __enter__(self) -> "_CapturePreimages":
-        # Reached via sys.modules, matching how _pin_action_ids gets at its
-        # patch targets, so the file keeps a single import style.
+        # Reached via sys.modules, matching how `pinned_identity` gets at its
+        # patch target, so the file keeps a single import style.
         self._module = sys.modules["rootsign.hashing"]
         self._saved = self._module.hashlib
         real_sha256 = self._saved.sha256
@@ -106,23 +116,101 @@ class _CapturePreimages:
         return [json.loads(b.decode("utf-8")) for b in self.preimages]
 
 
-def _pin_action_ids(monkeypatch, ids: list[UUID]) -> None:
-    """Make both stores assign the same `action_id`s, in order.
+class _PinnedIdentity:
+    """Hands out the same `action_id`s, in order, to whichever backend asks.
 
-    `action_id` is store-assigned identity (`uuid4()` in jsonl_client and in
-    crud.action), not a property of the logical action, so an unpinned run
-    differs in that field and — via the chain — in `prev_action_hash` too.
-    Pinning holds identity constant so the comparison isolates canonicalization.
+    `action_id` is assigned identity, not a property of the logical action, so
+    an unpinned run differs in that field and — through the chain — in
+    `prev_action_hash` too. Pinning holds identity constant so a byte
+    comparison isolates canonicalization.
+
+    One patch target: `rootsign.chain_state.uuid4`, the single minting point
+    (T2.3). `reset()` rewinds the sequence before each backend runs.
     """
-    seq = iter(ids)
 
-    def _next() -> UUID:
-        return next(seq)
+    def __init__(self, ids: list[UUID]) -> None:
+        self.ids = ids
+        self._iter = iter(ids)
 
-    # `rootsign.crud.action` resolves to the CRUDAction *instance* (crud/__init__
-    # rebinds the name), so reach the modules through sys.modules.
-    monkeypatch.setattr(sys.modules["rootsign.sdk.jsonl_client"], "uuid4", _next)
-    monkeypatch.setattr(sys.modules["rootsign.crud.action"], "uuid4", _next)
+    def reset(self) -> None:
+        self._iter = iter(self.ids)
+
+    def __call__(self) -> UUID:
+        return next(self._iter)
+
+
+@pytest.fixture
+def pinned_identity(monkeypatch) -> _PinnedIdentity:
+    pinned = _PinnedIdentity([uuid4() for _ in range(8)])
+    # Reached via sys.modules to match `_CapturePreimages`' patch style.
+    monkeypatch.setattr(sys.modules["rootsign.chain_state"], "uuid4", pinned)
+    return pinned
+
+
+# ---------------------------------------------------------------------------
+# Backend builders — one entry per backend, nothing else to re-plumb (T2.3)
+# ---------------------------------------------------------------------------
+
+
+def _accept_all(request: httpx.Request) -> httpx.Response:
+    """A server that accepts every envelope in the batch, index-aligned."""
+    batch = json.loads(request.content)
+    return httpx.Response(
+        200,
+        json=[
+            {"status": "accepted", "event_id": env["event_id"], "entity_id": str(uuid4())}
+            for env in batch
+        ],
+    )
+
+
+async def _drive_jsonl(envelopes: list[dict], *, tmp_path, db) -> Any:
+    client = JsonlIngestClient(data_dir=tmp_path / "jsonl")
+    for env in envelopes:
+        await client.handle(env)
+    return client
+
+
+async def _drive_postgres(envelopes: list[dict], *, tmp_path, db) -> Any:
+    client = LocalIngestClient(db=db)
+    for env in envelopes:
+        await client.handle(env)
+    await db.commit()
+    return client
+
+
+async def _drive_cloud(envelopes: list[dict], *, tmp_path, db) -> Any:
+    client = HttpIngestClient(
+        "https://ingest.example.test/v1",
+        "sk-parity",
+        transport=httpx.MockTransport(_accept_all),
+    )
+    for env in envelopes:
+        await client.handle(env)
+    await client.close()
+    return client
+
+
+BACKEND_BUILDERS = {
+    "jsonl": _drive_jsonl,
+    "postgres": _drive_postgres,
+    "cloud": _drive_cloud,
+}
+
+
+async def _canonical_preimages(
+    backend: str, envelopes: list[dict], *, tmp_path, db, pinned: _PinnedIdentity
+) -> list[bytes]:
+    """Run one backend over a private copy of the envelopes; return its pre-images.
+
+    The copy matters: the cloud transport seals payloads **in place** (ADR-013
+    Decision 1), and a sealed payload handed to the Postgres store is rejected
+    by design. Each backend must see the envelopes as the SDK first emitted them.
+    """
+    pinned.reset()
+    with _CapturePreimages() as capture:
+        await BACKEND_BUILDERS[backend](copy.deepcopy(envelopes), tmp_path=tmp_path, db=db)
+    return capture.preimages
 
 
 class TestCrossBackendHash:
@@ -207,55 +295,182 @@ class TestCrossBackendHash:
         assert result.first_invalid_sequence == 2
 
     async def test_canonical_hash_input_is_byte_identical(
-        self, tmp_path, clean_db, seeded_agent, monkeypatch
+        self, tmp_path, clean_db, seeded_agent, pinned_identity
     ):
-        """T2.8 at the input level: both backends must feed SHA-256 the same bytes.
+        """Every backend must feed SHA-256 the same bytes (T2.8, extended by T2.3).
 
         Comparing digests alone would mostly re-prove that SHA-256 is
-        deterministic. Comparing the pre-images proves the two stores agree on
+        deterministic. Comparing the pre-images proves the backends agree on
         *which* fields are canonical, in what order, and how each value is
-        normalized — the things that actually drift.
+        normalized — the things that actually drift. Cloud joins as a third
+        entry in `BACKEND_BUILDERS`, not as a third patch target.
         """
         session_id = uuid4()
         envelopes = _scripted_envelopes(seeded_agent.agent_id, session_id)
-        pinned = [uuid4() for _ in range(3)]
 
-        _pin_action_ids(monkeypatch, list(pinned))
-        jsonl = JsonlIngestClient(data_dir=tmp_path)
-        with _CapturePreimages() as jsonl_cap:
-            for env in envelopes:
-                await jsonl.handle(env)
+        preimages = {
+            backend: await _canonical_preimages(
+                backend, envelopes, tmp_path=tmp_path, db=clean_db, pinned=pinned_identity
+            )
+            for backend in BACKEND_BUILDERS
+        }
 
-        _pin_action_ids(monkeypatch, list(pinned))
-        pg = LocalIngestClient(db=clean_db)
-        with _CapturePreimages() as pg_cap:
-            for env in envelopes:
-                await pg.handle(env)
-        await clean_db.commit()
-
-        assert len(jsonl_cap.preimages) == 3, (
-            f"expected 3 action pre-images from JSONL, got {len(jsonl_cap.preimages)}"
+        reference_name, reference = next(iter(preimages.items()))
+        assert len(reference) == 3, (
+            f"expected 3 action pre-images from {reference_name}, got {len(reference)}"
         )
-        assert len(jsonl_cap.preimages) == len(pg_cap.preimages)
 
-        # Field sets first — a divergence here is more legible than a byte diff.
-        assert [sorted(d) for d in jsonl_cap.as_dicts()] == [
-            sorted(d) for d in pg_cap.as_dicts()
-        ], "canonical field sets diverge between backends"
+        for name, captured in preimages.items():
+            assert len(captured) == len(reference), (
+                f"{name} produced {len(captured)} pre-images, {reference_name} produced "
+                f"{len(reference)} — a backend is hashing a different number of records"
+            )
+            # Field sets first — a divergence there is more legible than a byte diff.
+            assert [sorted(json.loads(b)) for b in captured] == [
+                sorted(json.loads(b)) for b in reference
+            ], f"canonical field sets diverge: {name} vs {reference_name}"
+            for i, (got, want) in enumerate(zip(captured, reference), start=1):
+                assert got == want, (
+                    f"canonical SHA-256 input differs at action {i}:\n"
+                    f"  {name}: {got.decode()}\n"
+                    f"  {reference_name}: {want.decode()}"
+                )
 
-        for i, (j, p) in enumerate(zip(jsonl_cap.preimages, pg_cap.preimages), start=1):
-            assert j == p, (
-                f"canonical SHA-256 input differs at action {i}:\n"
-                f"  jsonl: {j.decode()}\n"
-                f"  pg   : {p.decode()}"
+    async def test_all_backends_are_covered_by_the_parity_harness(self):
+        """A backend that isn't a builder entry is a backend nobody checks.
+
+        The tripwire for the T2.3 shape: adding a client-side backend means
+        adding an entry here, not re-plumbing patch targets elsewhere.
+        """
+        assert set(BACKEND_BUILDERS) == {"jsonl", "postgres", "cloud"}
+
+    async def test_cloud_seals_the_record_before_it_leaves_the_process(
+        self, tmp_path, clean_db, seeded_agent, pinned_identity
+    ):
+        """ADR-013 Decision 1: the four chain fields ride in the payload (spec §8.2).
+
+        And the seal is the *same* seal the JSONL backend would have computed —
+        pinned identity makes that comparable, so a divergence here is the
+        cloud path having grown its own sealer.
+        """
+        session_id = uuid4()
+        envelopes = _scripted_envelopes(seeded_agent.agent_id, session_id)
+
+        sent: list[dict] = []
+
+        def capture(request: httpx.Request) -> httpx.Response:
+            sent.extend(json.loads(request.content))
+            return _accept_all(request)
+
+        pinned_identity.reset()
+        cloud = HttpIngestClient(
+            "https://ingest.example.test/v1",
+            "sk-seal",
+            transport=httpx.MockTransport(capture),
+        )
+        for env in copy.deepcopy(envelopes):
+            await cloud.handle(env)
+        await cloud.close()
+
+        actions = [e for e in sent if e["event_type"] == "ACTION_RECORD"]
+        assert len(actions) == 3
+        assert [a["payload"]["sequence_number"] for a in actions] == [1, 2, 3]
+        assert actions[0]["payload"]["prev_action_hash"] is None
+        for prev, nxt in zip(actions, actions[1:]):
+            assert nxt["payload"]["prev_action_hash"] == prev["payload"]["self_hash"], (
+                "cloud chain does not link"
             )
 
-        # And the chains both verify, so identical inputs really did produce
-        # a valid chain on each side rather than matching garbage.
-        jsonl_result = verify_session_local(str(jsonl._session_path(str(session_id))))
-        pg_result = await action_crud.verify_chain(clean_db, session_id=session_id)
-        assert jsonl_result.valid is True
-        assert pg_result["valid"] is True
+        # The seal matches what the JSONL backend computes for the same session.
+        pinned_identity.reset()
+        jsonl = JsonlIngestClient(data_dir=tmp_path / "seal-parity")
+        for env in copy.deepcopy(envelopes):
+            await jsonl.handle(env)
+        local = [
+            json.loads(ln)
+            for ln in jsonl._session_path(str(session_id)).read_text().splitlines()
+            if json.loads(ln).get("event_type") == "ACTION_RECORD"
+        ]
+        assert [a["payload"]["self_hash"] for a in actions] == [r["self_hash"] for r in local]
+        assert [a["payload"]["action_id"] for a in actions] == [r["action_id"] for r in local]
+
+    async def test_a_sealed_record_keeps_its_identity_through_the_jsonl_writer(
+        self, tmp_path, clean_db, seeded_agent
+    ):
+        """The spool handoff (T2.4's precondition): adoption, not re-minting.
+
+        A cloud-sealed envelope written to a session file must land with the
+        identity it was sealed under. Re-minting would produce a locally
+        consistent chain that never happened — and the record the client
+        believes it sent would exist nowhere.
+        """
+        session_id = uuid4()
+        envelopes = _scripted_envelopes(seeded_agent.agent_id, session_id)
+
+        sent: list[dict] = []
+
+        def capture(request: httpx.Request) -> httpx.Response:
+            sent.extend(json.loads(request.content))
+            return _accept_all(request)
+
+        cloud = HttpIngestClient(
+            "https://ingest.example.test/v1",
+            "sk-spool",
+            transport=httpx.MockTransport(capture),
+        )
+        for env in copy.deepcopy(envelopes):
+            await cloud.handle(env)
+        await cloud.close()
+
+        # Replay the *sealed* envelopes through the file writer, as the spool will.
+        spool = JsonlIngestClient(data_dir=tmp_path / "spool")
+        for env in sent:
+            await spool.handle(env)
+
+        written = [
+            json.loads(ln)
+            for ln in spool._session_path(str(session_id)).read_text().splitlines()
+            if json.loads(ln).get("event_type") == "ACTION_RECORD"
+        ]
+        sealed = [e["payload"] for e in sent if e["event_type"] == "ACTION_RECORD"]
+        assert [w["self_hash"] for w in written] == [p["self_hash"] for p in sealed]
+        assert [w["action_id"] for w in written] == [p["action_id"] for p in sealed]
+        assert [w["sequence_number"] for w in written] == [1, 2, 3]
+
+        # And the adopted chain verifies offline — the whole point of spooling.
+        result = verify_session_local(str(spool._session_path(str(session_id))))
+        assert result.valid is True, result.error
+
+    async def test_postgres_rejects_a_client_sealed_record(self, clean_db, seeded_agent):
+        """The store assigns identity under a row lock; it cannot honor a seal.
+
+        Accepting one and recomputing would fork the chain silently — the
+        client would hold a self_hash the store never stored. Spec §8.2 makes
+        sealed records cloud-only; this is the loud half of that rule.
+        """
+        session_id = uuid4()
+        envelopes = _scripted_envelopes(seeded_agent.agent_id, session_id)
+
+        cloud = HttpIngestClient(
+            "https://ingest.example.test/v1",
+            "sk-reject",
+            transport=httpx.MockTransport(_accept_all),
+        )
+        sealed_envelopes = copy.deepcopy(envelopes)
+        for env in sealed_envelopes:
+            await cloud.handle(env)
+        await cloud.close()
+
+        pg = LocalIngestClient(db=clean_db)
+        responses = [await pg.handle(env) for env in sealed_envelopes]
+        await clean_db.commit()
+
+        action_responses = [
+            r for r, e in zip(responses, sealed_envelopes) if e["event_type"] == "ACTION_RECORD"
+        ]
+        assert all(r.status == "rejected" for r in action_responses)
+        assert all(r.error_code.value == "VALIDATION_ERROR" for r in action_responses)
+        assert all("cloud-mode only" in (r.error_message or "") for r in action_responses)
 
     async def test_payload_binding_tamper_caught_on_both_backends(
         self, tmp_path, clean_db, seeded_agent

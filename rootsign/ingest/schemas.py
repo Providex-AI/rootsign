@@ -23,6 +23,15 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+#: Wire-format version this SDK emits, `MAJOR.MINOR` (ingest-spec-v1 §9).
+#: 1.1 adds the optional client-sealed chain fields on ACTION_RECORD (ADR-013
+#: Decision 1). Stores check the MAJOR component only, so a 1.0-era store
+#: accepts a 1.1 envelope — and rejects one that actually *carries* the new
+#: fields, since the per-event payloads forbid extras (spec §3.6). That is why
+#: minor additions deploy store-first.
+SCHEMA_VERSION = "1.1"
+
+
 # ---------------------------------------------------------------------------
 # Enums
 # ---------------------------------------------------------------------------
@@ -155,6 +164,17 @@ class ActionRecordPayload(BaseModel):
     decision_id: UUID | None = None
     policy_id: UUID | None = None
     authorization_status: str = "auto_authorized"
+
+    # Client-sealed chain fields — schema 1.1, additive (ingest-spec-v1 §8.2,
+    # ADR-013 Decision 1). Present in cloud mode, where the SDK seals the record
+    # before it crosses the network and the server *verifies* rather than
+    # computes. Absent on the Postgres binding, where the store assigns chain
+    # identity under a row lock — a payload that carries them there is rejected,
+    # not silently recomputed (see IngestHandler._handle_action_record).
+    action_id: UUID | None = None
+    sequence_number: int | None = Field(default=None, ge=1)
+    prev_action_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    self_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
 
 class DecisionRecordPayload(BaseModel):

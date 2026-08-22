@@ -24,17 +24,23 @@ class TestIngestClientABC:
             IngestClient()  # type: ignore[abstract]
 
 
-class TestHttpIngestClientStub:
-    async def test_handle_raises_not_implemented(self):
-        client = HttpIngestClient(base_url="https://example.com", api_key="sk-test")
-        with pytest.raises(NotImplementedError, match="Phase 2"):
-            await client.handle({"event_type": "SESSION_OPEN"})
+class TestHttpIngestClientSurface:
+    """The cloud transport's call-site surface (ADR-013 replaced the stub).
 
-    def test_constructor_accepts_phase2_args(self):
-        """Locking the call-site shape now so Sprint 2 doesn't refactor it."""
-        client = HttpIngestClient(base_url="https://x", api_key="k")
-        assert client._base_url == "https://x"
+    Behavior — batching, retry, error mapping — lives in
+    `tests/unit/test_http_ingest_client.py` against `httpx.MockTransport`.
+    """
+
+    def test_constructor_shape_is_unchanged(self):
+        client = HttpIngestClient(base_url="https://x/v1", api_key="k")
+        assert client._base_url == "https://x/v1"
         assert client._api_key == "k"
+
+    def test_advertises_the_duck_typed_capabilities(self):
+        """`BufferedIngestClient` probes both by name — see ADR-013 Decision 3."""
+        client = HttpIngestClient(base_url="https://x/v1", api_key="k")
+        assert client.owns_retry is True
+        assert callable(client.handle_batch)
 
 
 class TestLocalIngestClient:

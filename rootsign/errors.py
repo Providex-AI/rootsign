@@ -175,6 +175,41 @@ class EscalationDepthExceededError(RootSignError):
         self.action_id = action_id
 
 
+class RecordPersistenceError(RootSignError):
+    """A record could not be persisted anywhere — wire down *and* spool unwritable.
+
+    The bottom rung of ADR-013 Decision 4a's ladder. Telemetry does **not**
+    raise this by default: ADR-002's isolation rule holds, the record drops
+    with accounting (CRITICAL + loss ledger + a hash-evident gap), and the
+    agent keeps running. Setting ``ROOTSIGN_ON_RECORD_LOSS=fail`` opts the
+    telemetry path into raising it instead — for deployments whose auditor
+    prefers a halted agent to an incomplete record.
+
+    Its HiTL subclass is *always* raised, regardless of that setting.
+    """
+
+
+class HiTLPersistenceError(RecordPersistenceError):
+    """A human-in-the-loop control record could not be durably persisted.
+
+    Raised **before** the gated tool executes, exactly as a rejection would be.
+    An Approval record is not observability — it *is* the authorization
+    control, and a control whose record can be lost is not a control. So this
+    is the one place the failure-isolation rule yields: an ungoverned action is
+    worse than a failed one.
+
+    Covers both halves of the HiTL write: the pending ACTION_RECORD that the
+    approval will be voted on, and the APPROVAL_RECORD itself.
+    """
+
+    def __init__(self, detail: str, *, tool_name: str | None = None):
+        prefix = f"HiTL record for tool {tool_name!r} " if tool_name else "HiTL record "
+        super().__init__(
+            prefix + f"could not be persisted: {detail}. The gated action was not executed."
+        )
+        self.tool_name = tool_name
+
+
 class RootSignPostgresExtraRequired(RootSignError):
     """The Postgres backend was requested but the DB stack isn't installed.
 
@@ -223,6 +258,44 @@ def postgres_extra_required() -> "Iterator[None]":
         yield
     except ModuleNotFoundError as exc:
         raise RootSignPostgresExtraRequired(f"missing module: {exc.name}") from exc
+
+
+class RootSignCloudExtraRequired(RootSignError):
+    """The cloud backend was requested but the HTTP stack isn't installed.
+
+    Mirrors `RootSignPostgresExtraRequired` (ADR-011 Decision 7): the
+    `httpx` dependency lives in the optional ``cloud`` extra (ADR-013
+    Decision 2) so ``pip install rootsign`` stays at four dependencies.
+    Selecting ``ROOTSIGN_BACKEND=cloud`` — or running ``rootsign-admin sync``
+    — without that extra raises this, with the exact install command, instead
+    of a bare ``ModuleNotFoundError`` from inside the transport.
+    """
+
+    INSTALL_HINT = (
+        "ROOTSIGN_BACKEND=cloud requires the cloud extra. Install with:  "
+        "pip install 'rootsign[cloud]'"
+    )
+
+    def __init__(self, detail: str | None = None):
+        message = self.INSTALL_HINT if detail is None else f"{self.INSTALL_HINT}  ({detail})"
+        super().__init__(message)
+
+
+@contextmanager
+def cloud_extra_required() -> "Iterator[None]":
+    """Translate a missing `httpx` into `RootSignCloudExtraRequired`.
+
+    Same shape and same reason as `postgres_extra_required` — wrap only the
+    lazy import itself, never surrounding application code, or an unrelated
+    `ModuleNotFoundError` gets mislabelled as a missing extra::
+
+        with cloud_extra_required():
+            import httpx
+    """
+    try:
+        yield
+    except ModuleNotFoundError as exc:
+        raise RootSignCloudExtraRequired(f"missing module: {exc.name}") from exc
 
 
 class HiTLUnsupportedBackendError(RootSignError):

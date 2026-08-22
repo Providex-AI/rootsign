@@ -8,11 +8,21 @@ so concurrent writers never produce duplicate sequence_numbers or fork the chain
 from __future__ import annotations
 
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from rootsign.chain_state import new_record_id
+from rootsign.verdict import (
+    FailureKind,
+    Verdict,
+    decide,
+    describe_missing,
+    explains_break,
+    missing_count,
+    missing_ranges,
+)
 from rootsign.crud.base import CRUDBase
 from rootsign.hashing import compute_action_self_hash
 from rootsign.models.action import Action
@@ -90,9 +100,11 @@ class CRUDAction(CRUDBase[Action, ActionCreate]):
         prev_hash = session_row.chain_tail_hash
         seq = session_row.action_count + 1
 
-        # 4. Compute self_hash from the canonical fields. action_id is generated here
-        #    so it can be part of the canonical representation.
-        action_id = uuid4()
+        # 4. Compute self_hash from the canonical fields. The id is minted through
+        #    the shared minting point (T2.3) so identity has exactly one source
+        #    across all three backends — `rootsign.chain_state.new_record_id`.
+        #    It must exist before hashing: action_id is inside the canonical input.
+        action_id = new_record_id()
         canonical_input: dict[str, Any] = {
             "action_id": action_id,
             "session_id": session_id,
@@ -160,23 +172,67 @@ class CRUDAction(CRUDBase[Action, ActionCreate]):
 
         Returns:
             {
-              "valid": bool,
+              "valid": bool,                      # False for both failure verdicts
+              "verdict": "VALID"|"TAMPERED"|"INCOMPLETE",
               "record_count": int,
               "first_invalid_sequence": int | None,
+              "missing_ranges": list[tuple[int, int]],
               "error": str | None,
             }
+
+        `verdict` and `missing_ranges` were added in v0.3.0 (ADR-013 Decision
+        4b) **additively**: `rootsign/mcp/server.py` publishes this dict as an
+        MCP tool result, so removing or renaming a key breaks a published
+        surface. `valid` therefore stays, meaning exactly "verdict is VALID".
+
+        Gaps are as real here as they are offline — a partially uploaded sync,
+        or a deleted row, which is arguably the more audit-relevant INCOMPLETE.
+        The precedence rule is shared with the local verifier
+        (`rootsign.verdict`) so the two can never disagree about the same
+        session.
         """
         actions = await self.get_session_chain(db, session_id=session_id)
         if not actions:
             return {
                 "valid": True,
+                "verdict": Verdict.VALID.value,
                 "record_count": 0,
                 "first_invalid_sequence": None,
+                "missing_ranges": [],
                 "error": None,
             }
 
+        gaps = missing_ranges([a.sequence_number for a in actions])
+
+        def _result(
+            kind: FailureKind | None, sequence: int | None = None, error: str | None = None
+        ) -> dict[str, Any]:
+            verdict = decide(missing=gaps, failure_kind=kind)
+            if kind is None and gaps:
+                sequence = gaps[0][0]
+                error = (
+                    f"{missing_count(gaps)} record(s) missing at sequence {describe_missing(gaps)}"
+                )
+            return {
+                "valid": verdict is Verdict.VALID,
+                "verdict": verdict.value,
+                "record_count": len(actions),
+                "first_invalid_sequence": sequence,
+                "missing_ranges": gaps,
+                "error": error,
+            }
+
+        seen: set[int] = set()
         expected_prev: str | None = None
-        for idx, action in enumerate(actions, start=1):
+        for action in actions:
+            if action.sequence_number in seen:
+                return _result(
+                    FailureKind.DUPLICATE_SEQUENCE,
+                    action.sequence_number,
+                    f"duplicate sequence_number {action.sequence_number} (chain replay/corruption)",
+                )
+            seen.add(action.sequence_number)
+
             # Recompute the canonical self_hash from the stored canonical fields.
             recomputed = compute_action_self_hash(
                 {
@@ -191,33 +247,22 @@ class CRUDAction(CRUDBase[Action, ActionCreate]):
                 }
             )
             if recomputed != action.self_hash:
-                return {
-                    "valid": False,
-                    "record_count": len(actions),
-                    "first_invalid_sequence": action.sequence_number,
-                    "error": (
-                        f"self_hash mismatch at sequence_number={action.sequence_number} "
-                        f"(stored={action.self_hash}, recomputed={recomputed})"
-                    ),
-                }
-            if action.sequence_number != idx:
-                return {
-                    "valid": False,
-                    "record_count": len(actions),
-                    "first_invalid_sequence": action.sequence_number,
-                    "error": (
-                        f"sequence gap or duplicate: expected {idx}, got {action.sequence_number}"
-                    ),
-                }
+                return _result(
+                    FailureKind.SELF_HASH_MISMATCH,
+                    action.sequence_number,
+                    f"self_hash mismatch at sequence_number={action.sequence_number} "
+                    f"(stored={action.self_hash}, recomputed={recomputed})",
+                )
             if (action.prev_action_hash or None) != expected_prev:
-                return {
-                    "valid": False,
-                    "record_count": len(actions),
-                    "first_invalid_sequence": action.sequence_number,
-                    "error": (
-                        f"prev_action_hash mismatch at sequence_number={action.sequence_number}"
-                    ),
-                }
+                if not explains_break(action.sequence_number, gaps):
+                    return _result(
+                        FailureKind.PREV_HASH_MISMATCH,
+                        action.sequence_number,
+                        f"prev_action_hash mismatch at sequence_number={action.sequence_number}",
+                    )
+                # Explained by the gap immediately before this row: the
+                # predecessor it names is not in the table. Re-anchor and keep
+                # checking, so a deleted row cannot hide a rewritten one.
             binding_error = _payload_binding_error(
                 input_redacted=action.input_redacted,
                 input_hash=action.input_hash,
@@ -226,20 +271,10 @@ class CRUDAction(CRUDBase[Action, ActionCreate]):
                 sequence_number=action.sequence_number,
             )
             if binding_error is not None:
-                return {
-                    "valid": False,
-                    "record_count": len(actions),
-                    "first_invalid_sequence": action.sequence_number,
-                    "error": binding_error,
-                }
+                return _result(FailureKind.PAYLOAD_BINDING, action.sequence_number, binding_error)
             expected_prev = action.self_hash
 
-        return {
-            "valid": True,
-            "record_count": len(actions),
-            "first_invalid_sequence": None,
-            "error": None,
-        }
+        return _result(None)
 
 
 action = CRUDAction(Action, pk_attr="action_id")

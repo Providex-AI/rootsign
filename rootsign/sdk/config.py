@@ -17,7 +17,9 @@ import warnings
 from enum import Enum
 from typing import Literal
 
-from pydantic import field_validator
+from pathlib import Path
+
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -49,7 +51,8 @@ class SDKSettings(BaseSettings):
     # Transport selector (ADR-011). Default is now 'jsonl' — the zero-dependency
     # append-only local backend (no Docker, no Postgres). 'postgres' uses
     # LocalIngestClient against PostgreSQL/TimescaleDB (requires the `postgres`
-    # extra). 'cloud' routes through HttpIngestClient (Phase 2 stub). 'local' is
+    # extra). 'cloud' routes through HttpIngestClient (ADR-013, requires the
+    # `cloud` extra; the hosted backend itself is Phase 2). 'local' is
     # the pre-0.2.0 alias for 'postgres', accepted with a DeprecationWarning.
     BACKEND: Literal["jsonl", "postgres", "cloud", "local"] = "jsonl"
 
@@ -61,9 +64,56 @@ class SDKSettings(BaseSettings):
     JSONL_FSYNC: Literal["chain", "always", "never"] = "chain"
 
     # Hosted ingest endpoint (Phase 2). Default points at the Providex AI
-    # cloud — RootSign products are hosted under getprovidex.com.
+    # cloud — RootSign products are hosted under getprovidex.com. NOTE the
+    # default already ends in `/v1`, so the request path is
+    # `{CLOUD_URL}/ingest`; `{CLOUD_URL}/v1/ingest` doubles the prefix
+    # (ADR-013 Decision 2, ingest-spec-v1 §7).
     CLOUD_URL: str = "https://ingest.getprovidex.com/v1"
     API_KEY: str = ""
+
+    # Offline spool root (ADR-013 Decision 4). Empty means "derive from
+    # DATA_DIR" — see the validator below. Spool files are ordinary session
+    # files, which is what lets `rootsign verify --local` and
+    # `rootsign export --local` read them while the network is still down.
+    SPOOL_DIR: str = ""
+
+    # What to do when a record cannot be persisted at all — the endpoint is
+    # unreachable AND the spool write fails (ADR-013 Decision 4a).
+    #   'warn' (default): telemetry records drop with accounting — one CRITICAL,
+    #           an in-memory loss ledger, and a hash-evident gap in the chain.
+    #           Honors ADR-002: the agent keeps running.
+    #   'fail':  telemetry raises `RecordPersistenceError` into the caller, for
+    #           deployments that prefer a halted agent to an incomplete record.
+    # HiTL/approval records fail closed either way — the setting only moves the
+    # telemetry path. Note this is best-effort under ROOTSIGN_BUFFERED=true:
+    # buffered records are flushed after the tool has already returned, so
+    # there is no caller left to raise into.
+    ON_RECORD_LOSS: Literal["warn", "fail"] = "warn"
+
+    # HttpIngestClient transport knobs (ADR-013 Decisions 2-3). HTTP_MAX_RETRIES
+    # is the cap on **total attempts** per request, not retries after the first
+    # — 3 means one send plus at most two retries, matching
+    # BufferedIngestClient.max_retries. The transport is the only layer that
+    # retries when it is the inner client; see BufferedIngestClient.
+    HTTP_TIMEOUT_SECONDS: float = 10.0
+    HTTP_MAX_RETRIES: int = 3
+
+    @model_validator(mode="after")
+    def _derive_spool_dir(self) -> "SDKSettings":
+        """Default the spool root to `$DATA_DIR/spool`.
+
+        Derived rather than defaulted to a literal so that setting
+        `ROOTSIGN_DATA_DIR` alone moves *both* the session files and the spool
+        — a user who redirects their data directory and finds spooled records
+        still landing in `~/.rootsign` has lost evidence they thought they had
+        relocated. `ROOTSIGN_SPOOL_DIR` still overrides for the split case.
+
+        The path stays un-expanded (`~/...`); `JsonlIngestClient` expands it,
+        and it appends its own `sessions/` segment underneath.
+        """
+        if not self.SPOOL_DIR:
+            self.SPOOL_DIR = str(Path(self.DATA_DIR) / "spool")
+        return self
 
     @field_validator("BACKEND")
     @classmethod
@@ -103,8 +153,11 @@ class SDKSettings(BaseSettings):
     # Sprint 3 alongside the `rootsign verify` CLI.
     WAL_PATH: str = "~/.rootsign/wal"
 
-    # Retry policy for HttpIngestClient (Phase 2 — unused while the cloud
-    # transport is stubbed). Exponential backoff with cap.
+    # LEGACY, read by no code path. Superseded by HTTP_TIMEOUT_SECONDS /
+    # HTTP_MAX_RETRIES above (ADR-013), which are what the cloud transport
+    # actually honors. Kept so an existing .env that sets them still loads;
+    # setting them changes nothing. Removal is a (minor) breaking change and
+    # wants a founder call.
     MAX_RETRIES: int = 3
     RETRY_BASE_DELAY: float = 0.1
     RETRY_MAX_DELAY: float = 5.0

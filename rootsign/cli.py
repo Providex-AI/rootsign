@@ -6,6 +6,16 @@ Commands:
   rootsign-admin init           — alembic upgrade head
   rootsign-admin init --reset   — drop the schema, then upgrade head
   rootsign-admin status         — table row counts
+  rootsign-admin sync           — upload spooled sessions to the cloud endpoint
+  rootsign-admin sync --dry-run — list what would be uploaded, contact nothing
+
+`sync` is the replay half of the offline spool (ADR-013 Decision 4). It lives
+here rather than on the `rootsign` developer CLI because batch replay is an
+operational act — the transport-level analogue of `replay-pending`, sharing its
+batch-replay core (`rootsign.replay`) — and keeping it here keeps the
+`cloud`-extra error surface off the developer CLI. Discoverability is preserved
+by breadcrumb instead: the spool-mode WARNING and `rootsign verify --local` on
+a spool file both print the exact command.
 
 Alembic migrations ship inside the `rootsign` package (`rootsign/_migrations/`)
 and are resolved via `importlib.resources`, so this CLI works identically when
@@ -14,19 +24,22 @@ installed from PyPI as it does from the source tree.
 
 from __future__ import annotations
 
+import contextlib
 import re
 import shutil
 import subprocess
 import time
 from importlib import import_module, resources
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Optional
 
 import typer
 
 from rootsign.config import settings
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from alembic.config import Config
 
 # psycopg2 and alembic live in the optional `postgres` extra (ADR-011), so they
@@ -60,6 +73,7 @@ def _require(module: str) -> Any:
             err=True,
         )
         raise typer.Exit(code=1) from exc
+
 
 # Default container name + image. Mirrors docker-compose.yml so devs can swap
 # freely between `rootsign-admin start-db` and `docker-compose up -d db`.
@@ -258,6 +272,181 @@ def init(
     alembic_command.upgrade(_alembic_config(), "head")
     elapsed = time.perf_counter() - start
     typer.echo(f"Done in {elapsed:.2f}s")
+
+
+@app.command()
+def sync(
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="List what would be uploaded, contact nothing."
+    ),
+    spool_dir: Optional[Path] = typer.Option(
+        None,
+        "--spool-dir",
+        help="Spool root to read (default: ROOTSIGN_SPOOL_DIR, else $ROOTSIGN_DATA_DIR/spool).",
+    ),
+) -> None:
+    """Upload spooled sessions to the cloud ingest endpoint (ADR-013 Decision 4).
+
+    When the endpoint is unreachable, the SDK keeps recording to
+    `$ROOTSIGN_DATA_DIR/spool/` instead of losing records. This uploads what
+    accumulated there and retires each fully-accepted file to `spool/synced/`.
+
+    Safe to re-run: idempotency is server-side by `event_id`, so records the
+    store already has come back `DUPLICATE_EVENT` and count as delivered. A
+    partially-uploaded session stays in place and resumes on the next run.
+
+    Exit 0 = everything synced (or nothing to sync), 1 = at least one session
+    did not finish.
+    """
+    # Lazy: reading the spool needs neither extra, so `--dry-run` works on a
+    # bare install. The cloud transport is only imported once we are actually
+    # going to talk to the network.
+    from rootsign.sdk.spool import SpoolFormatError, mark_synced, read_spool_session, spool_files
+
+    root = spool_dir
+    paths = spool_files(root)
+    if not paths:
+        typer.echo(f"Nothing to sync — no spooled sessions under {_spool_display(root)}.")
+        return
+
+    sessions, unreadable = _read_spool_sessions(paths, read_spool_session, SpoolFormatError)
+
+    total_envelopes = sum(len(s.envelopes) for s in sessions)
+    typer.echo(
+        f"{len(sessions)} spooled session(s), {total_envelopes} record(s) "
+        f"under {_spool_display(root)}"
+    )
+
+    if dry_run:
+        for session in sessions:
+            span = session.sequence_range
+            detail = f"actions {span[0]}-{span[1]}" if span else "no actions"
+            typer.echo(
+                f"  would upload  {session.session_id}  "
+                f"{len(session.envelopes)} record(s), {detail}"
+            )
+        typer.echo("Dry run — nothing was uploaded.")
+        raise typer.Exit(code=1 if unreadable else 0)
+
+    failures = unreadable
+    with _sync_client(root) as client:
+        for session in sessions:
+            failures += _sync_one(client, session, root, mark_synced)
+
+    if failures:
+        typer.echo(f"{failures} session(s) did not finish. Re-run to resume.", err=True)
+        raise typer.Exit(code=1)
+    typer.echo("All spooled sessions uploaded.")
+
+
+def _spool_display(root: Path | None) -> str:
+    from rootsign.sdk.spool import spool_root
+
+    return str(spool_root(root))
+
+
+def _read_spool_sessions(
+    paths: list[Path], read: Any, format_error: type[Exception]
+) -> tuple[list[Any], int]:
+    """Parse every spool file, reporting (not raising on) the corrupt ones.
+
+    One unreadable file must not strand the others: an operator running this
+    after an outage wants the sessions that *are* intact uploaded, and a clear
+    line about the one that is not.
+    """
+    sessions: list[Any] = []
+    unreadable = 0
+    for path in paths:
+        try:
+            sessions.append(read(path))
+        except format_error as exc:
+            unreadable += 1
+            typer.echo(f"  SKIPPED  {exc}", err=True)
+        except (OSError, UnicodeDecodeError) as exc:
+            # Unreadable (permissions, a vanished mount) or not text at all.
+            # Both are one bad file, and one bad file must not strand the rest.
+            unreadable += 1
+            typer.echo(f"  SKIPPED  {path}: {exc}", err=True)
+    return sessions, unreadable
+
+
+@contextlib.contextmanager
+def _sync_client(root: Path | None) -> "Iterator[Any]":
+    """An `HttpIngestClient` configured for replay, closed on the way out.
+
+    Two settings differ from the SDK's own client:
+
+    * `enable_spool=False` — a replay that failed over would append the records
+      it is reading back into the same file it is uploading (same session id,
+      same writer), duplicating sequence numbers and corrupting the evidence it
+      was sent to rescue.
+    * a private `ChainRegistry` is irrelevant here — every spooled record is
+      already sealed, and `_seal` adopts rather than re-mints.
+    """
+    from rootsign.errors import RootSignCloudExtraRequired
+    from rootsign.sdk.config import SDKSettings
+
+    s = SDKSettings()
+    if not s.API_KEY:
+        typer.echo(
+            "Error: ROOTSIGN_API_KEY is not set — the ingest endpoint will reject every "
+            "record. Set it (or use --dry-run to inspect the spool offline).",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    try:
+        from rootsign.sdk.client import HttpIngestClient
+
+        client = HttpIngestClient(
+            base_url=s.CLOUD_URL,
+            api_key=s.API_KEY,
+            timeout_seconds=s.HTTP_TIMEOUT_SECONDS,
+            max_retries=s.HTTP_MAX_RETRIES,
+            enable_spool=False,
+        )
+    except RootSignCloudExtraRequired as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(f"Uploading to {client.endpoint}")
+    try:
+        yield client
+    finally:
+        import asyncio
+
+        asyncio.run(client.close())
+
+
+def _sync_one(client: Any, session: Any, root: Path | None, mark_synced: Any) -> int:
+    """Upload one session. Returns 1 if it did not finish, else 0."""
+    import asyncio
+
+    from rootsign.replay import replay_envelopes
+
+    report = asyncio.run(replay_envelopes(client, session.envelopes))
+
+    if report.complete:
+        destination = mark_synced(session.path, root)
+        typer.echo(
+            f"  synced    {session.session_id}  {report.accepted} accepted, "
+            f"{report.duplicates} already present -> {destination.parent.name}/"
+        )
+        return 0
+
+    # Left in place on purpose: the file is the only copy of the records the
+    # store has not taken. Naming the sequence tells the operator where the
+    # next run will resume, and whether the rejection is theirs to fix.
+    stuck = session.envelopes[report.failed_index]
+    sequence = (stuck.get("payload") or {}).get("sequence_number")
+    at = f"sequence {sequence}" if sequence is not None else f"record {report.failed_index + 1}"
+    typer.echo(
+        f"  INCOMPLETE {session.session_id}  {report.delivered}/{report.total} delivered, "
+        f"rejected at {at}: {report.error_code.value if report.error_code else 'unknown'} "
+        f"({report.error_message}). File left in place.",
+        err=True,
+    )
+    return 1
 
 
 @app.command()

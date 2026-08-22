@@ -21,18 +21,19 @@ import pytest
 # `feedback_canonical_hash_never_reimplemented`.
 from rootsign.hashing import compute_action_self_hash
 from rootsign.sdk.chain import VerifyResult, verify_session_local
+from rootsign.verdict import Verdict
 
 
 class TestVerifyResultSummary:
     def test_valid_summary(self):
-        r = VerifyResult(valid=True, record_count=47, session_id=uuid4())
+        r = VerifyResult(verdict=Verdict.VALID, record_count=47, session_id=uuid4())
         s = r.summary
         assert "VALID" in s
         assert "47" in s
 
     def test_tampered_summary_includes_sequence(self):
         r = VerifyResult(
-            valid=False,
+            verdict=Verdict.TAMPERED,
             record_count=10,
             session_id=uuid4(),
             first_invalid_sequence=5,
@@ -78,6 +79,116 @@ def _write_jsonl(tmp_path, records: list[dict]):
         for r in records:
             f.write(json.dumps(r) + "\n")
     return p
+
+
+class TestIncompleteVerdict:
+    """Gaps are their own verdict now (ADR-013 Decision 4b, T2.4b).
+
+    Before this, a missing record surfaced as TAMPERED — record N+1's
+    `prev_action_hash` names a record that is not there, which is
+    indistinguishable from an alteration unless you look at the sequence set.
+    """
+
+    def test_a_missing_record_is_incomplete_not_tampered(self, tmp_path):
+        session_id = str(uuid4())
+        records = _make_chain(4, session_id)
+        del records[1]  # sequence 2 never made it to disk
+        path = _write_jsonl(tmp_path, records)
+
+        result = verify_session_local(str(path))
+
+        assert result.verdict is Verdict.INCOMPLETE
+        assert result.valid is False  # the property still reads false
+        assert result.missing_ranges == [(2, 2)]
+        assert result.record_count == 3
+        assert "missing" in (result.error or "")
+
+    def test_a_run_of_lost_records_reports_one_range(self, tmp_path):
+        session_id = str(uuid4())
+        records = _make_chain(6, session_id)
+        del records[1:4]  # sequences 2, 3, 4 — a spool that was down a while
+        path = _write_jsonl(tmp_path, records)
+
+        result = verify_session_local(str(path))
+
+        assert result.verdict is Verdict.INCOMPLETE
+        assert result.missing_ranges == [(2, 4)]
+        assert "2-4" in result.summary
+
+    def test_a_missing_first_record_is_incomplete(self, tmp_path):
+        session_id = str(uuid4())
+        records = _make_chain(3, session_id)
+        del records[0]
+        path = _write_jsonl(tmp_path, records)
+
+        result = verify_session_local(str(path))
+
+        assert result.verdict is Verdict.INCOMPLETE
+        assert result.missing_ranges == [(1, 1)]
+
+    def test_tampering_after_a_gap_is_still_caught(self, tmp_path):
+        """The reason a gap-explained break re-anchors instead of returning.
+
+        If the verifier stopped at the gap, one dropped record would mask every
+        alteration after it — a cheap way to launder a rewritten log.
+        """
+        session_id = str(uuid4())
+        records = _make_chain(5, session_id)
+        del records[1]  # gap at sequence 2
+        records[2]["tool_name"] = "ATTACKER_REWROTE_THIS"  # sequence 4, hashed field
+        path = _write_jsonl(tmp_path, records)
+
+        result = verify_session_local(str(path))
+
+        assert result.verdict is Verdict.TAMPERED  # worst verdict wins
+        assert result.first_invalid_sequence == 4
+        assert result.missing_ranges == [(2, 2)]  # ...and the gap is still reported
+        assert "also missing sequence 2" in result.summary
+
+    def test_a_clean_chain_is_still_valid(self, tmp_path):
+        session_id = str(uuid4())
+        path = _write_jsonl(tmp_path, _make_chain(3, session_id))
+
+        result = verify_session_local(str(path))
+
+        assert result.verdict is Verdict.VALID
+        assert result.valid is True
+        assert result.missing_ranges == []
+
+    def test_an_alteration_without_gaps_is_tampered(self, tmp_path):
+        session_id = str(uuid4())
+        records = _make_chain(3, session_id)
+        records[1]["self_hash"] = "c" * 64
+        path = _write_jsonl(tmp_path, records)
+
+        result = verify_session_local(str(path))
+
+        assert result.verdict is Verdict.TAMPERED
+        assert result.missing_ranges == []
+
+    def test_duplicate_sequences_stay_tampered(self, tmp_path):
+        session_id = str(uuid4())
+        records = _make_chain(3, session_id)
+        records[2]["sequence_number"] = 2
+        path = _write_jsonl(tmp_path, records)
+
+        result = verify_session_local(str(path))
+
+        assert result.verdict is Verdict.TAMPERED
+        assert "duplicate" in (result.error or "")
+
+    def test_the_incomplete_summary_names_the_range_and_the_count(self, tmp_path):
+        session_id = str(uuid4())
+        records = _make_chain(5, session_id)
+        del records[1:3]
+        path = _write_jsonl(tmp_path, records)
+
+        summary = verify_session_local(str(path)).summary
+
+        assert summary.startswith("INCOMPLETE")
+        assert "2 record(s) missing" in summary
+        assert "2-3" in summary
+        assert "3 present and intact" in summary
 
 
 class TestVerifySessionLocal:
