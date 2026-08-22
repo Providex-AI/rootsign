@@ -1,7 +1,7 @@
 # ADR-013: HttpIngestClient — cloud transport, client-side hashing, JSONL offline spool
 
 - **Date**: 2026-08 (Pre-Phase 2 Sprint B — targets v0.3.0)
-- **Status**: Proposed
+- **Status**: Accepted (2026-08-21) — implemented in v0.3.0
 - **Decider**: Founder
 - **Related**: ADR-002 (the stub this replaces; failure-isolation rule),
   ADR-009 (BufferedIngestClient — the batching layer this transport was

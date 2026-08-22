@@ -1,7 +1,7 @@
 # ADR-014: `rootsign export` — the evidence bundle
 
 - **Date**: 2026-08 (Pre-Phase 2 Sprint B — targets v0.3.0)
-- **Status**: Proposed
+- **Status**: Accepted (2026-08-21) — implemented in v0.3.0
 - **Decider**: Founder
 - **Related**: ADR-011 (session files are one input), ADR-001 (the
   verification proof embedded in every bundle), ADR-013 (bundles from
@@ -88,6 +88,17 @@ ask for it, that is a follow-up ADR, not a quiet widening of this one.
 
 Decision 4's honesty rule applies here too: a bundle must not imply provenance
 it does not have.
+
+**Implementation note (v0.3.0).** Even the narrowed scope above proved too
+generous: there is no configuration setting recording which rule set was active
+either — `RedactionConfig` is passed to `@rootsign.trace` per call site, not
+read from settings, so at export time nothing knows what ran. `redaction.json`
+therefore ships `rule_set.name = null` with the reason spelled out in
+`rule_set.provenance`, and reports only what is observable: the field paths
+carrying the sentinel. Naming a plausible rule set would have been the bundle
+inventing provenance, which is the exact failure this decision exists to
+prevent. If partners need attribution, the follow-up ADR has to add it at
+capture time.
 
 **The verdict vocabulary is three-valued from day one.** ADR-013 Decision 4a
 adds `INCOMPLETE` (records missing) alongside `VALID` and `TAMPERED` (records
