@@ -22,6 +22,7 @@ make the second run of a resumed sync permanently unable to finish.
 
 from __future__ import annotations
 
+import inspect
 import logging
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
@@ -113,7 +114,13 @@ async def replay_envelopes(
             report.responses.append(response)
             if on_progress is not None:
                 result = on_progress(index, response)
-                if result is not None:
+                # `isawaitable`, not `is not None`: the callback may be sync or
+                # async, and a sync one that happens to return a value (a list
+                # append chained with `or`, a builder returning self) would be
+                # awaited and raise "object … can't be used in 'await'
+                # expression" — a crash in the caller's progress reporting, of
+                # all places.
+                if inspect.isawaitable(result):
                     await result
             if response.status == "accepted":
                 report.accepted += 1

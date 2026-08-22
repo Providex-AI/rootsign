@@ -131,15 +131,15 @@ def test_is_sealed_reads_self_hash_not_prev() -> None:
     assert is_sealed(_payload(self_hash="c" * 64)) is True
 
 
-def test_record_ids_come_from_one_patchable_point() -> None:
-    """The property the parity harness depends on (T2.3)."""
-    import rootsign.chain_state as chain_state
+def test_record_ids_come_from_one_patchable_point(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The property the parity harness depends on (T2.3).
 
+    `monkeypatch` with a string target rather than a hand-rolled
+    save/restore: it needs no second import of the module under test, and it
+    puts `uuid4` back even if an assertion fails partway.
+    """
     pinned = UUID(int=42)
-    original = chain_state.uuid4
-    chain_state.uuid4 = lambda: pinned
-    try:
-        assert new_record_id() == pinned
-        assert ChainState().seal(SESSION, _payload()).action_id == pinned
-    finally:
-        chain_state.uuid4 = original
+    monkeypatch.setattr("rootsign.chain_state.uuid4", lambda: pinned)
+
+    assert new_record_id() == pinned
+    assert ChainState().seal(SESSION, _payload()).action_id == pinned

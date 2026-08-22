@@ -233,6 +233,35 @@ class TestReplayReporting:
 
         assert seen == [0, 1, 2, 3]
 
+    async def test_a_sync_callback_that_returns_something_is_not_awaited(self):
+        """`on_progress` accepts sync or async callbacks, so "did it return
+        something" is the wrong question — "is it awaitable" is.
+
+        A sync callback that returns a value is easy to write by accident
+        (`lambda i, r: seen.append(i) or True`, a logger that returns self) and
+        awaiting it raises "object … can't be used in 'await' expression" —
+        crashing the caller inside their own progress reporting.
+        """
+        seen: list[int] = []
+        envelopes = [_envelope() for _ in range(3)]
+
+        report = await replay_envelopes(
+            _Store(), envelopes, on_progress=lambda i, r: seen.append(i) or "not awaitable"
+        )
+
+        assert report.complete
+        assert seen == [0, 1, 2]
+
+    async def test_an_async_callback_is_awaited(self):
+        seen: list[int] = []
+
+        async def record(index: int, response: IngestResponse) -> None:
+            seen.append(index)
+
+        await replay_envelopes(_Store(), [_envelope() for _ in range(2)], on_progress=record)
+
+        assert seen == [0, 1]
+
     async def test_default_batch_size_is_a_single_request_for_a_small_session(self):
         store = _Store()
         await replay_envelopes(store, [_envelope() for _ in range(DEFAULT_BATCH_SIZE)])
