@@ -27,14 +27,14 @@ Compliance-grade audit trails. Zero changes to your agent code.
 
 ## Status
 
-**v0.2.1.** `pip install rootsign` → a verified hash chain in under a minute: no Docker, no database, no plumbing. LangGraph + CrewAI integrations, a framework-agnostic MCP proxy, `rootsign verify` CLI, PII redaction, human-in-the-loop checkpoints, opt-in decision capture (PRD-19 / ADR-008), and opt-in SDK micro-batching are all shipping. Evidence bundles (`rootsign export`) and the offline spool land in v0.3.0.
+**v0.3.0.** `pip install rootsign` → a verified hash chain in under a minute: no Docker, no database, no plumbing. LangGraph + CrewAI integrations, a framework-agnostic MCP proxy, `rootsign verify` CLI, PII redaction, human-in-the-loop checkpoints, opt-in decision capture (PRD-19 / ADR-008), and opt-in SDK micro-batching are all shipping — plus evidence bundles (`rootsign export`), the cloud transport with its offline spool, and a published wire spec.
 
 | Phase | Scope | Status |
 |---|---|---|
 | 0 | Data model + storage + ingest handler | ✅ Complete |
 | 1 | Python SDK — `@rootsign.trace`, LangGraph + CrewAI + MCP proxy, `rootsign verify` CLI, redaction, HiTL checkpoint, decision capture, micro-batching | ✅ v0.1.5 |
 | 1.5 | Zero-dependency onboarding — JSONL default backend, `rootsign.init()` facade | ✅ v0.2.0 |
-| 1.6 | Evidence bundles (`rootsign export`), cloud transport + offline spool, published ingest spec | 🚧 v0.3.0 |
+| 1.6 | Evidence bundles (`rootsign export`), cloud transport + offline spool, published ingest spec | ✅ v0.3.0 |
 | 2 | Hosted ingest backend + compliance dashboard | Planned |
 | 3 | Policy enforcement + incident workflow | Planned |
 | 4 | Cross-platform governance | Planned |
