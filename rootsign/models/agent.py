@@ -17,17 +17,13 @@ class Agent(Base):
 
     __tablename__ = "agents"
 
-    agent_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), primary_key=True, default=uuid4
-    )
+    agent_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     owner: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str | None] = mapped_column(String(2000), nullable=True)
     environment: Mapped[str] = mapped_column(String(32), nullable=False)
     risk_tier: Mapped[str] = mapped_column(String(32), nullable=False)
-    permitted_tools: Mapped[list[str]] = mapped_column(
-        ARRAY(String), nullable=False, default=list
-    )
+    permitted_tools: Mapped[list[str]] = mapped_column(ARRAY(String), nullable=False, default=list)
     regulatory_categories: Mapped[list[str]] = mapped_column(
         ARRAY(String), nullable=False, default=list
     )
@@ -42,9 +38,7 @@ class Agent(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     # `metadata` is reserved on SQLAlchemy Base — keep the SQL column name `metadata`
     # but expose it on the ORM attribute as `extra_metadata`.
-    extra_metadata: Mapped[dict | None] = mapped_column(
-        "metadata", JSONB, nullable=True
-    )
+    extra_metadata: Mapped[dict | None] = mapped_column("metadata", JSONB, nullable=True)
 
     __table_args__ = (
         # Identity is (name, environment) since ADR-012 — the same name may

@@ -109,9 +109,7 @@ class TestVerifyBenchmark:
             return verify_elapsed
 
         median, samples = await median_seconds(measure, repeats=5)
-        print(
-            f"10,000-record verify: median {median:.3f}s  samples: {format_samples(samples)}"
-        )
+        print(f"10,000-record verify: median {median:.3f}s  samples: {format_samples(samples)}")
         assert median < 5.0, (
             f"verify_chain median {median:.2f}s — exceeds 5s budget. "
             f"Samples: {format_samples(samples)}. Hardware/environment dependent."

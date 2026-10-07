@@ -157,7 +157,4 @@ class TestFailureIsolation:
         )
 
         assert result is None
-        assert any(
-            "_emit_decision_record failed" in rec.message
-            for rec in caplog.records
-        )
+        assert any("_emit_decision_record failed" in rec.message for rec in caplog.records)

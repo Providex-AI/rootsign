@@ -133,9 +133,7 @@ async def test_engine():
     test by default, and asyncpg Future objects are tied to the loop that
     created them. NullPool ensures we open a fresh connection per test.
     """
-    engine = create_async_engine(
-        settings.TEST_DATABASE_URL, poolclass=NullPool, future=True
-    )
+    engine = create_async_engine(settings.TEST_DATABASE_URL, poolclass=NullPool, future=True)
     try:
         yield engine
     finally:

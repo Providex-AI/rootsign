@@ -35,9 +35,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.create_unique_constraint(
-        "uq_agents_name_environment", "agents", ["name", "environment"]
-    )
+    op.create_unique_constraint("uq_agents_name_environment", "agents", ["name", "environment"])
     op.drop_constraint("uq_agents_name", "agents", type_="unique")
 
 

@@ -42,15 +42,11 @@ class Decision(Base):
     reasoning_summary: Mapped[str | None] = mapped_column(String(10000), nullable=True)
     selected_action: Mapped[str] = mapped_column(String(200), nullable=False)
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
-    alternatives_considered: Mapped[list[str] | None] = mapped_column(
-        ARRAY(String), nullable=True
-    )
+    alternatives_considered: Mapped[list[str] | None] = mapped_column(ARRAY(String), nullable=True)
     timestamp: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
     )
-    reasoning_captured: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False
-    )
+    reasoning_captured: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     __table_args__ = (
         Index("ix_decisions_session_timestamp", "session_id", "timestamp"),

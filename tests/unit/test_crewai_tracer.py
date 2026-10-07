@@ -139,9 +139,7 @@ class TestCrewAITracerWrapTools:
 
 
 class TestCrewAITracerDecoratorRouting:
-    def test_at_trace_routes_crewai_tool_to_crewai_tracer(
-        self, double_tool, ctx, mock_client
-    ):
+    def test_at_trace_routes_crewai_tool_to_crewai_tracer(self, double_tool, ctx, mock_client):
         from rootsign.sdk.decorator import trace
 
         wrapped = trace(ingest_client=mock_client, session_context=ctx)(double_tool)
@@ -151,9 +149,7 @@ class TestCrewAITracerDecoratorRouting:
         # therefore still have ._run as the primary entry point.
         assert hasattr(wrapped, "_run")
 
-    def test_at_trace_routes_langchain_tool_to_langgraph_tracer(
-        self, ctx, mock_client
-    ):
+    def test_at_trace_routes_langchain_tool_to_langgraph_tracer(self, ctx, mock_client):
         """Load-bearing for ADR-005: LangChain check MUST win.
 
         LangChain's StructuredTool satisfies both `_is_langchain_tool` AND
@@ -177,7 +173,9 @@ class TestCrewAITracerDecoratorRouting:
         # one, not our traced_run closure. Inspect via __closure__: our
         # traced_run captures the name "captured_args" in its closure cells.
         run_cells = getattr(wrapped._run, "__closure__", None) or ()
-        captured_names = {cell.cell_contents for cell in run_cells if hasattr(cell, "cell_contents")}
+        captured_names = {
+            cell.cell_contents for cell in run_cells if hasattr(cell, "cell_contents")
+        }
         # CrewAITracer's traced_run closes over `original_run` callable +
         # `tool_name` str. If we accidentally routed to CrewAITracer, ._run
         # would be a CLOSURE rather than the bound method on the

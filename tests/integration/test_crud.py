@@ -195,9 +195,7 @@ class TestHashChain:
 
         # Corrupt the stored self_hash on action 1.
         await db.execute(
-            update(Action)
-            .where(Action.action_id == a1.action_id)
-            .values(self_hash="0" * 64)
+            update(Action).where(Action.action_id == a1.action_id).values(self_hash="0" * 64)
         )
         await db.flush()
 
@@ -296,9 +294,7 @@ class TestHashChain:
         assert result["missing_ranges"] == [(2, 2)]
 
     # AC-2.11
-    async def test_get_session_chain_orders_by_sequence_number(
-        self, db: AsyncSession
-    ):
+    async def test_get_session_chain_orders_by_sequence_number(self, db: AsyncSession):
         agent = await _make_agent(db)
         s = await _make_session(db, agent.agent_id)
 
@@ -349,9 +345,7 @@ class TestConcurrentInserts:
         await clean_db.commit()
         session_id = s.session_id
 
-        factory = async_sessionmaker(
-            test_engine, class_=AsyncSession, expire_on_commit=False
-        )
+        factory = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
 
         async def writer(i: int):
             async with factory() as worker_db:
@@ -366,9 +360,7 @@ class TestConcurrentInserts:
         async with factory() as reader:
             chain = await crud.action.get_session_chain(reader, session_id=session_id)
             seqs = sorted(a.sequence_number for a in chain)
-            assert seqs == [1, 2, 3, 4, 5], (
-                f"Expected contiguous 1..5, got {seqs}"
-            )
+            assert seqs == [1, 2, 3, 4, 5], f"Expected contiguous 1..5, got {seqs}"
             verify = await crud.action.verify_chain(reader, session_id=session_id)
             assert verify["valid"] is True, verify
 

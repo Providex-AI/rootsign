@@ -42,13 +42,9 @@ class TestSignature:
         in the wrong slot."""
         sig = inspect.signature(_emit_approval_record)
         non_keyword = [
-            name
-            for name, p in sig.parameters.items()
-            if p.kind != inspect.Parameter.KEYWORD_ONLY
+            name for name, p in sig.parameters.items() if p.kind != inspect.Parameter.KEYWORD_ONLY
         ]
-        assert non_keyword == [], (
-            f"Parameters {non_keyword} must be keyword-only"
-        )
+        assert non_keyword == [], f"Parameters {non_keyword} must be keyword-only"
 
     def test_rejects_positional_call(self):
         """Smoke: calling positionally must raise TypeError."""
@@ -58,8 +54,14 @@ class TestSignature:
         with pytest.raises(TypeError):
             # ruff: noqa - intentional positional misuse
             _emit_approval_record(
-                client, ctx, uuid4(), datetime.now(timezone.utc),  # type: ignore[misc]
-                "u", "human", {}, "approved",
+                client,
+                ctx,
+                uuid4(),
+                datetime.now(timezone.utc),  # type: ignore[misc]
+                "u",
+                "human",
+                {},
+                "approved",
             )
 
 
@@ -179,8 +181,7 @@ class TestFailureIsolation:
         assert result is None
         # A WARNING was logged so an operator can spot the divergence.
         assert any(
-            "rootsign: _emit_approval_record failed" in rec.message
-            for rec in caplog.records
+            "rootsign: _emit_approval_record failed" in rec.message for rec in caplog.records
         )
 
     async def test_timeout_envelope_carries_timeout_sentinel(self):

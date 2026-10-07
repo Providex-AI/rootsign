@@ -308,9 +308,7 @@ async def _emit_action_record(
     if _input_payload_override is not None:
         redacted_input: Any = _input_payload_override
     else:
-        input_payload: dict[str, Any] = _to_json_safe(
-            {"args": list(args), "kwargs": dict(kwargs)}
-        )
+        input_payload: dict[str, Any] = _to_json_safe({"args": list(args), "kwargs": dict(kwargs)})
         redacted_input = (
             redaction_config.redact(input_payload) if redaction_config else input_payload
         )
@@ -533,9 +531,7 @@ async def _emit_hitl_action(
     if _input_payload_override is not None:
         redacted_input: Any = _input_payload_override
     else:
-        input_payload: dict[str, Any] = _to_json_safe(
-            {"args": list(args), "kwargs": dict(kwargs)}
-        )
+        input_payload: dict[str, Any] = _to_json_safe({"args": list(args), "kwargs": dict(kwargs)})
         redacted_input = (
             redaction_config.redact(input_payload) if redaction_config else input_payload
         )

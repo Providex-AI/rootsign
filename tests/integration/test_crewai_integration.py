@@ -95,9 +95,7 @@ class TestCrewAIFullPipeline:
         assert result["valid"] is True
         assert result["record_count"] == 3
 
-    async def test_schema_parity_with_langgraph(
-        self, db, registered_agent, make_envelope_fixture
-    ):
+    async def test_schema_parity_with_langgraph(self, db, registered_agent, make_envelope_fixture):
         """CrewAI and LangGraph Action records have identical payload fields."""
         client = LocalIngestClient(db=db)
         session_id = uuid4()
@@ -106,9 +104,7 @@ class TestCrewAIFullPipeline:
             session_id=session_id,
         )
         await client.handle(
-            make_envelope_fixture(
-                "SESSION_OPEN", registered_agent.agent_id, session_id, {}
-            )
+            make_envelope_fixture("SESSION_OPEN", registered_agent.agent_id, session_id, {})
         )
 
         @tool("Add Numbers")

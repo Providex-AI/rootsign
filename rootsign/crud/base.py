@@ -44,7 +44,9 @@ class CRUDBase(Generic[ModelType, CreateSchemaType]):
     async def update(
         self, db: AsyncSession, *, db_obj: ModelType, obj_in: dict[str, Any] | BaseModel
     ) -> ModelType:
-        data = obj_in.model_dump(exclude_unset=True) if isinstance(obj_in, BaseModel) else dict(obj_in)
+        data = (
+            obj_in.model_dump(exclude_unset=True) if isinstance(obj_in, BaseModel) else dict(obj_in)
+        )
         for field, value in data.items():
             setattr(db_obj, field, value)
         db.add(db_obj)
@@ -56,9 +58,7 @@ class CRUDBase(Generic[ModelType, CreateSchemaType]):
         db_obj = await self.get(db, id)
         if db_obj is None:
             return None
-        await db.execute(
-            delete(self.model).where(getattr(self.model, self.pk_attr) == id)
-        )
+        await db.execute(delete(self.model).where(getattr(self.model, self.pk_attr) == id))
         await db.flush()
         return db_obj
 

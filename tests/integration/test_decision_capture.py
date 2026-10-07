@@ -46,58 +46,36 @@ def _make_tools():
 
 
 class TestDecisionCaptureDisabled:
-    async def test_no_decision_records_when_flag_off(
-        self, clean_db, seeded_agent, monkeypatch
-    ):
+    async def test_no_decision_records_when_flag_off(self, clean_db, seeded_agent, monkeypatch):
         monkeypatch.setenv("ROOTSIGN_CAPTURE_DECISIONS", "false")
         importlib.reload(cfg)
 
         client = LocalIngestClient(db=clean_db)
         session_id = uuid4()
-        ctx = SessionContext(
-            agent_id=seeded_agent.agent_id, session_id=session_id
-        )
-        await client.handle(
-            make_envelope(
-                "SESSION_OPEN", seeded_agent.agent_id, session_id, {}
-            )
-        )
-        tools = LangGraphTracer.wrap_tools(
-            _make_tools(), ctx=ctx, client=client
-        )
+        ctx = SessionContext(agent_id=seeded_agent.agent_id, session_id=session_id)
+        await client.handle(make_envelope("SESSION_OPEN", seeded_agent.agent_id, session_id, {}))
+        tools = LangGraphTracer.wrap_tools(_make_tools(), ctx=ctx, client=client)
         await tools[0].ainvoke({"amount": 100.0})
         await clean_db.commit()
 
-        chain = await action_crud.get_session_chain(
-            clean_db, session_id=session_id
-        )
+        chain = await action_crud.get_session_chain(clean_db, session_id=session_id)
         assert len(chain) == 1
         assert chain[0].decision_id is None  # not populated when off
 
-        decisions = await decision_crud.get_by_session(
-            clean_db, session_id=session_id
-        )
+        decisions = await decision_crud.get_by_session(clean_db, session_id=session_id)
         assert len(decisions) == 0
 
 
 class TestDecisionCaptureEnabled:
-    async def test_decision_record_created_and_linked(
-        self, clean_db, seeded_agent, monkeypatch
-    ):
+    async def test_decision_record_created_and_linked(self, clean_db, seeded_agent, monkeypatch):
         monkeypatch.setenv("ROOTSIGN_CAPTURE_DECISIONS", "true")
         monkeypatch.setenv("ROOTSIGN_REASONING_DEPTH", "summary")
         importlib.reload(cfg)
 
         client = LocalIngestClient(db=clean_db)
         session_id = uuid4()
-        ctx = SessionContext(
-            agent_id=seeded_agent.agent_id, session_id=session_id
-        )
-        await client.handle(
-            make_envelope(
-                "SESSION_OPEN", seeded_agent.agent_id, session_id, {}
-            )
-        )
+        ctx = SessionContext(agent_id=seeded_agent.agent_id, session_id=session_id)
+        await client.handle(make_envelope("SESSION_OPEN", seeded_agent.agent_id, session_id, {}))
 
         decision_id = await ctx.record_decision(
             selected_action="process_payment",
@@ -107,31 +85,20 @@ class TestDecisionCaptureEnabled:
         )
         assert decision_id is not None
 
-        tools = LangGraphTracer.wrap_tools(
-            _make_tools(), ctx=ctx, client=client
-        )
+        tools = LangGraphTracer.wrap_tools(_make_tools(), ctx=ctx, client=client)
         await tools[0].ainvoke({"amount": 100.0})
         await clean_db.commit()
 
-        chain = await action_crud.get_session_chain(
-            clean_db, session_id=session_id
-        )
+        chain = await action_crud.get_session_chain(clean_db, session_id=session_id)
         assert len(chain) == 1
         assert chain[0].decision_id == decision_id
 
-        decisions = await decision_crud.get_by_session(
-            clean_db, session_id=session_id
-        )
+        decisions = await decision_crud.get_by_session(clean_db, session_id=session_id)
         assert len(decisions) == 1
         assert decisions[0].selected_action == "process_payment"
-        assert (
-            decisions[0].reasoning_summary
-            == "Amount within policy limit; auto-approved."
-        )
+        assert decisions[0].reasoning_summary == "Amount within policy limit; auto-approved."
 
-        result = await action_crud.verify_chain(
-            clean_db, session_id=session_id
-        )
+        result = await action_crud.verify_chain(clean_db, session_id=session_id)
         assert result["valid"] is True
         assert result["record_count"] == 1
 
@@ -143,49 +110,31 @@ class TestDecisionCaptureEnabled:
 
         client = LocalIngestClient(db=clean_db)
         session_id = uuid4()
-        ctx = SessionContext(
-            agent_id=seeded_agent.agent_id, session_id=session_id
-        )
-        await client.handle(
-            make_envelope(
-                "SESSION_OPEN", seeded_agent.agent_id, session_id, {}
-            )
-        )
+        ctx = SessionContext(agent_id=seeded_agent.agent_id, session_id=session_id)
+        await client.handle(make_envelope("SESSION_OPEN", seeded_agent.agent_id, session_id, {}))
 
         await ctx.record_decision(
             selected_action="process_payment",
             ingest_client=client,
         )
-        tools = LangGraphTracer.wrap_tools(
-            _make_tools() + _make_tools(), ctx=ctx, client=client
-        )
+        tools = LangGraphTracer.wrap_tools(_make_tools() + _make_tools(), ctx=ctx, client=client)
         await tools[0].ainvoke({"amount": 100.0})  # consumes decision_id
         await tools[1].ainvoke({"amount": 200.0})  # no decision_id
         await clean_db.commit()
 
-        chain = await action_crud.get_session_chain(
-            clean_db, session_id=session_id
-        )
+        chain = await action_crud.get_session_chain(clean_db, session_id=session_id)
         assert chain[0].decision_id is not None  # first action: linked
         assert chain[1].decision_id is None  # second action: not linked
 
-    async def test_minimal_depth_stores_no_reasoning(
-        self, clean_db, seeded_agent, monkeypatch
-    ):
+    async def test_minimal_depth_stores_no_reasoning(self, clean_db, seeded_agent, monkeypatch):
         monkeypatch.setenv("ROOTSIGN_CAPTURE_DECISIONS", "true")
         monkeypatch.setenv("ROOTSIGN_REASONING_DEPTH", "minimal")
         importlib.reload(cfg)
 
         client = LocalIngestClient(db=clean_db)
         session_id = uuid4()
-        ctx = SessionContext(
-            agent_id=seeded_agent.agent_id, session_id=session_id
-        )
-        await client.handle(
-            make_envelope(
-                "SESSION_OPEN", seeded_agent.agent_id, session_id, {}
-            )
-        )
+        ctx = SessionContext(agent_id=seeded_agent.agent_id, session_id=session_id)
+        await client.handle(make_envelope("SESSION_OPEN", seeded_agent.agent_id, session_id, {}))
         await ctx.record_decision(
             selected_action="process_payment",
             reasoning_summary="This should NOT be stored at minimal depth.",
@@ -193,8 +142,6 @@ class TestDecisionCaptureEnabled:
         )
         await clean_db.commit()
 
-        decisions = await decision_crud.get_by_session(
-            clean_db, session_id=session_id
-        )
+        decisions = await decision_crud.get_by_session(clean_db, session_id=session_id)
         assert decisions[0].reasoning_summary is None
         assert decisions[0].selected_action == "process_payment"

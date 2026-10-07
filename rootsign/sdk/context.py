@@ -94,9 +94,7 @@ class SessionContext:
         from rootsign.sdk.facade import _resolve_ctx_client
 
         # `self` is already the context; only the client needs resolving.
-        _, ingest_client = _resolve_ctx_client(
-            self, ingest_client, surface="record_decision"
-        )
+        _, ingest_client = _resolve_ctx_client(self, ingest_client, surface="record_decision")
 
         # _emit_decision_record is only imported on the capture-on path so
         # the no-op path stays free of dependency on the helper.

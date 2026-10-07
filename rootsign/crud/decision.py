@@ -20,9 +20,7 @@ from rootsign.schemas.decision import DecisionCreate
 
 
 class CRUDDecision(CRUDBase[Decision, DecisionCreate]):
-    async def get_by_session(
-        self, db: AsyncSession, *, session_id: UUID
-    ) -> list[Decision]:
+    async def get_by_session(self, db: AsyncSession, *, session_id: UUID) -> list[Decision]:
         """Return all Decision rows for a session, oldest first.
 
         Used by replay queries to walk the Decision narrative for a

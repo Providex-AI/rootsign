@@ -39,15 +39,11 @@ class TestStandardPIIConfig:
 
     def test_redacts_email(self):
         cfg = StandardPIIConfig()
-        assert cfg.redact({"email": "alice@example.com"}) == {
-            "email": REDACTED_PLACEHOLDER
-        }
+        assert cfg.redact({"email": "alice@example.com"}) == {"email": REDACTED_PLACEHOLDER}
 
     def test_redacts_phone(self):
         cfg = StandardPIIConfig()
-        assert cfg.redact({"phone": "+1 415 555 1234"}) == {
-            "phone": REDACTED_PLACEHOLDER
-        }
+        assert cfg.redact({"phone": "+1 415 555 1234"}) == {"phone": REDACTED_PLACEHOLDER}
 
     def test_redacts_ssn(self):
         cfg = StandardPIIConfig()
@@ -127,9 +123,7 @@ class TestStandardPIIConfig:
         match only top-level paths, NOT nested ones. Useful when you
         want to distinguish `audit.email` from `user.email`."""
         cfg = RedactionConfig({"email": r".+@.+"}, match_mode="path")
-        out = cfg.redact(
-            {"kwargs": {"email": "alice@example.com"}}
-        )
+        out = cfg.redact({"kwargs": {"email": "alice@example.com"}})
         # Under path mode, the bare rule "email" only matches path "email"
         # at the top level — kwargs.email does NOT match.
         assert out == {"kwargs": {"email": "alice@example.com"}}
@@ -212,6 +206,7 @@ class TestListAndDepth:
         # placeholder, so a serialised form of `out` should contain
         # neither the raw value nor any path beyond the limit.
         import json
+
         rendered = json.dumps(out)
         assert "should_not_be_visible_in_output" not in rendered
         assert REDACTED_PLACEHOLDER in rendered

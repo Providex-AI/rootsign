@@ -17,20 +17,14 @@ class Policy(Base):
 
     __tablename__ = "policies"
 
-    policy_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), primary_key=True, default=uuid4
-    )
+    policy_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     rule_text: Mapped[str] = mapped_column(String(50000), nullable=False)
     scope: Mapped[str] = mapped_column(String(32), nullable=False)
     scope_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    regulatory_refs: Mapped[list[str] | None] = mapped_column(
-        ARRAY(String), nullable=True
-    )
-    enforcement_mode: Mapped[str] = mapped_column(
-        String(32), nullable=False, default="log_only"
-    )
+    regulatory_refs: Mapped[list[str] | None] = mapped_column(ARRAY(String), nullable=True)
+    enforcement_mode: Mapped[str] = mapped_column(String(32), nullable=False, default="log_only")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
@@ -39,9 +33,7 @@ class Policy(Base):
 
     __table_args__ = (
         UniqueConstraint("name", "version", name="uq_policies_name_version"),
-        CheckConstraint(
-            "scope IN ('agent','session','tool','global')", name="ck_policies_scope"
-        ),
+        CheckConstraint("scope IN ('agent','session','tool','global')", name="ck_policies_scope"),
         CheckConstraint(
             "enforcement_mode IN ('log_only','require_approval','block')",
             name="ck_policies_enforcement_mode",

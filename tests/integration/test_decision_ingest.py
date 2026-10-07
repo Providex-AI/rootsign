@@ -24,17 +24,11 @@ from tests.conftest import make_envelope
 
 
 class TestDecisionRecordIngest:
-    async def test_decision_record_accepted_and_persisted(
-        self, clean_db, seeded_agent
-    ):
+    async def test_decision_record_accepted_and_persisted(self, clean_db, seeded_agent):
         client = LocalIngestClient(db=clean_db)
         session_id = uuid4()
 
-        await client.handle(
-            make_envelope(
-                "SESSION_OPEN", seeded_agent.agent_id, session_id, {}
-            )
-        )
+        await client.handle(make_envelope("SESSION_OPEN", seeded_agent.agent_id, session_id, {}))
 
         resp = await client.handle(
             {
@@ -60,9 +54,7 @@ class TestDecisionRecordIngest:
         assert resp.entity_id is not None  # handler-assigned decision_id
         await clean_db.commit()
 
-        decisions = await decision_crud.get_by_session(
-            clean_db, session_id=session_id
-        )
+        decisions = await decision_crud.get_by_session(clean_db, session_id=session_id)
         assert len(decisions) == 1
         assert decisions[0].decision_id == resp.entity_id
         assert decisions[0].selected_action == "test_tool"

@@ -30,9 +30,7 @@ class Action(Base):
 
     __tablename__ = "actions"
 
-    action_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), primary_key=True, default=uuid4
-    )
+    action_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
     timestamp: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), primary_key=True, nullable=False, default=_utcnow
     )
@@ -41,9 +39,7 @@ class Action(Base):
         ForeignKey("sessions.session_id", ondelete="RESTRICT"),
         nullable=False,
     )
-    decision_id: Mapped[UUID | None] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=True
-    )
+    decision_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
     # Forward-looking nullable FK; Policy entity exists in Phase 0 schema for this.
     policy_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
@@ -77,10 +73,6 @@ class Action(Base):
             "duration_ms IS NULL OR duration_ms >= 0",
             name="ck_actions_duration_nonneg",
         ),
-        CheckConstraint(
-            "length(input_hash) = 64", name="ck_actions_input_hash_length"
-        ),
-        CheckConstraint(
-            "length(self_hash) = 64", name="ck_actions_self_hash_length"
-        ),
+        CheckConstraint("length(input_hash) = 64", name="ck_actions_input_hash_length"),
+        CheckConstraint("length(self_hash) = 64", name="ck_actions_self_hash_length"),
     )

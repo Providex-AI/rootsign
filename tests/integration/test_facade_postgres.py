@@ -85,9 +85,7 @@ async def test_drift_warns_and_keeps_stored_values(pg_facade, caplog):
     assert again == agent_id
     assert "already registered with different attributes" in caplog.text
     async with pg_facade() as db:
-        stored = (
-            await db.execute(select(Agent).where(Agent.name == "pg-drift"))
-        ).scalar_one()
+        stored = (await db.execute(select(Agent).where(Agent.name == "pg-drift"))).scalar_one()
     assert stored.risk_tier == "low"  # mutation is an admin op, not an init side effect
 
 

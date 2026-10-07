@@ -112,9 +112,7 @@ async def open_session(handler, agent_id: UUID, session_id: UUID) -> None:
 
 
 class TestAC31_SessionOpen:
-    async def test_creates_session_with_status_running(
-        self, handler, registered_agent, db
-    ):
+    async def test_creates_session_with_status_running(self, handler, registered_agent, db):
         session_id = uuid4()
         r = await handler.handle(
             envelope(
@@ -154,9 +152,7 @@ class TestAC31_SessionOpen:
 
 
 class TestAC32_ActionRecordReturnsHashChainFields:
-    async def test_response_has_sequence_and_self_hash(
-        self, handler, registered_agent
-    ):
+    async def test_response_has_sequence_and_self_hash(self, handler, registered_agent):
         session_id = uuid4()
         await open_session(handler, registered_agent.agent_id, session_id)
 
@@ -181,9 +177,7 @@ class TestAC32_ActionRecordReturnsHashChainFields:
 
 
 class TestAC33_HashChainViaIngest:
-    async def test_three_actions_chain_correctly(
-        self, handler, registered_agent, db
-    ):
+    async def test_three_actions_chain_correctly(self, handler, registered_agent, db):
         session_id = uuid4()
         await open_session(handler, registered_agent.agent_id, session_id)
 
@@ -272,9 +266,7 @@ class TestAC35_Idempotency:
 
 
 class TestAC36_DecisionCountIncrement:
-    async def test_one_decision_increments_count(
-        self, handler, registered_agent, db
-    ):
+    async def test_one_decision_increments_count(self, handler, registered_agent, db):
         session_id = uuid4()
         await open_session(handler, registered_agent.agent_id, session_id)
 
@@ -304,9 +296,7 @@ class TestAC36_DecisionCountIncrement:
 
 
 class TestAC37_ApprovalUpdatesAction:
-    async def test_approved_flips_action_to_human_approved(
-        self, handler, registered_agent, db
-    ):
+    async def test_approved_flips_action_to_human_approved(self, handler, registered_agent, db):
         session_id = uuid4()
         await open_session(handler, registered_agent.agent_id, session_id)
 
@@ -338,9 +328,7 @@ class TestAC37_ApprovalUpdatesAction:
         assert r_approval.status == "accepted"
 
         action = (
-            await db.execute(
-                select(Action).where(Action.action_id == action_id)
-            )
+            await db.execute(select(Action).where(Action.action_id == action_id))
         ).scalar_one()
         assert action.authorization_status == "human_approved"
 
@@ -351,9 +339,7 @@ class TestAC37_ApprovalUpdatesAction:
 
 
 class TestAC38_SessionClose:
-    async def test_close_sets_status_and_end_time(
-        self, handler, registered_agent, db
-    ):
+    async def test_close_sets_status_and_end_time(self, handler, registered_agent, db):
         session_id = uuid4()
         await open_session(handler, registered_agent.agent_id, session_id)
 
@@ -410,9 +396,7 @@ class TestAC39_PostCloseEventsRejected:
 
 
 class TestAC310_SchemaVersionMismatch:
-    async def test_major_version_mismatch_rejected(
-        self, handler, registered_agent
-    ):
+    async def test_major_version_mismatch_rejected(self, handler, registered_agent):
         r = await handler.handle(
             envelope(
                 event_type="SESSION_OPEN",
@@ -476,9 +460,7 @@ class TestAC311_CloseReconciliation:
                 )
             )
         assert r.status == "accepted"
-        assert any(
-            "action_count mismatch" in record.message for record in caplog.records
-        )
+        assert any("action_count mismatch" in record.message for record in caplog.records)
 
 
 # ---------------------------------------------------------------------------
@@ -565,15 +547,11 @@ class TestAC313_EscalationChain:
 
         # Resolving approval has the right parent linkage
         resolver = (
-            await db.execute(
-                select(Approval).where(Approval.approval_id == r_resolve.entity_id)
-            )
+            await db.execute(select(Approval).where(Approval.approval_id == r_resolve.entity_id))
         ).scalar_one()
         assert resolver.parent_approval_id == escalated_approval_id
 
-    async def test_chained_escalation_rejected(
-        self, handler, registered_agent
-    ):
+    async def test_chained_escalation_rejected(self, handler, registered_agent):
         """2-level enforcement: an `escalated` approval may NOT have parent set."""
         session_id = uuid4()
         await open_session(handler, registered_agent.agent_id, session_id)
@@ -661,9 +639,7 @@ class TestAC313_EscalationChain:
 
 
 class TestAC314_ActionAlreadyResolved:
-    async def test_third_approval_after_resolution_rejected(
-        self, handler, registered_agent
-    ):
+    async def test_third_approval_after_resolution_rejected(self, handler, registered_agent):
         session_id = uuid4()
         await open_session(handler, registered_agent.agent_id, session_id)
         r_action = await handler.handle(

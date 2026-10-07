@@ -29,9 +29,7 @@ def _jsonl_facade_env(monkeypatch, tmp_path):
 
 
 def _verify(tmp_path, session_id):
-    return rootsign.verify_session_local(
-        str(tmp_path / "sessions" / f"{session_id}.jsonl")
-    )
+    return rootsign.verify_session_local(str(tmp_path / "sessions" / f"{session_id}.jsonl"))
 
 
 @pytest.mark.asyncio

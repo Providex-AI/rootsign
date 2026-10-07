@@ -63,9 +63,7 @@ def upgrade() -> None:
             nullable=False,
             server_default=sa.text("now()"),
         ),
-        sa.Column(
-            "is_active", sa.Boolean(), nullable=False, server_default=sa.text("true")
-        ),
+        sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("true")),
         sa.Column("metadata", postgresql.JSONB(), nullable=True),
         sa.UniqueConstraint("name", name="uq_agents_name"),
         sa.CheckConstraint(
@@ -81,9 +79,7 @@ def upgrade() -> None:
             name="ck_agents_framework",
         ),
     )
-    op.create_index(
-        "ix_agents_environment_is_active", "agents", ["environment", "is_active"]
-    )
+    op.create_index("ix_agents_environment_is_active", "agents", ["environment", "is_active"])
     op.create_index("ix_agents_risk_tier", "agents", ["risk_tier"])
     op.create_index("ix_agents_is_active", "agents", ["is_active"])
 
@@ -95,9 +91,7 @@ def upgrade() -> None:
         sa.Column("rule_text", sa.String(50000), nullable=False),
         sa.Column("scope", sa.String(32), nullable=False),
         sa.Column("scope_id", postgresql.UUID(as_uuid=True), nullable=True),
-        sa.Column(
-            "version", sa.Integer(), nullable=False, server_default=sa.text("1")
-        ),
+        sa.Column("version", sa.Integer(), nullable=False, server_default=sa.text("1")),
         sa.Column("regulatory_refs", postgresql.ARRAY(sa.String()), nullable=True),
         sa.Column(
             "enforcement_mode",
@@ -105,9 +99,7 @@ def upgrade() -> None:
             nullable=False,
             server_default=sa.text("'log_only'"),
         ),
-        sa.Column(
-            "is_active", sa.Boolean(), nullable=False, server_default=sa.text("true")
-        ),
+        sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("true")),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
@@ -146,9 +138,7 @@ def upgrade() -> None:
             server_default=sa.text("now()"),
         ),
         sa.Column("end_time", sa.DateTime(timezone=True), nullable=True),
-        sa.Column(
-            "action_count", sa.Integer(), nullable=False, server_default=sa.text("0")
-        ),
+        sa.Column("action_count", sa.Integer(), nullable=False, server_default=sa.text("0")),
         sa.Column(
             "decision_count",
             sa.Integer(),
@@ -162,12 +152,8 @@ def upgrade() -> None:
             "status IN ('running','completed','failed','abandoned')",
             name="ck_sessions_status",
         ),
-        sa.CheckConstraint(
-            "action_count >= 0", name="ck_sessions_action_count_nonneg"
-        ),
-        sa.CheckConstraint(
-            "decision_count >= 0", name="ck_sessions_decision_count_nonneg"
-        ),
+        sa.CheckConstraint("action_count >= 0", name="ck_sessions_action_count_nonneg"),
+        sa.CheckConstraint("decision_count >= 0", name="ck_sessions_decision_count_nonneg"),
         sa.CheckConstraint(
             "end_time IS NULL OR end_time >= start_time",
             name="ck_sessions_end_after_start",
@@ -196,9 +182,7 @@ def upgrade() -> None:
         sa.Column("reasoning_summary", sa.String(10000), nullable=True),
         sa.Column("selected_action", sa.String(200), nullable=False),
         sa.Column("confidence", sa.Float(), nullable=True),
-        sa.Column(
-            "alternatives_considered", postgresql.ARRAY(sa.String()), nullable=True
-        ),
+        sa.Column("alternatives_considered", postgresql.ARRAY(sa.String()), nullable=True),
         sa.Column(
             "timestamp",
             sa.DateTime(timezone=True),
@@ -216,9 +200,7 @@ def upgrade() -> None:
             name="ck_decisions_confidence_range",
         ),
     )
-    op.create_index(
-        "ix_decisions_session_timestamp", "decisions", ["session_id", "timestamp"]
-    )
+    op.create_index("ix_decisions_session_timestamp", "decisions", ["session_id", "timestamp"])
 
     # ---------- actions (hypertable) ----------
     op.create_table(
@@ -265,12 +247,8 @@ def upgrade() -> None:
             "duration_ms IS NULL OR duration_ms >= 0",
             name="ck_actions_duration_nonneg",
         ),
-        sa.CheckConstraint(
-            "length(input_hash) = 64", name="ck_actions_input_hash_length"
-        ),
-        sa.CheckConstraint(
-            "length(self_hash) = 64", name="ck_actions_self_hash_length"
-        ),
+        sa.CheckConstraint("length(input_hash) = 64", name="ck_actions_input_hash_length"),
+        sa.CheckConstraint("length(self_hash) = 64", name="ck_actions_self_hash_length"),
     )
     op.create_index("ix_actions_session_seq", "actions", ["session_id", "sequence_number"])
     op.create_index("ix_actions_session_timestamp", "actions", ["session_id", "timestamp"])
@@ -288,8 +266,7 @@ def upgrade() -> None:
         "timescaledb.compress_segmentby = 'session_id')"
     )
     op.execute(
-        "SELECT add_compression_policy('actions', INTERVAL '30 days', "
-        "if_not_exists => TRUE)"
+        "SELECT add_compression_policy('actions', INTERVAL '30 days', if_not_exists => TRUE)"
     )
 
     # ---------- approvals ----------
@@ -327,9 +304,7 @@ def upgrade() -> None:
         ),
     )
     op.create_index("ix_approvals_action_id", "approvals", ["action_id"])
-    op.create_index(
-        "ix_approvals_decision_timestamp", "approvals", ["decision", "timestamp"]
-    )
+    op.create_index("ix_approvals_decision_timestamp", "approvals", ["decision", "timestamp"])
 
     # ---------- incidents ----------
     op.create_table(
