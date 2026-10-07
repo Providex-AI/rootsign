@@ -48,7 +48,10 @@ MOCK_UPSTREAM_RESPONSE = {
 TOOLS_CALL_REQUEST = {
     "jsonrpc": "2.0",
     "method": "tools/call",
-    "params": {"name": "send_email", "arguments": {"to": "alice@example.com", "subject": "Invoice"}},
+    "params": {
+        "name": "send_email",
+        "arguments": {"to": "alice@example.com", "subject": "Invoice"},
+    },
     "id": 1,
 }
 
@@ -127,7 +130,10 @@ class TestMCPProxyInterception:
             "jsonrpc": "2.0",
             "method": "tools/call",
             # `email` is a StandardPIIConfig leaf key; `subject` is not.
-            "params": {"name": "send_email", "arguments": {"email": "user@example.com", "subject": "Invoice"}},
+            "params": {
+                "name": "send_email",
+                "arguments": {"email": "user@example.com", "subject": "Invoice"},
+            },
             "id": 1,
         }
         with mock_upstream(MOCK_UPSTREAM_RESPONSE):

@@ -87,10 +87,13 @@ class TestHiTLOverMCP:
                 decision=ApprovalDecision.APPROVED, approval_id=uuid4(), approver_id="op@test"
             )
 
-        with upstream_patch, patch(
-            "rootsign.sdk.hitl.HiTLCheckpoint.wait_for_approval",
-            new=AsyncMock(side_effect=wait_side_effect),
-        ) as wait:
+        with (
+            upstream_patch,
+            patch(
+                "rootsign.sdk.hitl.HiTLCheckpoint.wait_for_approval",
+                new=AsyncMock(side_effect=wait_side_effect),
+            ) as wait,
+        ):
             result = await MCPProxyTracer.intercept_tools_call(
                 request_body=TOOLS_CALL,
                 upstream_url="http://mock/mcp",
@@ -111,9 +114,12 @@ class TestHiTLOverMCP:
         ctx = SessionContext(agent_id=uuid4())
         upstream_patch, post = _mock_upstream()
 
-        with upstream_patch, patch(
-            "rootsign.sdk.hitl.HiTLCheckpoint.wait_for_approval",
-            new=AsyncMock(side_effect=HiTLRejectedError(client._action_id, reason="Too risky")),
+        with (
+            upstream_patch,
+            patch(
+                "rootsign.sdk.hitl.HiTLCheckpoint.wait_for_approval",
+                new=AsyncMock(side_effect=HiTLRejectedError(client._action_id, reason="Too risky")),
+            ),
         ):
             with pytest.raises(HiTLRejectedError, match="Too risky"):
                 await MCPProxyTracer.intercept_tools_call(
@@ -134,12 +140,17 @@ class TestHiTLOverMCP:
         ctx = SessionContext(agent_id=uuid4())
         upstream_patch, _post = _mock_upstream()
 
-        with upstream_patch, patch(
-            "rootsign.sdk.hitl.HiTLCheckpoint.wait_for_approval",
-            new=AsyncMock(
-                return_value=HiTLResult(
-                    decision=ApprovalDecision.APPROVED, approval_id=uuid4(), approver_id="op@test"
-                )
+        with (
+            upstream_patch,
+            patch(
+                "rootsign.sdk.hitl.HiTLCheckpoint.wait_for_approval",
+                new=AsyncMock(
+                    return_value=HiTLResult(
+                        decision=ApprovalDecision.APPROVED,
+                        approval_id=uuid4(),
+                        approver_id="op@test",
+                    )
+                ),
             ),
         ):
             await MCPProxyTracer.intercept_tools_call(

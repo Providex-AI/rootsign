@@ -169,9 +169,7 @@ class EscalationDepthExceededError(RootSignError):
     error_code."""
 
     def __init__(self, action_id: UUID):
-        super().__init__(
-            f"Escalation depth limit (1) exceeded for action {action_id}"
-        )
+        super().__init__(f"Escalation depth limit (1) exceeded for action {action_id}")
         self.action_id = action_id
 
 
@@ -332,8 +330,8 @@ class RootSignNotInitializedError(RootSignError):
 
     FIX_HINT = (
         "No rootsign session is active. Either open one:\n"
-        "    rootsign.init(agent=\"my-agent\")\n"
-        "    async with rootsign.session(objective=\"...\"):  # then wrap/trace inside\n"
+        '    rootsign.init(agent="my-agent")\n'
+        '    async with rootsign.session(objective="..."):  # then wrap/trace inside\n'
         "or pass the context explicitly: ctx=<SessionContext>, client=<IngestClient>."
     )
 

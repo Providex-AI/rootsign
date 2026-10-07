@@ -31,9 +31,7 @@ class TestSessionContextManager:
         assert row.status == "completed"
         assert row.end_time is not None
 
-    async def test_exception_marks_session_failed_and_reraises(
-        self, db, registered_agent
-    ):
+    async def test_exception_marks_session_failed_and_reraises(self, db, registered_agent):
         client = LocalIngestClient(db=db)
         captured_session_id = None
 
@@ -57,8 +55,6 @@ class TestSessionContextManager:
         """If the body manually calls `mark_session_open` again, the ctx mgr
         has already claimed the flag — body's call must return False."""
         client = LocalIngestClient(db=db)
-        async with rootsign.session(
-            agent_id=registered_agent.agent_id, client=client
-        ) as ctx:
+        async with rootsign.session(agent_id=registered_agent.agent_id, client=client) as ctx:
             again = await ctx.mark_session_open()
             assert again is False

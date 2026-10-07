@@ -82,9 +82,7 @@ class RedactionConfig:
             RedactionConfig({"audit.email": r".+@.+"}, match_mode="path")
         """
         if match_mode not in ("leaf", "path"):
-            raise ValueError(
-                f"match_mode must be 'leaf' or 'path', got {match_mode!r}"
-            )
+            raise ValueError(f"match_mode must be 'leaf' or 'path', got {match_mode!r}")
         self._match_mode = match_mode
         self._leaf_rules: dict[str, re.Pattern[str]] = {}
         self._path_rules: dict[str, re.Pattern[str]] = {}

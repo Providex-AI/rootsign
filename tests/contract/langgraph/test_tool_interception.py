@@ -113,9 +113,7 @@ class TestToolCallInterception:
         payload = mock_client.handle.call_args[0][0]["payload"]
         assert len(payload["output_hash"]) == 64
 
-    def test_exception_still_emits_action_record(
-        self, always_fails, ctx, mock_client
-    ):
+    def test_exception_still_emits_action_record(self, always_fails, ctx, mock_client):
         wrapped = LangGraphTracer.wrap_tool(always_fails, ctx=ctx, client=mock_client)
         with pytest.raises(ValueError, match="intentional failure"):
             wrapped.invoke({"x": "test"})
@@ -123,9 +121,7 @@ class TestToolCallInterception:
         payload = mock_client.handle.call_args[0][0]["payload"]
         assert payload["output_hash"] is None
 
-    async def test_action_record_emitted_on_ainvoke(
-        self, multiply, ctx, mock_client
-    ):
+    async def test_action_record_emitted_on_ainvoke(self, multiply, ctx, mock_client):
         wrapped = LangGraphTracer.wrap_tool(multiply, ctx=ctx, client=mock_client)
         result = await wrapped.ainvoke({"a": 7, "b": 8})
         assert result == 56

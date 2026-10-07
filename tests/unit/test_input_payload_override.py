@@ -33,9 +33,7 @@ class TestOverrideSignature:
 class TestOverrideBehavior:
     async def test_override_is_stored_and_hashed_verbatim(self):
         client = AsyncMock()
-        client.handle.return_value = MagicMock(
-            status="accepted", entity_id=None, sequence_number=1
-        )
+        client.handle.return_value = MagicMock(status="accepted", entity_id=None, sequence_number=1)
         ctx = SessionContext(agent_id=AGENT_ID)
         override = {"to": "[REDACTED]", "subject": "Invoice"}
 
@@ -61,9 +59,7 @@ class TestOverrideBehavior:
 
     async def test_none_override_falls_back_to_args_kwargs_capture(self):
         client = AsyncMock()
-        client.handle.return_value = MagicMock(
-            status="accepted", entity_id=None, sequence_number=1
-        )
+        client.handle.return_value = MagicMock(status="accepted", entity_id=None, sequence_number=1)
         ctx = SessionContext(agent_id=AGENT_ID)
 
         async def forward(*_a, **_k):

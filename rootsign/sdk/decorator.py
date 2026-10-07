@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID, uuid4
 
+from rootsign._version import SDK_VERSION
 from rootsign.errors import RecordPersistenceError, postgres_extra_required
 from rootsign.ingest.schemas import SCHEMA_VERSION, EventType, IngestResponse
 from rootsign.sdk.client import IngestClient
@@ -34,8 +35,6 @@ from rootsign.sdk.hashing import compute_payload_hash
 from rootsign.sdk.redaction import RedactionConfig
 
 logger = logging.getLogger("rootsign.sdk")
-
-from rootsign._version import SDK_VERSION  # noqa: F401  (re-exported via envelopes)
 
 # SCHEMA_VERSION is re-exported from rootsign.ingest.schemas — the wire version
 # belongs with the wire schema, and two copies of it drift (it lived here and in
@@ -309,9 +308,7 @@ async def _emit_action_record(
     if _input_payload_override is not None:
         redacted_input: Any = _input_payload_override
     else:
-        input_payload: dict[str, Any] = _to_json_safe(
-            {"args": list(args), "kwargs": dict(kwargs)}
-        )
+        input_payload: dict[str, Any] = _to_json_safe({"args": list(args), "kwargs": dict(kwargs)})
         redacted_input = (
             redaction_config.redact(input_payload) if redaction_config else input_payload
         )
@@ -534,9 +531,7 @@ async def _emit_hitl_action(
     if _input_payload_override is not None:
         redacted_input: Any = _input_payload_override
     else:
-        input_payload: dict[str, Any] = _to_json_safe(
-            {"args": list(args), "kwargs": dict(kwargs)}
-        )
+        input_payload: dict[str, Any] = _to_json_safe({"args": list(args), "kwargs": dict(kwargs)})
         redacted_input = (
             redaction_config.redact(input_payload) if redaction_config else input_payload
         )

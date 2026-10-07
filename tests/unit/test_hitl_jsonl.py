@@ -59,7 +59,10 @@ async def test_tty_approve_runs_tool_and_writes_approval(tmp_path):
         ran.append(x)
         return x * 2
 
-    with patch("sys.stdin.isatty", return_value=True), patch("builtins.input", return_value="y verified"):
+    with (
+        patch("sys.stdin.isatty", return_value=True),
+        patch("builtins.input", return_value="y verified"),
+    ):
         result = await tool(21)
 
     assert result == 42
@@ -82,10 +85,15 @@ async def test_tty_reject_raises_and_skips_tool(tmp_path):
         ran.append(x)
         return x
 
-    with patch("sys.stdin.isatty", return_value=True), patch("builtins.input", return_value="n too risky"):
+    with (
+        patch("sys.stdin.isatty", return_value=True),
+        patch("builtins.input", return_value="n too risky"),
+    ):
         with pytest.raises(HiTLRejectedError):
             await tool(21)
 
     assert ran == []
-    approvals = [r for r in _lines(client, ctx.session_id) if r.get("event_type") == "APPROVAL_RECORD"]
+    approvals = [
+        r for r in _lines(client, ctx.session_id) if r.get("event_type") == "APPROVAL_RECORD"
+    ]
     assert approvals and approvals[0]["payload"]["decision"] == "rejected"

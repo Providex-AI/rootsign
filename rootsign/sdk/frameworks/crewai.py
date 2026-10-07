@@ -109,9 +109,7 @@ class CrewAITracer:
         def traced_run(*args: Any, **kwargs: Any) -> Any:
             # Resolve in the caller's frame — `_run_sync` may hop threads, and
             # the ambient session is guaranteed visible here.
-            call_ctx, call_client = _resolve_ctx_client(
-                ctx, client, surface="wrap_crewai_tools"
-            )
+            call_ctx, call_client = _resolve_ctx_client(ctx, client, surface="wrap_crewai_tools")
             return _run_sync(_emit(args, kwargs, call_ctx, call_client))
 
         async def traced_arun(*args: Any, **kwargs: Any) -> Any:
@@ -125,9 +123,7 @@ class CrewAITracer:
             part of the CrewAI BaseTool contract — it lives only on the
             instrumented instance.
             """
-            call_ctx, call_client = _resolve_ctx_client(
-                ctx, client, surface="wrap_crewai_tools"
-            )
+            call_ctx, call_client = _resolve_ctx_client(ctx, client, surface="wrap_crewai_tools")
             return await _emit(args, kwargs, call_ctx, call_client)
 
         # CrewAI BaseTool is a Pydantic v2 model — direct attribute

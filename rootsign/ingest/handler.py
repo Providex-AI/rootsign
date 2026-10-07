@@ -164,9 +164,7 @@ class IngestHandler:
         # duplicate event_id case)
         existing = await self.db.get(AgentSession, env.session_id)
         if existing is not None:
-            raise SessionAlreadyExistsError(
-                f"session_id={env.session_id} already exists"
-            )
+            raise SessionAlreadyExistsError(f"session_id={env.session_id} already exists")
 
         session_obj = await crud.session.create(
             self.db,
@@ -179,9 +177,7 @@ class IngestHandler:
             ),
             session_id=env.session_id,
         )
-        return IngestResponse.accepted(
-            event_id=env.event_id, entity_id=session_obj.session_id
-        )
+        return IngestResponse.accepted(event_id=env.event_id, entity_id=session_obj.session_id)
 
     async def _handle_action_record(
         self, env: IngestEnvelope, payload: ActionRecordPayload
@@ -255,9 +251,7 @@ class IngestHandler:
         self.db.add(session)
         await self.db.flush()
 
-        return IngestResponse.accepted(
-            event_id=env.event_id, entity_id=decision.decision_id
-        )
+        return IngestResponse.accepted(event_id=env.event_id, entity_id=decision.decision_id)
 
     async def _handle_approval_record(
         self, env: IngestEnvelope, payload: ApprovalRecordPayload
@@ -279,9 +273,7 @@ class IngestHandler:
                 parent_approval_id=payload.parent_approval_id,
             ),
         )
-        return IngestResponse.accepted(
-            event_id=env.event_id, entity_id=approval.approval_id
-        )
+        return IngestResponse.accepted(event_id=env.event_id, entity_id=approval.approval_id)
 
     async def _handle_session_close(
         self, env: IngestEnvelope, payload: SessionClosePayload
@@ -291,10 +283,7 @@ class IngestHandler:
         # Reconcile action_count against payload metadata if provided (AC-3.11).
         if payload.metadata is not None:
             reported_total = payload.metadata.get("total_actions")
-            if (
-                isinstance(reported_total, int)
-                and reported_total != session.action_count
-            ):
+            if isinstance(reported_total, int) and reported_total != session.action_count:
                 logger.warning(
                     "session_close action_count mismatch",
                     extra={
@@ -311,9 +300,7 @@ class IngestHandler:
         self.db.add(session)
         await self.db.flush()
 
-        return IngestResponse.accepted(
-            event_id=env.event_id, entity_id=session.session_id
-        )
+        return IngestResponse.accepted(event_id=env.event_id, entity_id=session.session_id)
 
     # -----------------------------------------------------------------------
     # Helpers
@@ -324,9 +311,7 @@ class IngestHandler:
         if session is None:
             raise SessionNotFoundError(f"session_id={session_id} not found")
         if session.status != "running":
-            raise SessionClosedError(
-                f"session_id={session_id} is {session.status!r}, not running"
-            )
+            raise SessionClosedError(f"session_id={session_id} is {session.status!r}, not running")
         return session
 
     async def _maybe_cache(

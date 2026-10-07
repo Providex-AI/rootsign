@@ -80,9 +80,7 @@ def wrap_crewai_tools(
     Drop-in for `Agent(tools=[...])`. See ADR-005. `ctx`/`client` are
     optional inside a `rootsign.session()` — see `wrap_tools`.
     """
-    return CrewAITracer.wrap_tools(
-        tools, ctx=ctx, client=client, redaction_config=redaction_config
-    )
+    return CrewAITracer.wrap_tools(tools, ctx=ctx, client=client, redaction_config=redaction_config)
 
 
 __all__ = [

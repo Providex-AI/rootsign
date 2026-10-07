@@ -512,9 +512,7 @@ class TestCrossBackendHash:
 
         row = (
             await clean_db.execute(
-                select(Action).where(
-                    Action.session_id == session_id, Action.sequence_number == 2
-                )
+                select(Action).where(Action.session_id == session_id, Action.sequence_number == 2)
             )
         ).scalar_one()
         # Hypertable-safe two-column form (action_id, timestamp).

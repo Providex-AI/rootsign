@@ -179,13 +179,9 @@ async def get_or_register_agent(
     if settings.BACKEND == "jsonl":
         from rootsign.sdk import jsonl_registry
 
-        existing = jsonl_registry.find_agent(
-            settings.DATA_DIR, name=name, environment=environment
-        )
+        existing = jsonl_registry.find_agent(settings.DATA_DIR, name=name, environment=environment)
         if existing is not None:
-            _warn_on_drift(
-                name=name, environment=environment, stored=existing, requested=requested
-            )
+            _warn_on_drift(name=name, environment=environment, stored=existing, requested=requested)
             return UUID(str(existing["agent_id"]))
         created = jsonl_registry.get_or_create_agent(
             settings.DATA_DIR, name=name, environment=environment, **requested
@@ -247,7 +243,5 @@ async def get_or_register_agent(
             "permitted_tools": list(agent.permitted_tools or []),
             "regulatory_categories": list(agent.regulatory_categories or []),
         }
-        _warn_on_drift(
-            name=name, environment=environment, stored=stored, requested=requested
-        )
+        _warn_on_drift(name=name, environment=environment, stored=stored, requested=requested)
         return agent.agent_id

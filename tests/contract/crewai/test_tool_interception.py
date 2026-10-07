@@ -130,9 +130,7 @@ class TestCrewAICallInterception:
         second_hash = mock_client.handle.call_args[0][0]["payload"]["input_hash"]
         assert first_hash != second_hash
 
-    def test_exception_emits_action_with_null_output_hash(
-        self, always_fails, ctx, mock_client
-    ):
+    def test_exception_emits_action_with_null_output_hash(self, always_fails, ctx, mock_client):
         wrapped = CrewAITracer.wrap_tool(always_fails, ctx=ctx, client=mock_client)
         with pytest.raises(ValueError, match="intentional failure"):
             wrapped._run(x="test")
@@ -140,9 +138,7 @@ class TestCrewAICallInterception:
         payload = mock_client.handle.call_args[0][0]["payload"]
         assert payload["output_hash"] is None
 
-    def test_action_records_have_parity_with_langgraph(
-        self, multiply, ctx, mock_client
-    ):
+    def test_action_records_have_parity_with_langgraph(self, multiply, ctx, mock_client):
         """ACTION_RECORD from CrewAI must have same payload fields as LangGraph."""
         wrapped = CrewAITracer.wrap_tool(multiply, ctx=ctx, client=mock_client)
         wrapped._run(a=1, b=2)

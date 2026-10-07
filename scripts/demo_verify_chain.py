@@ -96,7 +96,7 @@ async def run() -> None:
         assert result["valid"] is True
         assert result["record_count"] == 5
 
-    # 3. Corrupt self_hash on sequence_number=3. 
+    # 3. Corrupt self_hash on sequence_number=3.
     async with Session() as db:
         print("\n--- corrupting self_hash on sequence_number=3 ---")
         await db.execute(

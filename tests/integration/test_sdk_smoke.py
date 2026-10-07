@@ -54,7 +54,8 @@ class TestSdkSmoke:
 
         # The decorator should have produced exactly one Action row.
         chain = await action_crud.get_session_chain(
-            ingest_client._handler.db, session_id=session_id  # noqa: SLF001
+            ingest_client._handler.db,
+            session_id=session_id,  # noqa: SLF001
         )
         assert len(chain) == 1
         action = chain[0]
@@ -97,7 +98,8 @@ class TestSdkSmoke:
             await exploding_tool()
 
         chain = await action_crud.get_session_chain(
-            ingest_client._handler.db, session_id=session_id  # noqa: SLF001
+            ingest_client._handler.db,
+            session_id=session_id,  # noqa: SLF001
         )
         assert len(chain) == 1
         assert chain[0].tool_name == "exploding_tool"

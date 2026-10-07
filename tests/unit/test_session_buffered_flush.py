@@ -42,9 +42,7 @@ async def test_session_flushes_buffered_client_before_close(clean_db, seeded_age
             await tools[0].ainvoke({"x": 1})
 
             # The action is buffered, not yet in the DB.
-            chain_before = await action_crud.get_session_chain(
-                clean_db, session_id=ctx.session_id
-            )
+            chain_before = await action_crud.get_session_chain(clean_db, session_id=ctx.session_id)
             assert len(chain_before) == 0
 
         # session().__aexit__ ran: flush() fired before SESSION_CLOSE.

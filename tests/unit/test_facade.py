@@ -250,9 +250,7 @@ async def test_trace_resolves_ambient_client_per_call_not_at_decoration(tmp_path
     async with rootsign.session() as ctx:
         assert await echo("yes") == "yes"
 
-    assert rootsign.verify_session_local(
-        str(_session_file(tmp_path, ctx.session_id))
-    ).valid is True
+    assert rootsign.verify_session_local(str(_session_file(tmp_path, ctx.session_id))).valid is True
 
 
 @pytest.mark.asyncio

@@ -14,6 +14,55 @@ permissions:
   contents: read
 
 jobs:
+  lint:
+    # Enforces what CLAUDE.md has always asked contributors to run. Until this
+    # job existed the request was honour-system, and the tree drifted to 2 E402
+    # errors plus 48 unformatted files before anyone noticed. This job is
+    # REQUIRED — add it to branch protection alongside the test gates.
+    #
+    # No database and no project install: ruff reads the source tree and
+    # `[tool.ruff]` from pyproject.toml, nothing more. Keeps the job ~10s so it
+    # fails fast ahead of the DB-backed suites.
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Install ruff at the version uv.lock pins
+        # Deliberately NOT `pip install -e '.[dev]'`. That resolves
+        # `ruff>=0.5,<1.0` to whatever is newest, and a formatter whose version
+        # floats will eventually reformat code nobody touched and turn this gate
+        # red on an unrelated PR. uv.lock is the single source of truth for the
+        # version, so a bump is a reviewed lockfile change like any other, and
+        # a developer running `uv sync` locally gets the identical binary.
+        run: |
+          set -euo pipefail
+          RUFF_VERSION=$(python3 - <<'PY'
+          import re
+          src = open("uv.lock").read()
+          m = re.search(r'\[\[package\]\]\nname = "ruff"\nversion = "([^"]+)"', src)
+          if not m:
+              raise SystemExit("could not find the ruff version in uv.lock")
+          print(m.group(1))
+          PY
+          )
+          if [ -z "$RUFF_VERSION" ]; then
+            echo "::error::failed to read the ruff version from uv.lock" >&2
+            exit 1
+          fi
+          echo "uv.lock pins ruff==$RUFF_VERSION"
+          pip install "ruff==$RUFF_VERSION"
+      - name: ruff check
+        run: ruff check --output-format=github .
+      - name: ruff format --check
+        # Fails on drift rather than rewriting, so CI never pushes to a branch.
+        # `alembic revision` renders single-quoted strings via repr() in
+        # script.py.mako, so a freshly generated migration trips this until you
+        # run `ruff format .` — that is the intended prompt, not a bug.
+        run: ruff format --check --diff .
+
   unit-tests:
     name: Unit tests (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest

@@ -32,9 +32,7 @@ class ActionCreate(BaseModel):
     output_redacted: dict | None = None
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     duration_ms: int | None = Field(default=None, ge=0)
-    authorization_status: ActionAuthorizationStatus = (
-        ActionAuthorizationStatus.AUTO_AUTHORIZED
-    )
+    authorization_status: ActionAuthorizationStatus = ActionAuthorizationStatus.AUTO_AUTHORIZED
 
 
 class ActionUpdate(BaseModel):

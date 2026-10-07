@@ -78,9 +78,7 @@ class TestSignature:
         # (callers pass it positionally as the first arg after the
         # instance). Everything after the * marker must be keyword-only.
         params = list(sig.parameters.values())
-        keyword_only = [
-            p for p in params if p.kind == inspect.Parameter.KEYWORD_ONLY
-        ]
+        keyword_only = [p for p in params if p.kind == inspect.Parameter.KEYWORD_ONLY]
         names = {p.name for p in keyword_only}
         assert {
             "action_id",

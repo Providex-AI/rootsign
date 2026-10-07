@@ -38,12 +38,8 @@ _NEW_CHECK = (
 
 
 def upgrade() -> None:
-    op.drop_constraint(
-        "ck_actions_authorization_status", "actions", type_="check"
-    )
-    op.create_check_constraint(
-        "ck_actions_authorization_status", "actions", _NEW_CHECK
-    )
+    op.drop_constraint("ck_actions_authorization_status", "actions", type_="check")
+    op.create_check_constraint("ck_actions_authorization_status", "actions", _NEW_CHECK)
 
 
 def downgrade() -> None:

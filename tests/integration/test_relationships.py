@@ -123,10 +123,7 @@ class TestIndexesExist:
     async def test_all_required_indexes_present(self, db: AsyncSession):
         # AGENTS.md lists the required indexes — verify each was created.
         result = await db.execute(
-            text(
-                "SELECT indexname FROM pg_indexes "
-                "WHERE schemaname='public' ORDER BY indexname"
-            )
+            text("SELECT indexname FROM pg_indexes WHERE schemaname='public' ORDER BY indexname")
         )
         indexes = {row[0] for row in result.all()}
         required = {

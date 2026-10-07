@@ -115,9 +115,7 @@ class TestLocalIngestClientSerializesHandle:
         client = LocalIngestClient(db=_StubSession())  # type: ignore[arg-type]
         client._handler = _OverlapDetectingHandler()
 
-        await asyncio.gather(
-            *[client.handle({"seq": i}) for i in range(8)]
-        )
+        await asyncio.gather(*[client.handle({"seq": i}) for i in range(8)])
 
         # The lock guarantees serialization: only one handle() in flight
         # at any moment.
@@ -155,7 +153,9 @@ class TestLocalIngestClientSerializesHandle:
                 await asyncio.sleep(0.02)
                 a_seen_b = b_in
                 a_in = False
-                return type("R", (), {"status": "accepted", "sequence_number": 1, "self_hash": "x"})()
+                return type(
+                    "R", (), {"status": "accepted", "sequence_number": 1, "self_hash": "x"}
+                )()
 
         class _BSeesA:
             async def handle(self_inner, envelope):
@@ -164,7 +164,9 @@ class TestLocalIngestClientSerializesHandle:
                 await asyncio.sleep(0.02)
                 b_seen_a = a_in
                 b_in = False
-                return type("R", (), {"status": "accepted", "sequence_number": 1, "self_hash": "x"})()
+                return type(
+                    "R", (), {"status": "accepted", "sequence_number": 1, "self_hash": "x"}
+                )()
 
         client_a = LocalIngestClient(db=_StubSession())  # type: ignore[arg-type]
         client_b = LocalIngestClient(db=_StubSession())  # type: ignore[arg-type]
