@@ -19,13 +19,12 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID, uuid4
 
+from rootsign._version import SDK_VERSION
 from rootsign.ingest.schemas import SCHEMA_VERSION, EventType
 from rootsign.sdk.client import IngestClient
 from rootsign.sdk.context import SessionContext
 
 logger = logging.getLogger("rootsign.sdk.session")
-
-from rootsign._version import SDK_VERSION  # noqa: F401  (re-exported via envelopes)
 
 # SCHEMA_VERSION comes from rootsign.ingest.schemas (imported above) — one
 # definition of the wire version, next to the schema it versions.

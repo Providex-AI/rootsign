@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID, uuid4
 
+from rootsign._version import SDK_VERSION
 from rootsign.errors import RecordPersistenceError, postgres_extra_required
 from rootsign.ingest.schemas import SCHEMA_VERSION, EventType, IngestResponse
 from rootsign.sdk.client import IngestClient
@@ -34,8 +35,6 @@ from rootsign.sdk.hashing import compute_payload_hash
 from rootsign.sdk.redaction import RedactionConfig
 
 logger = logging.getLogger("rootsign.sdk")
-
-from rootsign._version import SDK_VERSION  # noqa: F401  (re-exported via envelopes)
 
 # SCHEMA_VERSION is re-exported from rootsign.ingest.schemas — the wire version
 # belongs with the wire schema, and two copies of it drift (it lived here and in
