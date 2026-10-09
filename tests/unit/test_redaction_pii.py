@@ -206,8 +206,6 @@ class TestListAndDepth:
         # the depth-limit bail-out replaced the subtree with the
         # placeholder, so a serialised form of `out` should contain
         # neither the raw value nor any path beyond the limit.
-        import json
-
         rendered = json.dumps(out)
         assert "should_not_be_visible_in_output" not in rendered
         assert REDACTED_PLACEHOLDER in rendered
