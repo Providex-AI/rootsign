@@ -47,10 +47,15 @@ from typing import Any
 
 REDACTED_PLACEHOLDER = "[REDACTED]"
 
-# Maximum recursion depth for nested dicts / lists. Anything deeper is
-# returned unchanged. Five levels covers every realistic tool payload
-# (LangChain / CrewAI tools rarely nest beyond 2–3) while blocking
-# pathological inputs from blowing the stack. See ADR-006.
+# Maximum recursion depth for nested dicts / lists. Anything deeper fails
+# CLOSED — the subtree is replaced with `[REDACTED]`, never returned raw.
+# (This comment previously claimed "returned unchanged", which described the
+# pre-audit behaviour and contradicted both the code below and the module
+# docstring. Returning the raw subtree past the bound would invert the threat
+# model, so the wording is kept explicit here.)
+# Five levels covers every realistic tool payload (LangChain / CrewAI tools
+# rarely nest beyond 2–3) while blocking pathological inputs from blowing the
+# stack. See ADR-006.
 MAX_REDACTION_DEPTH = 5
 
 
@@ -147,12 +152,28 @@ class RedactionConfig:
         # Same fail-closed rule as _redact_dict — see note above.
         if depth > MAX_REDACTION_DEPTH:
             return REDACTED_PLACEHOLDER
-        # Rule matches only fire on string values — applying a regex to
-        # anything else would crash, so silently skip mismatched types
-        # instead of throwing.
+        # A matching rule is tested against the value's STRING FORM, not only
+        # against values that already are `str`. Numeric PII is the common
+        # case this exists for: an SSN, account number, routing number, NPI or
+        # card number serialized as a JSON number arrives here as int/float/
+        # Decimal, and the pure-digit patterns in the pre-built Financial and
+        # Healthcare configs are written to match exactly those digits. Testing
+        # only `isinstance(value, str)` let every one of them through in the
+        # clear — and because redaction runs BEFORE hashing (ADR-006), the raw
+        # value reached both the hash input and `input_redacted`.
+        #
+        # Containers are skipped here and walked below instead, so a rule key
+        # never redacts a whole subtree. `None` carries no PII and is left as
+        # `None` rather than replaced with the placeholder.
         rule = self._matched_rule(path)
-        if rule is not None and isinstance(value, str):
-            if rule.search(value):
+        if rule is not None and value is not None and not isinstance(value, (dict, list)):
+            try:
+                candidate = value if isinstance(value, str) else str(value)
+            except Exception:
+                # Fail CLOSED (ADR-006): a value whose string form cannot even
+                # be produced is redacted, never emitted raw.
+                return REDACTED_PLACEHOLDER
+            if rule.search(candidate):
                 return REDACTED_PLACEHOLDER
         if isinstance(value, dict):
             return self._redact_dict(value, path, depth)

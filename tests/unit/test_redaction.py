@@ -60,9 +60,37 @@ class TestEdgeCases:
         assert original == snapshot
         assert original["nested"] == snapshot["nested"]
 
-    def test_non_string_value_at_matched_path_not_coerced(self):
-        """If the field exists but the value isn't a string, leave it
-        alone. Tests that we don't crash trying to regex-match an int."""
+    def test_non_string_value_at_matched_path_is_matched_not_crashed(self):
+        """A non-string value must not crash the matcher — and must not slip past it.
+
+        This test previously asserted `{"count": 42}` came back as `42`,
+        under the heading "we don't crash trying to regex-match an int".
+        Crash-avoidance was the real requirement; "leave the value alone"
+        was only how it happened to be implemented, by gating every rule on
+        `isinstance(value, str)`. That gate also let numeric PII through in
+        the clear — an SSN or account number arriving as a JSON number — and
+        since redaction runs before hashing (ADR-006), the raw value reached
+        both the hash input and `input_redacted`.
+
+        The matcher now tests the value's string form, so an explicitly
+        configured rule fires on the value the user actually configured it
+        for. Crash-avoidance still holds, and is asserted directly below.
+        """
         cfg = RedactionConfig({"count": r"\d+"})
         result = cfg.redact({"count": 42})
-        assert result["count"] == 42  # not stringified, not redacted
+        assert result["count"] == REDACTED_PLACEHOLDER  # str(42) matches r"\d+"
+
+        # The rule still decides — a value whose string form does not match
+        # is returned untouched rather than blanket-redacted by key alone.
+        assert cfg.redact({"count": "none at all"})["count"] == "none at all"
+
+    def test_matcher_never_raises_on_exotic_value_types(self):
+        """The original intent of the test above, asserted on its own terms."""
+
+        class Hostile:
+            def __str__(self):
+                raise RuntimeError("boom")
+
+        cfg = RedactionConfig({"count": r"\d+"})
+        for value in (42, 4.2, None, True, b"bytes", {"a": 1}, [1, 2], Hostile()):
+            cfg.redact({"count": value})  # must not raise

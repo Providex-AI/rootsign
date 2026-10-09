@@ -36,7 +36,28 @@ class ActionCreate(BaseModel):
 
 
 class ActionUpdate(BaseModel):
-    """Only mutable fields may be updated after creation. self_hash inputs are immutable."""
+    """Partial update of an Action.
+
+    WARNING — `output_hash` IS a canonical hash input. The previous wording
+    here ("self_hash inputs are immutable") was factually wrong: the canonical
+    spec in `rootsign.hashing.compute_action_self_hash` covers `action_id`,
+    `session_id`, `tool_name`, `input_hash`, **`output_hash`**,
+    `prev_action_hash`, `timestamp` and `sequence_number`. Persisting a changed
+    `output_hash` without recomputing `self_hash` — and every downstream
+    `prev_action_hash` in the session — makes the chain fail verification with
+    a `self_hash mismatch`, which reads as tampering.
+
+    `output_redacted`, `duration_ms` and `authorization_status` are genuinely
+    outside the canonical input and are safe to update in place. That
+    asymmetry is the whole reason this docstring is explicit.
+
+    This model currently has **no call sites** in `rootsign/`. v0.1.0+ writes
+    each Action exactly once, complete, via `CRUDAction.create_with_hash` —
+    the decorator does not run the tool until it has both hashes, so there is
+    no fill-in-the-output-later path to serve. It is kept as the shape a future
+    update path would take; wire it up only alongside a self_hash recompute.
+    ADR-001 governs the hash spec and is frozen.
+    """
 
     model_config = ConfigDict(extra="forbid")
 

@@ -6,6 +6,7 @@ PII is redacted BEFORE hashing (ADR-006).
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -264,3 +265,74 @@ class TestRedactionRunsBeforeHashing:
         # with any other email collides.
         other_raw = {"email": "totally@different.org", "kwargs": {"q": "hello"}}
         assert hash_of_redacted == compute_payload_hash(cfg.redact(other_raw))
+
+
+class TestNonStringScalarsFailClosed:
+    """A matching rule is tested against the value's STRING FORM.
+
+    Regression guard for the audit finding that `isinstance(value, str)`
+    gated every rule, so numeric PII — an SSN, account number, routing
+    number, NPI or card number serialized as a JSON number — passed through
+    in the clear. Because redaction runs BEFORE hashing (ADR-006), the raw
+    value reached both the hash input and `input_redacted`. The pure-digit
+    patterns in the Financial and Healthcare configs were the worst hit,
+    since those fields are the most likely to arrive as JSON numbers.
+    """
+
+    def test_int_ssn_is_redacted(self):
+        cfg = StandardPIIConfig()
+        assert cfg.redact({"ssn": 123456789}) == {"ssn": REDACTED_PLACEHOLDER}
+
+    def test_float_and_decimal_are_redacted(self):
+        cfg = StandardPIIConfig()
+        assert cfg.redact({"ssn": 123456789.0}) == {"ssn": REDACTED_PLACEHOLDER}
+        assert cfg.redact({"ssn": Decimal("123456789")}) == {"ssn": REDACTED_PLACEHOLDER}
+
+    def test_numeric_financial_and_healthcare_fields(self):
+        fin = FinancialPIIConfig()
+        assert fin.redact({"account_number": 12345678901})["account_number"] == (
+            REDACTED_PLACEHOLDER
+        )
+        assert fin.redact({"routing_number": 123456789})["routing_number"] == REDACTED_PLACEHOLDER
+        assert HealthcarePIIConfig().redact({"npi": 1234567890})["npi"] == REDACTED_PLACEHOLDER
+
+    def test_stringification_is_matched_not_blanket_redaction(self):
+        """Precision: a rule key alone must not redact. The pattern still decides."""
+        cfg = StandardPIIConfig()
+        # 42 does not match the SSN pattern, so it survives.
+        assert cfg.redact({"ssn": 42}) == {"ssn": 42}
+        # A value that WOULD match, under a key with no rule, also survives.
+        assert cfg.redact({"count": 123456789}) == {"count": 123456789}
+
+    def test_none_is_preserved_not_placeholdered(self):
+        """None carries no PII — replacing it would corrupt the payload shape."""
+        assert StandardPIIConfig().redact({"ssn": None}) == {"ssn": None}
+
+    def test_containers_recurse_instead_of_wholesale_redaction(self):
+        """A rule key whose value is a dict/list must never redact the subtree."""
+        cfg = StandardPIIConfig()
+        assert cfg.redact({"ssn": {"nested": "x"}}) == {"ssn": {"nested": "x"}}
+        assert cfg.redact({"ssn": ["123-45-6789", "ok"]}) == {"ssn": [REDACTED_PLACEHOLDER, "ok"]}
+
+    def test_unstringifiable_value_fails_closed(self):
+        """ADR-006: on uncertainty, emit the placeholder — never the raw value."""
+
+        class Hostile:
+            def __str__(self):
+                raise RuntimeError("boom")
+
+        assert StandardPIIConfig().redact({"ssn": Hostile()}) == {"ssn": REDACTED_PLACEHOLDER}
+
+    def test_numeric_pii_does_not_survive_into_the_hash(self):
+        """The ADR-006 guarantee, restated for the numeric case.
+
+        Two payloads differing only in a numeric SSN must hash identically
+        once redacted — otherwise the digest still carries the PII signal.
+        """
+        cfg = StandardPIIConfig()
+        a = cfg.redact({"ssn": 123456789, "kwargs": {"q": "hello"}})
+        b = cfg.redact({"ssn": 987654321, "kwargs": {"q": "hello"}})
+        assert compute_payload_hash(a) == compute_payload_hash(b)
+        assert compute_payload_hash(a) != compute_payload_hash(
+            {"ssn": 123456789, "kwargs": {"q": "hello"}}
+        )
