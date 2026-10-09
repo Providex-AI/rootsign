@@ -404,7 +404,7 @@ class TestSyncCommand:
     def test_a_successful_sync_uploads_every_record_and_retires_the_file(
         self, monkeypatch, spool, spooled_session, cloud_api_key
     ):
-        session_id, path = spooled_session
+        _session_id, path = spooled_session
         endpoint = _Endpoint()
         _bind_transport(monkeypatch, endpoint.transport())
 
@@ -426,7 +426,7 @@ class TestSyncCommand:
         """The file is the only copy of what the store would not take, so it
         stays. Naming the sequence tells the operator where the next run
         resumes and whether the rejection is theirs to fix."""
-        session_id, path = spooled_session
+        _session_id, path = spooled_session
         before = path.read_text()
         _bind_transport(monkeypatch, _Endpoint(reject_at_sequence=2).transport())
 

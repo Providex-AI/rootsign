@@ -24,6 +24,7 @@ installed from PyPI as it does from the source tree.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import re
 import shutil
@@ -413,15 +414,11 @@ def _sync_client(root: Path | None) -> "Iterator[Any]":
     try:
         yield client
     finally:
-        import asyncio
-
         asyncio.run(client.close())
 
 
 def _sync_one(client: Any, session: Any, root: Path | None, mark_synced: Any) -> int:
     """Upload one session. Returns 1 if it did not finish, else 0."""
-    import asyncio
-
     from rootsign.replay import replay_envelopes
 
     report = asyncio.run(replay_envelopes(client, session.envelopes))
