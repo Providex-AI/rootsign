@@ -32,7 +32,7 @@ from typer.testing import CliRunner
 
 from rootsign.cli import app as admin_app
 from rootsign.errors import RootSignCloudExtraRequired
-from rootsign.ingest.schemas import PAYLOAD_SCHEMAS, ErrorCode, EventType, IngestEnvelope
+from rootsign.ingest.schemas import PAYLOAD_SCHEMAS, EventType, IngestEnvelope
 from rootsign.sdk.cli import app as user_app
 from rootsign.sdk.client import HttpIngestClient
 from rootsign.sdk.jsonl_client import JsonlIngestClient
@@ -44,148 +44,17 @@ from rootsign.sdk.spool import (
     read_spool_session,
     spool_files,
 )
+from tests.support.spool_tree import API_KEY, BASE_URL, bind_transport
+from tests.support.spool_tree import Endpoint as _Endpoint
+from tests.support.spool_tree import dead_endpoint as _dead_endpoint
 from tests.conftest import make_envelope
 
 runner = CliRunner()
-
-BASE_URL = "https://ingest.example.test/v1"
-API_KEY = "sk-sync-test"
 
 
 # ---------------------------------------------------------------------------
 # A real spool tree
 # ---------------------------------------------------------------------------
-
-
-def _dead_endpoint(request: httpx.Request) -> httpx.Response:
-    return httpx.Response(503, text="down")
-
-
-def _spool_a_session(spool_dir: Path, *, actions: int = 3) -> str:
-    """Record a session while the endpoint is down; return its session_id.
-
-    `max_retries=1` keeps the backoff sleeps out of the test — the failover
-    path is what is being exercised, not the retry budget (that is
-    `test_http_ingest_client.py`).
-    """
-
-    async def _run() -> str:
-        client = HttpIngestClient(
-            BASE_URL,
-            API_KEY,
-            max_retries=1,
-            transport=httpx.MockTransport(_dead_endpoint),
-            spool_dir=str(spool_dir),
-        )
-        agent_id, session_id = uuid4(), uuid4()
-        await client.handle(make_envelope("SESSION_OPEN", agent_id, session_id, {"objective": "s"}))
-        for i in range(actions):
-            await client.handle(
-                make_envelope(
-                    "ACTION_RECORD",
-                    agent_id,
-                    session_id,
-                    {
-                        "tool_name": f"tool_{i}",
-                        "input_hash": f"{i:064d}",
-                        "output_hash": "b" * 64,
-                        "timestamp": "2026-08-21T09:00:00+00:00",
-                        "authorization_status": "auto_authorized",
-                    },
-                )
-            )
-        await client.handle(
-            make_envelope("SESSION_CLOSE", agent_id, session_id, {"status": "completed"})
-        )
-        await client.close()
-        return str(session_id)
-
-    return asyncio.run(_run())
-
-
-@pytest.fixture
-def spool(tmp_path: Path) -> Path:
-    return tmp_path / "spool"
-
-
-@pytest.fixture
-def spooled_session(spool: Path) -> tuple[str, Path]:
-    session_id = _spool_a_session(spool)
-    return session_id, spool / "sessions" / f"{session_id}.jsonl"
-
-
-class _Endpoint:
-    """A mock ingest endpoint that records what it was given.
-
-    Answers index-aligned per spec §7.1, and remembers `event_id`s so a second
-    run can answer DUPLICATE_EVENT — which is how server-side idempotency shows
-    up to a resumed sync.
-    """
-
-    def __init__(self, *, reject_at_sequence: int | None = None) -> None:
-        self.batches: list[list[dict[str, Any]]] = []
-        self.seen: set[str] = set()
-        self._reject_at = reject_at_sequence
-
-    @property
-    def envelopes(self) -> list[dict[str, Any]]:
-        return [envelope for batch in self.batches for envelope in batch]
-
-    def transport(self) -> httpx.MockTransport:
-        return httpx.MockTransport(self)
-
-    def __call__(self, request: httpx.Request) -> httpx.Response:
-        batch = json.loads(request.content)
-        self.batches.append(batch)
-        return httpx.Response(200, json=[self._answer(envelope) for envelope in batch])
-
-    def _answer(self, envelope: dict[str, Any]) -> dict[str, Any]:
-        event_id = envelope["event_id"]
-        if event_id in self.seen:
-            return {
-                "status": "rejected",
-                "event_id": event_id,
-                "error_code": ErrorCode.DUPLICATE_EVENT.value,
-                "error_message": "already ingested",
-                "retryable": False,
-            }
-        sequence = (envelope.get("payload") or {}).get("sequence_number")
-        if self._reject_at is not None and sequence == self._reject_at:
-            return {
-                "status": "rejected",
-                "event_id": event_id,
-                "error_code": ErrorCode.VALIDATION_ERROR.value,
-                "error_message": f"sequence {sequence} refused by the mock",
-                "retryable": False,
-            }
-        self.seen.add(event_id)
-        return {
-            "status": "accepted",
-            "event_id": event_id,
-            "entity_id": str(uuid4()),
-            "sequence_number": sequence,
-            "self_hash": (envelope.get("payload") or {}).get("self_hash"),
-        }
-
-
-@pytest.fixture
-def cloud_api_key(monkeypatch) -> None:
-    monkeypatch.setenv("ROOTSIGN_API_KEY", API_KEY)
-
-
-def _bind_transport(monkeypatch, transport: Any) -> None:
-    """Make the transport the CLI's own `HttpIngestClient` will use.
-
-    The command imports the class inside the function, so patching the module
-    attribute is enough — and it keeps the CLI's own constructor arguments
-    (including `enable_spool=False`) under test instead of bypassed.
-    """
-    real = HttpIngestClient
-
-    def factory(**kwargs: Any) -> HttpIngestClient:
-        return real(transport=transport, **kwargs)
-
-    monkeypatch.setattr("rootsign.sdk.client.HttpIngestClient", factory)
 
 
 # ---------------------------------------------------------------------------
@@ -406,7 +275,7 @@ class TestSyncCommand:
     ):
         _session_id, path = spooled_session
         endpoint = _Endpoint()
-        _bind_transport(monkeypatch, endpoint.transport())
+        bind_transport(monkeypatch, endpoint.transport())
 
         result = runner.invoke(admin_app, ["sync", "--spool-dir", str(spool)])
 
@@ -428,7 +297,7 @@ class TestSyncCommand:
         resumes and whether the rejection is theirs to fix."""
         _session_id, path = spooled_session
         before = path.read_text()
-        _bind_transport(monkeypatch, _Endpoint(reject_at_sequence=2).transport())
+        bind_transport(monkeypatch, _Endpoint(reject_at_sequence=2).transport())
 
         result = runner.invoke(admin_app, ["sync", "--spool-dir", str(spool)])
 
@@ -446,7 +315,7 @@ class TestSyncCommand:
         or a partially-uploaded session could never finish."""
         _, path = spooled_session
         endpoint = _Endpoint(reject_at_sequence=2)
-        _bind_transport(monkeypatch, endpoint.transport())
+        bind_transport(monkeypatch, endpoint.transport())
         first = runner.invoke(admin_app, ["sync", "--spool-dir", str(spool)])
         assert first.exit_code == 1
 
@@ -476,7 +345,7 @@ class TestSyncCommand:
         # failover would land somewhere else and the file comparison below
         # would pass for the wrong reason.
         monkeypatch.setenv("ROOTSIGN_SPOOL_DIR", str(spool))
-        _bind_transport(monkeypatch, httpx.MockTransport(_dead_endpoint))
+        bind_transport(monkeypatch, httpx.MockTransport(_dead_endpoint))
 
         result = runner.invoke(admin_app, ["sync", "--spool-dir", str(spool)])
 
@@ -523,7 +392,7 @@ class TestSyncCommand:
         _, good = spooled_session
         corrupt = spool / "sessions" / "00000000-0000-4000-8000-000000000000.jsonl"
         corrupt.write_text("{not json\n{}\n")
-        _bind_transport(monkeypatch, _Endpoint().transport())
+        bind_transport(monkeypatch, _Endpoint().transport())
 
         result = runner.invoke(admin_app, ["sync", "--spool-dir", str(spool)])
 
@@ -545,7 +414,7 @@ class TestSyncCommand:
         _, good = spooled_session
         binary = spool / "sessions" / "11111111-1111-4111-8111-111111111111.jsonl"
         binary.write_bytes(b"\xff\xfe\x00 not text at all\n")
-        _bind_transport(monkeypatch, _Endpoint().transport())
+        bind_transport(monkeypatch, _Endpoint().transport())
 
         result = runner.invoke(admin_app, ["sync", "--spool-dir", str(spool)])
 

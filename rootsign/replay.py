@@ -52,8 +52,11 @@ class ReplayReport:
     failed_index: int | None = None
     error_code: ErrorCode | None = None
     error_message: str | None = None
-    #: Responses for everything actually sent, index-aligned with the input up
-    #: to `failed_index`. Kept so a caller can report per-record detail.
+    #: Every response the store actually returned, index-aligned with the
+    #: input. Extends PAST `failed_index` to the end of the batch that
+    #: contained the refusal — those answers were given and a sync receipt
+    #: records them (ADR-015 Decision 2). Nothing beyond that batch is sent,
+    #: so this is shorter than `total` whenever a replay halted.
     responses: list[IngestResponse] = field(default_factory=list)
 
     @property
@@ -94,7 +97,12 @@ async def replay_envelopes(
     batch_size: int = DEFAULT_BATCH_SIZE,
     on_progress: Callable[[int, IngestResponse], Awaitable[None] | None] | None = None,
 ) -> ReplayReport:
-    """Send `envelopes` in order; stop at the first response that is not success.
+    """Send `envelopes` in order; stop soliciting after the first refusal.
+
+    Fail-fast is drawn at the **batch** boundary (ADR-015 Decision 2): the
+    responses the endpoint already returned for the rest of the failing batch
+    are recorded, because they are real observations and a sync receipt must
+    not claim those records went unattempted. No further batch is sent.
 
     Never raises for a rejected record — the report carries the outcome, in
     keeping with ADR-002's rule that ingest failures are data, not exceptions.
@@ -124,13 +132,26 @@ async def replay_envelopes(
                     await result
             if response.status == "accepted":
                 report.accepted += 1
-                continue
-            if response.error_code is ErrorCode.DUPLICATE_EVENT:
+            elif response.error_code is ErrorCode.DUPLICATE_EVENT:
                 report.duplicates += 1
-                continue
-            report.failed_index = index
-            report.error_code = response.error_code
-            report.error_message = response.error_message
+            elif report.failed_index is None:
+                # First refusal wins: it is the one that stops solicitation,
+                # and a later refusal in the same batch must not be promoted
+                # over the record that actually caused the halt. Both are
+                # still recorded — see the batch-boundary note below.
+                report.failed_index = index
+                report.error_code = response.error_code
+                report.error_message = response.error_message
+
+        # Fail-fast at the BATCH boundary, not the response boundary (ADR-015
+        # Decision 2). The endpoint answered this whole batch index-aligned
+        # (spec §7.1), and those answers are real observations a sync receipt
+        # must record — discarding them would make the receipt claim records
+        # were never attempted when the server had already ruled on them.
+        # What stops is *solicitation*: no further batch goes out for this
+        # session, because a chain-linked store that refused sequence N cannot
+        # accept N+1 and asking is the self-DDoS ADR-013 Decision 3 forbids.
+        if report.failed_index is not None:
             return report
 
         if len(responses) < len(batch):
