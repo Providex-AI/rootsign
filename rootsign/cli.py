@@ -418,32 +418,114 @@ def _sync_client(root: Path | None) -> "Iterator[Any]":
 
 
 def _sync_one(client: Any, session: Any, root: Path | None, mark_synced: Any) -> int:
-    """Upload one session. Returns 1 if it did not finish, else 0."""
-    from rootsign.replay import replay_envelopes
+    """Upload one session, recording a sync receipt. Returns 1 if unfinished.
 
-    report = asyncio.run(replay_envelopes(client, session.envelopes))
+    The receipt is written on every outcome, including a transport failure
+    that observed nothing — "we tried and the network died" is itself a fact
+    about how this evidence was handled (ADR-015).
+    """
+    from datetime import datetime, timezone
+
+    from rootsign.replay import ReplayReport, replay_envelopes
+    from rootsign.sdk.receipt import append_attempt, build_attempt, sha256_file
+
+    started_at = datetime.now(timezone.utc)
+    # Hashed BEFORE the upload, over the bytes actually about to be replayed:
+    # the receipt binds to the exhibit as observed, not as it may look later.
+    spool_sha = sha256_file(session.path)
+    endpoint = getattr(client, "endpoint", "unknown")
+
+    transport_error: str | None = None
+    try:
+        report = asyncio.run(replay_envelopes(client, session.envelopes))
+    except Exception as exc:  # noqa: BLE001 — recorded, then re-reported below
+        # Retries exhausted mid-attempt. Nothing was observed past this point,
+        # and the receipt says so rather than leaving the operator to infer it
+        # from an absent file.
+        report = ReplayReport(total=len(session.envelopes))
+        transport_error = f"{type(exc).__name__}: {exc}"
+
+    attempt = build_attempt(
+        envelopes=session.envelopes,
+        report=report,
+        endpoint=endpoint,
+        spool_file_sha256=spool_sha,
+        started_at=started_at,
+        transport_error=transport_error,
+    )
+    receipt_file, receipt_sha = append_attempt(session.session_id, attempt, root)
+
+    if transport_error is not None:
+        typer.echo(
+            f"  FAILED    {session.session_id}  transport failed before any record was "
+            f"observed: {transport_error}. File left in place.",
+            err=True,
+        )
+        _echo_receipt(receipt_file, receipt_sha)
+        return 1
 
     if report.complete:
         destination = mark_synced(session.path, root)
+        _move_receipt(session.session_id, root, destination)
         typer.echo(
             f"  synced    {session.session_id}  {report.accepted} accepted, "
             f"{report.duplicates} already present -> {destination.parent.name}/"
         )
+        _echo_receipt(_moved_receipt_path(session.session_id, root), receipt_sha)
         return 0
 
     # Left in place on purpose: the file is the only copy of the records the
     # store has not taken. Naming the sequence tells the operator where the
     # next run will resume, and whether the rejection is theirs to fix.
+    #
+    # REJECTED, not INCOMPLETE: INCOMPLETE is the verdict word for "a record is
+    # missing" (ADR-013 Decision 4b), and a record the store refused is the
+    # opposite — observed, and declined. Conflating them here is what ADR-015
+    # exists to stop, so the command that writes the receipt must not do it.
     stuck = session.envelopes[report.failed_index]
     sequence = (stuck.get("payload") or {}).get("sequence_number")
     at = f"sequence {sequence}" if sequence is not None else f"record {report.failed_index + 1}"
     typer.echo(
-        f"  INCOMPLETE {session.session_id}  {report.delivered}/{report.total} delivered, "
+        f"  REJECTED  {session.session_id}  {report.delivered}/{report.total} delivered, "
         f"rejected at {at}: {report.error_code.value if report.error_code else 'unknown'} "
         f"({report.error_message}). File left in place.",
         err=True,
     )
+    _echo_receipt(receipt_file, receipt_sha)
     return 1
+
+
+def _echo_receipt(path: Any, digest: str) -> None:
+    """Name the receipt and print its hash — the out-of-band anchor.
+
+    Same pattern as the bundle manifest (ADR-014 Decision 2): the digest is
+    only worth anything if the operator noted it somewhere the file cannot
+    reach.
+    """
+    typer.echo(f"            receipt {path}")
+    typer.echo(f"            receipt SHA-256 {digest}")
+
+
+def _moved_receipt_path(session_id: str, root: Path | None) -> Any:
+    from rootsign.sdk.receipt import find_receipt, receipt_path
+
+    return find_receipt(session_id, root) or receipt_path(session_id, root, synced=True)
+
+
+def _move_receipt(session_id: str, root: Path | None, destination: Any) -> None:
+    """Follow the spool file into `synced/`, keeping the suffix index aligned.
+
+    `mark_synced` suffixes a colliding file (`<id>.1.jsonl`); the receipt takes
+    the matching `<id>.1.sync.json` so the pair stays legible in `synced/`.
+    """
+    from rootsign.sdk.receipt import mark_receipt_synced
+
+    stem = Path(destination).name
+    suffix_index = 0
+    parts = stem.split(".")
+    if len(parts) >= 3 and parts[-2].isdigit():
+        suffix_index = int(parts[-2])
+    mark_receipt_synced(session_id, root, suffix_index=suffix_index)
 
 
 @app.command()

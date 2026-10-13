@@ -424,10 +424,16 @@ $ rootsign-admin sync
 1 spooled session(s), 4 record(s) under ~/.rootsign/spool
 Uploading to https://ingest.getprovidex.com/v1/ingest
   synced    2d333ca5-7b28-4cd3-80b4-8f67350d19ba  4 accepted, 0 already present -> synced/
+            receipt ~/.rootsign/spool/synced/receipts/2d333ca5-….sync.json
+            receipt SHA-256 9f2c…
 All spooled sessions uploaded.
 ```
 
-Safe to re-run: idempotency is server-side by `event_id`, so a partially uploaded session resumes and records the store already has count as delivered. Fully-uploaded files move to `spool/synced/`; a partial one stays put and reports the first rejected sequence. `--dry-run` lists what is waiting without contacting anything, and works on a bare install.
+Safe to re-run: idempotency is server-side by `event_id`, so a partially uploaded session resumes and records the store already has count as delivered. Fully-uploaded files move to `spool/synced/`; a partial one stays put and reports the sequence that was refused. `--dry-run` lists what is waiting without contacting anything, and works on a bare install.
+
+**Every attempt leaves a sync receipt** (`spool/receipts/<session_id>.sync.json`, [ADR-015](docs/adr/ADR-015-sync-receipts.md)) — the chain-of-custody log for the upload itself, kept beside the evidence and never written onto it. It records what the store accepted, what it already had, what it **refused and why**, and what was never attempted, with a SHA-256 binding it to the exact spool bytes replayed. Re-running after a fix appends a second attempt rather than overwriting the first, so the history of how the evidence was handled survives.
+
+That closes the gap the three verdicts could not: `INCOMPLETE` means a record is *missing*, `TAMPERED` means one was *altered* — neither can say a record was **observed and refused**. Without a receipt, that outcome lived only in terminal scrollback, and a reviewer reading the spool file later could not tell "never uploaded" from "uploaded and rejected". `rootsign export` carries the receipt into the evidence bundle, hashed in `manifest.json` like every other file.
 
 **The chain spans the outage.** Records written to the spool continue the sequence the wire path started, because the chain is sealed before the SDK chooses a destination — so after sync the store holds one unbroken session, not two fragments. If the disk *also* fails, telemetry drops with accounting (one CRITICAL, a loss ledger, and a chain gap that makes the loss provable as `INCOMPLETE`) while anything gated by a human approval fails closed and the tool never runs. See [ADR-013](docs/adr/ADR-013-http-ingest-client-spool.md).
 

@@ -292,6 +292,12 @@ the rule for growing it if that ever changes, and the client-side rule
 (honor the wire `retryable` flag over an unrecognized code) that makes
 growth possible without a major bump.
 
+A `PREDECESSOR_REJECTED` code was considered for ADR-015 and **rejected**: a
+batch rejection does not cascade under this spec, because §7 rule 3 forbids
+aborting later elements and §8.3 forbids rejecting a record for a
+`prev_action_hash` the store has never seen. There is no cascade for such a
+code to name.
+
 ### HTTP status mapping (cloud binding)
 
 | HTTP | Meaning | Maps to |
@@ -729,3 +735,9 @@ answers, listed for review:
    accepting the previous major while clients may still hold spool under it
    (§9.5). No cutoff duration is fixed here — only the requirement to
    announce one before enforcing it.
+10. **Sync receipts are client-side artifacts and change nothing on the
+    wire** (ADR-015). A receipt records what a store answered; it is written,
+    hashed, and exported entirely by the client. A conformant store neither
+    emits nor consumes one, and needs no awareness that they exist. The one
+    thing the spec does owe them is a stable `error_code` vocabulary, which
+    §5 already fixes — a receipt quotes the registry verbatim.

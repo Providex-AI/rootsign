@@ -55,6 +55,10 @@ EVIDENCE_BUNDLE_VERSION = "1.0"
 VERIFICATION_FILE = "verification.json"
 TIMELINE_FILE = "timeline.json"
 REDACTION_FILE = "redaction.json"
+#: Present only for sessions that were actually replayed (ADR-015 Decision 5).
+#: Absent — not null — for every other session, which is what keeps this
+#: additive under bundle v1.0.
+RECEIPT_FILE = "sync-receipt.json"
 MANIFEST_FILE = "manifest.json"
 
 #: Why `rule_set.name` is null rather than a guess (ADR-014 scope note).
@@ -120,6 +124,9 @@ class SessionEvidence:
     #: `RECORD_LOSS` tallies (ADR-013 D4a). Present only in file sources, and
     #: only when a spool write failed — the loudest thing in a bundle when it is.
     losses: list[dict[str, Any]] = field(default_factory=list)
+    #: The sync receipt (ADR-015), when this session lives in a spool tree and
+    #: has been replayed at least once. `None` for everything else.
+    receipt: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -146,6 +153,8 @@ class EvidenceBundle:
     generated_at: str = ""
     #: Rendered files (T3.2) attached after assembly: name -> text.
     rendered: dict[str, str] = field(default_factory=dict)
+    #: The sync receipt, carried verbatim when one exists (ADR-015 D5).
+    receipt: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if not self.generated_at:
@@ -162,11 +171,17 @@ class EvidenceBundle:
     def documents(self) -> dict[str, dict[str, Any]]:
         """The JSON documents, in reading order. Manifest is not among them —
         it is derived from them."""
-        return {
+        documents = {
             VERIFICATION_FILE: self.verification,
             TIMELINE_FILE: self.timeline,
             REDACTION_FILE: self.redaction,
         }
+        # Appended, never a reserved-and-empty slot: a session that was never
+        # synced must produce byte-identical output to a pre-ADR-015 bundle,
+        # which is what keeps the receipt additive under bundle v1.0.
+        if self.receipt is not None:
+            documents[RECEIPT_FILE] = self.receipt
+        return documents
 
     def files(self) -> dict[str, str]:
         """Every bundle file except the manifest: name -> serialized text."""
@@ -248,6 +263,7 @@ def build_bundle(evidence: SessionEvidence, *, redact_previews: bool = False) ->
         redaction=_build_redaction(evidence),
         source_backend=evidence.source_backend,
         source_location=evidence.source_location,
+        receipt=evidence.receipt,
         agent=evidence.agent,
     )
 
@@ -299,7 +315,57 @@ def _build_verification(evidence: SessionEvidence) -> dict[str, Any]:
             ),
         },
         "records": records,
+        **_replay_block(evidence),
     }
+
+
+def _replay_block(evidence: SessionEvidence) -> dict[str, Any]:
+    """The `replay` key, or nothing at all (ADR-015 Decision 5).
+
+    Returned as a dict to splat so that "no receipt" means the key is ABSENT,
+    not present-and-null. A session that was never synced has to serialize
+    byte-identically to a pre-ADR-015 bundle — that is what keeps the receipt
+    additive under bundle v1.0 rather than a format break, and it is what the
+    golden fixture pins.
+
+    Only the latest attempt is summarized. The full append-only history rides
+    in the bundle as `sync-receipt.json`; a reader wanting "how did this
+    evidence get here" goes to the receipt, and `verification.json` answers
+    "where does it stand now".
+    """
+    if evidence.receipt is None:
+        return {}
+
+    from rootsign.sdk.receipt import replay_summary
+
+    return {"replay": replay_summary(evidence.receipt)}
+
+
+def _load_receipt_for(session_id: str, path: Path) -> dict[str, Any] | None:
+    """Find this session's sync receipt, if it has one.
+
+    Only consulted for files that look like they live in a spool tree — an
+    arbitrary session file somewhere on disk has no receipt and must not get a
+    `replay` block inferred from a same-named session in the operator's spool.
+
+    A receipt that cannot be read is treated as absent rather than fatal: the
+    bundle is still the best available evidence, and failing the whole export
+    because a side-car is corrupt would withhold the records that are intact.
+    """
+    from rootsign.sdk.receipt import find_receipt, load_receipt
+    from rootsign.sdk.spool import is_spool_path
+
+    try:
+        if not is_spool_path(path):
+            return None
+        # The spool root is two levels up from `sessions/<file>.jsonl`; letting
+        # `find_receipt` resolve it from settings would look in the operator's
+        # configured spool rather than the tree this file came from.
+        root = path.parent.parent
+        found = find_receipt(session_id, root)
+        return load_receipt(found) if found else None
+    except (OSError, ValueError):
+        return None
 
 
 def _record_status(verdict: str, sequence: Any, first_invalid: int | None) -> str:
@@ -589,11 +655,14 @@ def load_local_session(jsonl_path: str | os.PathLike[str]) -> SessionEvidence:
 
     actions.sort(key=lambda a: a.get("sequence_number") or 0)
 
+    resolved_id = str(session_id or path.stem)
+
     return SessionEvidence(
-        session_id=str(session_id or path.stem),
+        session_id=resolved_id,
         source_backend="jsonl",
         source_location=str(path),
         verify=verify_session_local(str(path)),
+        receipt=_load_receipt_for(resolved_id, path),
         session=session,
         agent={"agent_id": session.get("agent_id")} if session.get("agent_id") else None,
         actions=actions,
