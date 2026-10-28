@@ -352,10 +352,23 @@ def _load_receipt_for(session_id: str, path: Path) -> dict[str, Any] | None:
     bundle is still the best available evidence, and failing the whole export
     because a side-car is corrupt would withhold the records that are intact.
     """
-    from rootsign.sdk.receipt import find_receipt, load_receipt
-    from rootsign.sdk.spool import is_spool_path
+    from rootsign.sdk.receipt import RECEIPT_SUFFIX, RECEIPTS_SUBDIR, find_receipt, load_receipt
+    from rootsign.sdk.spool import SPOOL_DIRNAME, SYNCED_SUBDIR, is_spool_path
 
     try:
+        if path.parent.name == SYNCED_SUBDIR:
+            # Retired by a completed sync. `is_spool_path` only knows the live
+            # `spool/sessions/` shape (it decides whether to print the sync
+            # breadcrumb, which a synced file must not get), so a spool tree
+            # copied to an examiner would otherwise lose the receipt of the one
+            # session that uploaded cleanly. The receipt moved beside the file
+            # and took its suffix index (ADR-015 D1), so pair by the file's own
+            # stem: `<id>.1.jsonl` belongs with `<id>.1.sync.json`, not with the
+            # first sync's `<id>.sync.json`.
+            if not (is_spool_path(path) or path.parent.parent.name == SPOOL_DIRNAME):
+                return None
+            paired = path.parent / RECEIPTS_SUBDIR / f"{path.stem}{RECEIPT_SUFFIX}"
+            return load_receipt(paired) if paired.is_file() else None
         if not is_spool_path(path):
             return None
         # The spool root is two levels up from `sessions/<file>.jsonl`; letting
