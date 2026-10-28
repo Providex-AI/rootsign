@@ -1,0 +1,54 @@
+{
+  "verdict": "TAMPERED",
+  "valid": false,
+  "summary": "TAMPERED — chain broken at record #2 (self_hash mismatch)",
+  "record_count": 2,
+  "first_invalid_sequence": 2,
+  "missing_ranges": [],
+  "error": "self_hash mismatch",
+  "hash": {
+    "algorithm": "sha256",
+    "canonical_spec": "ADR-001",
+    "note": "Each record's self_hash is recomputed from its canonical fields and checked against the stored value; each record's prev_action_hash must equal its predecessor's self_hash."
+  },
+  "records": [
+    {
+      "sequence_number": 1,
+      "action_id": "00000001-00a1-4000-8000-000000000001",
+      "timestamp": "2026-10-21T09:00:00+00:00",
+      "tool_name": "send_email",
+      "prev_action_hash": null,
+      "self_hash": "41c9d5c2d1dc332a28c596b9d70235c01cd4eb5a65361bc842cf4e5fa6f6ae03",
+      "chain_status": "verified"
+    },
+    {
+      "sequence_number": 2,
+      "action_id": "00000001-00a1-4000-8000-000000000002",
+      "timestamp": "2026-10-21T09:00:00+00:00",
+      "tool_name": "wire_transfer",
+      "prev_action_hash": "41c9d5c2d1dc332a28c596b9d70235c01cd4eb5a65361bc842cf4e5fa6f6ae03",
+      "self_hash": "33e5e738a2758bddb6949cc36ad113505319d670d72c184db9a02291b283db7f",
+      "chain_status": "failed"
+    }
+  ],
+  "replay": {
+    "attempts": 1,
+    "latest_attempt_id": "00000001-00a7-4000-8000-000000000001",
+    "latest_disposition": "partial",
+    "finished_at": "2026-10-21T10:00:01+00:00",
+    "endpoint": "https://ingest.example.test/v1/ingest",
+    "spool_file_sha256": "ba7c94afbf9dcfe96c9f632a5335b04226b02420f4e9d7e1b7181514378cd5af",
+    "record_count": 4,
+    "halted_at_sequence": 2,
+    "observed_and_rejected": [
+      {
+        "record": 3,
+        "error_code": "HASH_CHAIN_BROKEN",
+        "retryable": false,
+        "error_message": "self_hash does not match the canonical fields",
+        "sequence": 2
+      }
+    ],
+    "not_attempted": []
+  }
+}

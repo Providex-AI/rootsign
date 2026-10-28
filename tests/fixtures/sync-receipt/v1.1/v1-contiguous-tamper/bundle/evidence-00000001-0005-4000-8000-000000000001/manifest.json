@@ -1,0 +1,21 @@
+{
+  "bundle_version": "1.0",
+  "generator": "rootsign 0.3.1",
+  "generated_at": "2026-10-21T12:00:00+00:00",
+  "session_id": "00000001-0005-4000-8000-000000000001",
+  "agent": {
+    "agent_id": "00000001-000a-4000-8000-000000000001"
+  },
+  "source": {
+    "backend": "jsonl",
+    "location": "spool/sessions/00000001-0005-4000-8000-000000000001.jsonl"
+  },
+  "verdict": "TAMPERED",
+  "files": {
+    "redaction.json": "79dce68ab1f50b5586b36c823d383ac92d5ad2fe55af227bc31993a66e06e73e",
+    "sync-receipt.json": "3ef83c6ed69e5e7be97d05c1f55f3b4c4eec21d32d107141d7d5db72bfd3a500",
+    "timeline.json": "3148a030bc8ae1a8a8c9637ecc2be7e3751cb43ab39a2e6c8a3763e7e3eddd77",
+    "verification.json": "68666dc15e27d37994e3edd67cfbb6b5157fea5e1e6ced6c5fbe0cbfc36b8bc3"
+  },
+  "compliance": {}
+}

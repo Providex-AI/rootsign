@@ -1,0 +1,3 @@
+# Conformance vectors are hashed byte-for-byte (SHA256SUMS, spool_file_sha256,
+# bundle manifests). Never let a checkout rewrite their line endings.
+tests/fixtures/sync-receipt/** -text

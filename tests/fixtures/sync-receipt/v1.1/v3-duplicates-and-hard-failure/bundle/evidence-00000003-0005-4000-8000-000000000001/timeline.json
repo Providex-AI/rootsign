@@ -1,0 +1,81 @@
+{
+  "session": {
+    "session_id": "00000003-0005-4000-8000-000000000001",
+    "agent_id": "00000003-000a-4000-8000-000000000001",
+    "objective": "v3-duplicates-and-hard-failure",
+    "user_id": null,
+    "status": "completed",
+    "start_time": "2026-10-21T09:00:00+00:00",
+    "end_time": "2026-10-21T09:00:00+00:00",
+    "action_count": 4,
+    "decision_count": 0,
+    "approval_count": 0
+  },
+  "previews": {
+    "included": false,
+    "note": "payload previews not retained for this session — only the input/output hashes the chain is built from were stored",
+    "withheld_fields": [],
+    "withheld_from_events": 0
+  },
+  "events": [
+    {
+      "type": "SESSION_OPEN",
+      "timestamp": "2026-10-21T09:00:00+00:00",
+      "objective": "v3-duplicates-and-hard-failure",
+      "user_id": null
+    },
+    {
+      "type": "ACTION",
+      "timestamp": "2026-10-21T09:00:00+00:00",
+      "sequence_number": 1,
+      "action_id": "00000003-00a1-4000-8000-000000000001",
+      "tool_name": "send_email",
+      "authorization_status": "auto_authorized",
+      "duration_ms": null,
+      "decision_id": null,
+      "input_hash": "99d3a91e7e87eb4997107275226155498555e34322ffebe829e79cb7daeca5b9",
+      "output_hash": "65dc68cb17e842dc89122cf636d5b04f2ced39011bc5886ba0a026da073194c5"
+    },
+    {
+      "type": "ACTION",
+      "timestamp": "2026-10-21T09:00:00+00:00",
+      "sequence_number": 2,
+      "action_id": "00000003-00a1-4000-8000-000000000002",
+      "tool_name": "query_db",
+      "authorization_status": "auto_authorized",
+      "duration_ms": null,
+      "decision_id": null,
+      "input_hash": "7788c1f80817d66503a4acf2e279043f3e9d5d9b9ad4d861ac43d763f8eba5e2",
+      "output_hash": "77c1cff2a71c0e779bf011cae23343c2c559f51ad9436215a5f02289eac8577c"
+    },
+    {
+      "type": "ACTION",
+      "timestamp": "2026-10-21T09:00:00+00:00",
+      "sequence_number": 3,
+      "action_id": "00000003-00a1-4000-8000-000000000003",
+      "tool_name": "charge_card",
+      "authorization_status": "auto_authorized",
+      "duration_ms": null,
+      "decision_id": null,
+      "input_hash": "02df333ca5157d8388c6e5ca660fa7ddde3fdb04f14d49c73e6ea18b1256a637",
+      "output_hash": "fe8793f747a148fee3cc21df70d6349e814575c6b1533a8613a321fa817bee19"
+    },
+    {
+      "type": "ACTION",
+      "timestamp": "2026-10-21T09:00:00+00:00",
+      "sequence_number": 4,
+      "action_id": "00000003-00a1-4000-8000-000000000004",
+      "tool_name": "write_file",
+      "authorization_status": "auto_authorized",
+      "duration_ms": null,
+      "decision_id": null,
+      "input_hash": "0a084dfe5a0a68c2489679390a8eb565ab310e1cdbadd3a3c2177168e0af8f4e",
+      "output_hash": "d58e20eb3f0a9e4420a3de4fc893cf7a0bbaae9c572fb0ffa0f3815e2501cb40"
+    },
+    {
+      "type": "SESSION_CLOSE",
+      "timestamp": "2026-10-21T09:00:00+00:00",
+      "status": "completed"
+    }
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "session_id": "00000001-0005-4000-8000-000000000001",
+  "attempts": [
+    {
+      "schema_version": "receipt/1.1",
+      "attempt_id": "00000001-00a7-4000-8000-000000000001",
+      "started_at": "2026-10-21T10:00:00+00:00",
+      "finished_at": "2026-10-21T10:00:01+00:00",
+      "endpoint": "https://ingest.example.test/v1/ingest",
+      "sdk_version": "0.3.1",
+      "operator": "vector-generator",
+      "spool_file_sha256": "ba7c94afbf9dcfe96c9f632a5335b04226b02420f4e9d7e1b7181514378cd5af",
+      "record_count": 4,
+      "outcomes": {
+        "accepted": [
+          [
+            1,
+            2
+          ],
+          [
+            4,
+            4
+          ]
+        ],
+        "duplicate": [],
+        "rejected": [
+          {
+            "record": 3,
+            "error_code": "HASH_CHAIN_BROKEN",
+            "retryable": false,
+            "error_message": "self_hash does not match the canonical fields",
+            "sequence": 2
+          }
+        ],
+        "not_attempted": []
+      },
+      "halted_at_sequence": 2,
+      "disposition": "partial"
+    }
+  ]
+}

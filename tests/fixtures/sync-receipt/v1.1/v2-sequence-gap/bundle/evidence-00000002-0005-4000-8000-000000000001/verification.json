@@ -1,0 +1,51 @@
+{
+  "verdict": "INCOMPLETE",
+  "valid": false,
+  "summary": "INCOMPLETE — 1 record(s) missing (sequence 2); 2 present and intact (1 record(s) missing at sequence 2)",
+  "record_count": 2,
+  "first_invalid_sequence": 2,
+  "missing_ranges": [
+    [
+      2,
+      2
+    ]
+  ],
+  "error": "1 record(s) missing at sequence 2",
+  "hash": {
+    "algorithm": "sha256",
+    "canonical_spec": "ADR-001",
+    "note": "Each record's self_hash is recomputed from its canonical fields and checked against the stored value; each record's prev_action_hash must equal its predecessor's self_hash."
+  },
+  "records": [
+    {
+      "sequence_number": 1,
+      "action_id": "00000002-00a1-4000-8000-000000000001",
+      "timestamp": "2026-10-21T09:00:00+00:00",
+      "tool_name": "send_email",
+      "prev_action_hash": null,
+      "self_hash": "b04ec9bc9693d2b37f204ce6ba218eaa5ec476a5a5dba646ce1c3660c6eeb5a2",
+      "chain_status": "verified"
+    },
+    {
+      "sequence_number": 3,
+      "action_id": "00000002-00a1-4000-8000-000000000003",
+      "timestamp": "2026-10-21T09:00:00+00:00",
+      "tool_name": "charge_card",
+      "prev_action_hash": "95d5ccc963fec75ac277d03651c510e2620a8d29f78d280ec18d4322d54c5332",
+      "self_hash": "bbb8120f107d675a8a0ba2749822b75f2cb25110e67fada0ace5e0d45a8f6f16",
+      "chain_status": "unverified"
+    }
+  ],
+  "replay": {
+    "attempts": 1,
+    "latest_attempt_id": "00000002-00a7-4000-8000-000000000001",
+    "latest_disposition": "fully_accepted",
+    "finished_at": "2026-10-21T10:00:01+00:00",
+    "endpoint": "https://ingest.example.test/v1/ingest",
+    "spool_file_sha256": "a8f6fcd0bbef6518fcdd34336996f8b312300d641296c98fae1db67f52a78219",
+    "record_count": 4,
+    "halted_at_sequence": null,
+    "observed_and_rejected": [],
+    "not_attempted": []
+  }
+}

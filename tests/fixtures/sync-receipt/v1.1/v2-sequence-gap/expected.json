@@ -1,0 +1,49 @@
+{
+  "vector": "v2-sequence-gap",
+  "title": "Sequence gap: chain verdict INCOMPLETE, receipt shows no rejection for the missing record",
+  "receipt_schema_version": "receipt/1.1",
+  "scenario": {
+    "recorded": "SESSION_OPEN, three ACTION_RECORDs (sequences 1-3), SESSION_CLOSE",
+    "damage": "the line for sequence 2 deleted from the spool file before sync",
+    "store": "verifies each ACTION_RECORD's self_hash against its own canonical fields; a dangling prev_action_hash is not a rejection (ingest spec section 8.3)",
+    "sync": "one attempt, batch size 100"
+  },
+  "files": {
+    "spool_file": "spool/synced/00000002-0005-4000-8000-000000000001.jsonl",
+    "receipt": "spool/synced/receipts/00000002-0005-4000-8000-000000000001.sync.json",
+    "bundle": "bundle/evidence-00000002-0005-4000-8000-000000000001"
+  },
+  "chain": {
+    "verdict": "INCOMPLETE",
+    "first_invalid_sequence": 2,
+    "missing_ranges": [
+      [
+        2,
+        2
+      ]
+    ]
+  },
+  "sync_exit_codes": [
+    0
+  ],
+  "attempts": [
+    {
+      "schema_version": "receipt/1.1",
+      "spool_file_sha256": "a8f6fcd0bbef6518fcdd34336996f8b312300d641296c98fae1db67f52a78219",
+      "record_count": 4,
+      "outcomes": {
+        "accepted": [
+          [
+            1,
+            4
+          ]
+        ],
+        "duplicate": [],
+        "rejected": [],
+        "not_attempted": []
+      },
+      "halted_at_sequence": null,
+      "disposition": "fully_accepted"
+    }
+  ]
+}
