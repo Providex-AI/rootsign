@@ -13,7 +13,7 @@ macOS, `shasum -a 256 -c SHA256SUMS`), before you run any code from it.
 
 | What | Licence |
 | --- | --- |
-| Every file in this directory **except** `verify_vectors.py`: spool files, receipts, bundles, `expected.json`, this README, `SHA256SUMS` | **CC0 1.0** ([`LICENSE`](LICENSE)). No rights reserved, so you can copy them into your own test suite. |
+| Every file in this directory **except** `verify_vectors.py`: spool files, receipts, bundles, `expected.json`, `transcript.json`, this README, `SHA256SUMS` | **CC0 1.0** ([`LICENSE`](LICENSE)). No rights reserved, so you can copy them into your own test suite. |
 | `verify_vectors.py` | **Apache-2.0**, like the rest of the repository (SPDX header in the file) |
 
 ## Layout
@@ -24,6 +24,7 @@ v1.1/
   verify_vectors.py            standalone verifier, Python stdlib only
   <lane>/
     expected.json              what the lane pins (see below)
+    transcript.json            every request sync sent, and the store's answers
     spool/...                  the spool tree as `rootsign-admin sync` left it
     bundle/evidence-<id>/      the evidence bundle `rootsign export` produced
 ```
@@ -113,6 +114,52 @@ the evidence and every implementation produces its own: `attempt_id`,
 (`vector-generator`, 2026-10-21) so that regenerating the files produces no
 diff.
 
+## The store transcript
+
+Each lane's `transcript.json` records, attempt by attempt, every request
+`rootsign-admin sync` sent and the store's index-aligned answer to it:
+
+```json
+{"batch_size": 2, "attempts": [{"exchanges": [
+  {"records": [3, 4], "http_status": 200, "responses": [
+    {"record": 3, "event_id": "…", "status": "rejected",
+     "error_code": "VALIDATION_ERROR", "retryable": false, "error_message": "…"},
+    {"record": 4, "event_id": "…", "status": "accepted"}]}]}]}
+```
+
+`records` are spool-file positions, and `event_id` ties each answer to its
+spool line. The transcript exists so that a second implementation can test
+its **receipt writer** on its own, without first building a store. That
+matters most for V1, whose store checks each record's hash, so reproducing
+the store would mean implementing the canonical hash as well.
+
+### Mapping store answers to a receipt
+
+These rules turn a transcript attempt into receipt outcomes. `derive_attempt`
+in `verify_vectors.py` implements them, and rule T3 checks the result against
+RootSign's actual receipts.
+
+1. If a record was answered more than once (a retried request), use its last
+   answer.
+2. `status: "accepted"` → `accepted`.
+3. `status: "rejected"` with `error_code: "DUPLICATE_EVENT"` → `duplicate`.
+4. Any other rejection → a `rejected` entry carrying the answer's `record`,
+   `error_code` and `retryable`, plus `sequence` when the spool line at that
+   position is an `ACTION_RECORD`.
+5. A record that was never answered → `not_attempted`.
+6. The first refusal in position order (rule 4) halted the attempt.
+   `halted_at_sequence` is that refusal's `sequence`, or `null` if it has none
+   or nothing was refused.
+7. `disposition` is `transport_failed` if the halting refusal is retryable,
+   `fully_accepted` if nothing was refused, and `partial` otherwise.
+8. `record_count` is the number of envelopes in the spool file. Ranges use the
+   canonical form (R4).
+
+An exchange with no `responses` (a request that got no answer at the HTTP
+level) is outside these rules. What a client records in its place is
+implementation behaviour, so T3 skips such attempts. No lane in this set has
+one.
+
 ## Using the vectors
 
 ```sh
@@ -127,14 +174,20 @@ To check **your** implementation against a lane:
 1. **Chain layer.** Run your chain verifier over the lane's spool file and
    compare the result with `expected.json` → `chain` (`verdict`,
    `first_invalid_sequence`, `missing_ranges`).
-2. **Receipt layer.** Replay the spool file against a store that behaves as
-   described in `scenario.store`, using the batch size and number of attempts
-   given in `scenario.sync`. Then run:
+2. **Receipt layer.** Produce a receipt for the lane in one of two ways:
+   - **Writer only (no store needed):** read the spool file and
+     `transcript.json`, and write one receipt attempt per transcript attempt.
+   - **End to end:** replay the spool file against a store that behaves as
+     described in `scenario.store`, using the batch size and number of
+     attempts given in `scenario.sync`.
+
+   Then run:
    ```sh
    python verify_vectors.py --lane v3-duplicates-and-hard-failure --receipt your.sync.json
    ```
-   This checks every R rule against the lane's spool bytes, and E2 against the
-   lane's expected outcomes.
+   This checks every R rule against the lane's spool bytes, E2 against the
+   lane's expected outcomes, and T3 against the store answers in the lane's
+   transcript.
 3. **Any receipt, anywhere:**
    ```sh
    python verify_vectors.py --receipt some.sync.json --spool some.jsonl
@@ -163,6 +216,9 @@ ID of each failure.
 | B4 | The `replay` block is **absent** (not `null`) exactly when there is no receipt |
 | B5 | The `replay` block summarizes the latest attempt |
 | B6 | Layer separation: the receipt contains no chain-verdict vocabulary, and no missing sequence appears as an observed rejection |
+| T1 | Transcript requests carry contiguous runs of positions starting at 1 (a retry repeats the previous run), and each answer is index-aligned with its request |
+| T2 | Each answer's `event_id` is the `event_id` of the spool line at that position |
+| T3 | Each receipt attempt has the outcomes, `halted_at_sequence` and `disposition` that the mapping rules derive from the transcript |
 | E1 | The bundle's chain verdict equals `expected.json` → `chain` |
 | E2 | Each receipt attempt, without the fields that are not compared, equals `expected.json` → `attempts` |
 | M1 | `SHA256SUMS` covers every file in the set, and every file matches it |
@@ -187,7 +243,8 @@ All files come from RootSign's production code paths (`tests/support/receipt_vec
    spool file is the real failover output.
 2. The damage is a text edit to that file.
 3. The real `rootsign-admin sync` replays the file. V1 and V2 use a mock store
-   that verifies each record's seal. V3 uses one that refuses sequence 2.
+   that verifies each record's seal. V3 uses one that refuses sequence 2. A
+   recorder between sync and the store writes `transcript.json`.
 4. The real `rootsign export` produces the bundle.
 
 The RootSign suite (`tests/unit/test_sync_receipt_vectors.py`) replays these

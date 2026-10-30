@@ -11,7 +11,8 @@
   "files": {
     "spool_file": "spool/sessions/00000003-0005-4000-8000-000000000001.jsonl",
     "receipt": "spool/receipts/00000003-0005-4000-8000-000000000001.sync.json",
-    "bundle": "bundle/evidence-00000003-0005-4000-8000-000000000001"
+    "bundle": "bundle/evidence-00000003-0005-4000-8000-000000000001",
+    "transcript": "transcript.json"
   },
   "chain": {
     "verdict": "VALID",

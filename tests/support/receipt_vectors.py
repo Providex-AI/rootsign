@@ -291,18 +291,93 @@ def _pinned(lane: Lane, mp: pytest.MonkeyPatch, *, pin_receipts: bool = True) ->
     yield
 
 
-def sync_attempts(lane: Lane, spool_dir: Path, mp: pytest.MonkeyPatch) -> list[int]:
+class Recorder:
+    """Sits between sync and the store and writes down every exchange.
+
+    What the store *said* is the one input a second implementation cannot
+    reconstruct without also building a store — and, for a seal-verifying
+    store, the frozen canonical hash. Publishing the exchanges as data lets a
+    receipt writer be tested on its own (issue #47).
+    """
+
+    def __init__(self, store: Any) -> None:
+        self.store = store
+        self.attempts: list[list[tuple[list[dict[str, Any]], int, Any]]] = []
+
+    def begin_attempt(self) -> None:
+        self.attempts.append([])
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        response = self.store(request)
+        body = response.json() if response.status_code == 200 else None
+        self.attempts[-1].append((json.loads(request.content), response.status_code, body))
+        return response
+
+
+@dataclass
+class SyncRun:
+    exit_codes: list[int]
+    recorder: Recorder
+
+
+def sync_attempts(lane: Lane, spool_dir: Path, mp: pytest.MonkeyPatch) -> SyncRun:
     """Run `rootsign-admin sync` `lane.attempts` times against one store."""
-    store = lane.store()
-    bind_transport(mp, store.transport())
+    recorder = Recorder(lane.store())
+    bind_transport(mp, httpx.MockTransport(recorder))
     runner = CliRunner()
     codes = []
     for _ in range(lane.attempts):
+        recorder.begin_attempt()
         result = runner.invoke(admin_app, ["sync", "--spool-dir", str(spool_dir)])
         if result.exception and not isinstance(result.exception, SystemExit):
             raise result.exception
         codes.append(result.exit_code)
-    return codes
+    return SyncRun(exit_codes=codes, recorder=recorder)
+
+
+#: Response fields a transcript keeps. `entity_id`, `self_hash` and the echoed
+#: `sequence_number` on an acceptance are the store's bookkeeping — random in
+#: the mock, and nothing a receipt is built from.
+_RESPONSE_FIELDS = ("status", "error_code", "retryable", "error_message")
+
+
+def transcript(lane: Lane, spool_file: Path, run: SyncRun) -> dict[str, Any]:
+    """The store's side of every attempt, keyed by record position."""
+    from rootsign.sdk.spool import read_spool_session
+
+    positions = {
+        envelope["event_id"]: index
+        for index, envelope in enumerate(read_spool_session(spool_file).envelopes, start=1)
+    }
+    attempts = []
+    for exchanges in run.recorder.attempts:
+        rendered = []
+        for batch, status_code, body in exchanges:
+            exchange: dict[str, Any] = {
+                "records": [positions[envelope["event_id"]] for envelope in batch],
+                "http_status": status_code,
+            }
+            if body is not None:
+                exchange["responses"] = [
+                    {
+                        "record": positions[envelope["event_id"]],
+                        "event_id": envelope["event_id"],
+                        **{key: answer[key] for key in _RESPONSE_FIELDS if key in answer},
+                    }
+                    for envelope, answer in zip(batch, body)
+                ]
+            rendered.append(exchange)
+        attempts.append({"exchanges": rendered})
+    return {
+        "vector": lane.slug,
+        "description": (
+            "Every request rootsign-admin sync sent to the store, and the store's "
+            "index-aligned answer, per attempt. `records` are spool-file positions; "
+            "`event_id` binds each answer to its spool line."
+        ),
+        "batch_size": lane.batch_size or 100,
+        "attempts": attempts,
+    }
 
 
 def located(spool_dir: Path, session_id: str) -> tuple[Path, Path]:
@@ -333,7 +408,7 @@ def build_lane(lane: Lane, work: Path) -> Path:
         spool_file = _spool(lane, spool_dir)
         if lane.damage is not None:
             lane.damage(spool_file)
-        exit_codes = sync_attempts(lane, spool_dir, mp)
+        run = sync_attempts(lane, spool_dir, mp)
 
         spool_file, receipt_file = located(spool_dir, lane.session_id)
         verdict = verify_session_local(str(spool_file))
@@ -354,21 +429,26 @@ def build_lane(lane: Lane, work: Path) -> Path:
             "spool_file": spool_file.relative_to(out).as_posix(),
             "receipt": receipt_file.relative_to(out).as_posix(),
             "bundle": bundle_dir.relative_to(out).as_posix(),
+            "transcript": "transcript.json",
         },
         "chain": {
             "verdict": verdict.verdict.value,
             "first_invalid_sequence": verdict.first_invalid_sequence,
             "missing_ranges": [list(r) for r in verdict.missing_ranges],
         },
-        "sync_exit_codes": exit_codes,
+        "sync_exit_codes": run.exit_codes,
         "attempts": [
             _expected_attempt(attempt)
             for attempt in json.loads(receipt_file.read_text(encoding="utf-8"))["attempts"]
         ],
     }
-    (out / "expected.json").write_text(
-        json.dumps(expected, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-    )
+    for name, document in (
+        ("expected.json", expected),
+        ("transcript.json", transcript(lane, spool_file, run)),
+    ):
+        (out / name).write_text(
+            json.dumps(document, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+        )
     return out
 
 

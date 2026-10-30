@@ -18,8 +18,10 @@ Three ways to run it:
         the spool file it describes, against the bytes it claims to describe.
 
     python verify_vectors.py --lane v3-duplicates-and-hard-failure --receipt R.sync.json
-        Check a receipt *your* implementation produced by replaying a lane's
-        spool file, against the outcomes that lane expects.
+        Check a receipt *your* implementation produced for a lane — by
+        replaying its spool file against a store, or by writing it from the
+        spool file plus the lane's transcript.json — against the outcomes that
+        lane expects and the store answers its transcript records.
 
 What this does NOT check: the hash chain. Recomputing ADR-001 `self_hash`
 values would mean a second implementation of the canonical hash, and every
@@ -27,7 +29,7 @@ lane already pins the verdict RootSign's own verifier reached
 (expected.json `chain`). Run your chain verifier over the lane's spool file
 and compare. `tests/fixtures/hash_vectors.json` pins the hash itself.
 
-Rule identifiers (R*, B*, E*) are the ones README.md describes.
+Rule identifiers (R*, B*, T*, E*, M*) are the ones README.md describes.
 """
 
 from __future__ import annotations
@@ -505,6 +507,155 @@ def check_against_lane(lane_dir: Path, receipt: dict[str, Any]) -> Report:
     return report
 
 
+# ---------------------------------------------------------------------------
+# T — the store transcript, and the receipt derived from it
+# ---------------------------------------------------------------------------
+
+
+def _compress(positions: list[int]) -> list[list[int]]:
+    ranges: list[list[int]] = []
+    for position in sorted(positions):
+        if ranges and position == ranges[-1][1] + 1:
+            ranges[-1][1] = position
+        else:
+            ranges.append([position, position])
+    return ranges
+
+
+def derive_attempt(spool: list[dict[str, Any]], exchanges: list[dict[str, Any]]) -> dict[str, Any]:
+    """The receipt outcomes a transcript implies, by the README's mapping rules.
+
+    This is the receipt writer's whole job once the store has answered, so it
+    doubles as a reference a second implementation can be compared against —
+    the store and the canonical hash are not needed to run it. A retried
+    request appears as a later exchange carrying the same records; the last
+    answer for a record is the one that counts.
+    """
+    answers: dict[int, dict[str, Any]] = {}
+    for exchange in exchanges:
+        for answer in exchange.get("responses") or []:
+            answers[answer["record"]] = answer
+
+    accepted, duplicate, rejected = [], [], []
+    halting = None
+    for position in sorted(answers):
+        answer = answers[position]
+        if answer.get("status") == "accepted":
+            accepted.append(position)
+        elif answer.get("error_code") == "DUPLICATE_EVENT":
+            duplicate.append(position)
+        else:
+            entry = {
+                "record": position,
+                "error_code": answer.get("error_code"),
+                "retryable": answer.get("retryable"),
+            }
+            line = spool[position - 1]
+            if line.get("event_type") == "ACTION_RECORD" and _is_int(_sequence_of(line)):
+                entry["sequence"] = _sequence_of(line)
+            rejected.append(entry)
+            if halting is None:
+                halting = entry
+
+    if halting is not None and halting["retryable"]:
+        disposition = "transport_failed"
+    elif halting is None:
+        disposition = "fully_accepted"
+    else:
+        disposition = "partial"
+
+    return {
+        "record_count": len(spool),
+        "outcomes": {
+            "accepted": _compress(accepted),
+            "duplicate": _compress(duplicate),
+            "rejected": rejected,
+            "not_attempted": _compress([p for p in range(1, len(spool) + 1) if p not in answers]),
+        },
+        "halted_at_sequence": halting.get("sequence") if halting is not None else None,
+        "disposition": disposition,
+    }
+
+
+def check_transcript(
+    transcript: Any, spool: list[dict[str, Any]], receipt: dict[str, Any] | None
+) -> Report:
+    """T1-T3: the transcript is bound to the spool file, and implies the receipt."""
+    report = Report()
+    ok = isinstance(transcript, dict) and isinstance(transcript.get("attempts"), list)
+    if not report.check("T1", ok, "not {attempts: [...]}"):
+        return report
+
+    for index, attempt in enumerate(transcript["attempts"], start=1):
+        where = f"transcript attempt {index}"
+        exchanges = attempt.get("exchanges") if isinstance(attempt, dict) else None
+        if not report.check("T1", isinstance(exchanges, list), f"{where}: no exchanges list"):
+            continue
+        previous: list[int] = []
+        for exchange in exchanges:
+            records = exchange.get("records") or []
+            # Delivery is a prefix on the wire too: each request carries the
+            # next contiguous run of positions, or repeats the last (a retry).
+            start = (previous[-1] + 1) if previous else 1
+            contiguous = records == list(range(start, start + len(records)))
+            report.check(
+                "T1",
+                bool(records) and (contiguous or records == previous),
+                f"{where}: request records {records} do not continue from {previous or 'the start'}",
+            )
+            previous = records
+            responses = exchange.get("responses")
+            if responses is None:
+                continue
+            report.check(
+                "T1",
+                [r.get("record") for r in responses] == records,
+                f"{where}: answers {[r.get('record') for r in responses]} are not index-aligned with records {records}",
+            )
+            for answer in responses:
+                position = answer.get("record")
+                if not (_is_int(position) and 1 <= position <= len(spool)):
+                    report.check(
+                        "T1",
+                        False,
+                        f"{where}: answer for record {position!r} outside the spool file",
+                    )
+                    continue
+                report.check(
+                    "T2",
+                    answer.get("event_id") == spool[position - 1].get("event_id"),
+                    f"{where}: answer for record {position} names event_id {answer.get('event_id')}, "
+                    f"the spool file has {spool[position - 1].get('event_id')} there",
+                )
+
+        if receipt is None:
+            continue
+        attempts = receipt.get("attempts") or []
+        if not report.check(
+            "T3", index <= len(attempts), f"{where} has no matching receipt attempt"
+        ):
+            continue
+        if any(exchange.get("responses") is None for exchange in exchanges):
+            # A request the transport never got an answer to: what the client
+            # synthesizes in its place is implementation behaviour, not data.
+            continue
+        derived = derive_attempt(spool, exchanges)
+        actual = comparable(attempts[index - 1])
+        for key, value in derived.items():
+            report.check(
+                "T3",
+                actual.get(key) == value,
+                f"{where}: transcript implies {key} = {json.dumps(value)}, receipt says {json.dumps(actual.get(key))}",
+            )
+    if receipt is not None:
+        report.check(
+            "T3",
+            len(transcript["attempts"]) == len(receipt.get("attempts") or []),
+            "transcript and receipt hold different numbers of attempts",
+        )
+    return report
+
+
 def check_lane(lane_dir: Path) -> Report:
     report = Report()
     expected = json.loads((lane_dir / "expected.json").read_text(encoding="utf-8"))
@@ -516,6 +667,8 @@ def check_lane(lane_dir: Path) -> Report:
     report.merge(check_against_lane(lane_dir, receipt), "receipt: ")
     bundle_report, verification = check_bundle(lane_dir / files["bundle"], receipt)
     report.merge(bundle_report, "bundle: ")
+    transcript = json.loads((lane_dir / files["transcript"]).read_text(encoding="utf-8"))
+    report.merge(check_transcript(transcript, read_envelope_lines(spool_bytes), receipt), "")
 
     chain = expected["chain"]
     got = {
@@ -611,6 +764,11 @@ def main(argv: list[str] | None = None) -> int:
     report = check_receipt(receipt, spool_path.read_bytes() if spool_path else None)
     if lane_dir is not None:
         report.merge(check_against_lane(lane_dir, receipt), "")
+        files = json.loads((lane_dir / "expected.json").read_text(encoding="utf-8"))["files"]
+        transcript = json.loads((lane_dir / files["transcript"]).read_text(encoding="utf-8"))
+        report.merge(
+            check_transcript(transcript, read_envelope_lines(spool_path.read_bytes()), receipt), ""
+        )
     return _finish(report, str(args.receipt))
 
 

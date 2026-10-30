@@ -46,6 +46,7 @@ from tests.support.receipt_vectors import (
     located,
     sums_text,
     sync_attempts,
+    transcript,
 )
 
 VERIFIER_PATH = VECTORS_ROOT / "verify_vectors.py"
@@ -88,7 +89,7 @@ def _rules(report: Any) -> set[str]:
     found = set()
     for failure in report.failures:
         for token in failure.replace(":", " ").split():
-            if len(token) in (2, 3) and token[0] in "RBEM" and token[1:].isdigit():
+            if len(token) in (2, 3) and token[0] in "RBETM" and token[1:].isdigit():
                 found.add(token)
                 break
     return found
@@ -179,19 +180,20 @@ def _comparable(attempt: dict[str, Any]) -> dict[str, Any]:
 class TestReplayingTheCommittedBytes:
     """Feed the published spool files back through the real code."""
 
-    def _replay(self, lane: Lane, tmp_path: Path) -> tuple[Path, Path, list[int]]:
+    def _replay(self, lane: Lane, tmp_path: Path) -> tuple[Path, Path, Any]:
         spool_dir = tmp_path / "spool"
         sessions = spool_dir / "sessions"
         sessions.mkdir(parents=True)
         shutil.copyfile(_committed(lane, "spool_file"), sessions / f"{lane.session_id}.jsonl")
         with pytest.MonkeyPatch.context() as mp, _pinned(lane, mp, pin_receipts=False):
-            codes = sync_attempts(lane, spool_dir, mp)
+            run = sync_attempts(lane, spool_dir, mp)
         spool_file, receipt_file = located(spool_dir, lane.session_id)
-        return spool_file, receipt_file, codes
+        return spool_file, receipt_file, run
 
     def test_sync_writes_the_committed_receipt(self, lane: Lane, tmp_path: Path):
-        spool_file, receipt_file, codes = self._replay(lane, tmp_path)
+        spool_file, receipt_file, run = self._replay(lane, tmp_path)
         expected = _expected(lane)
+        codes = run.exit_codes
 
         produced = json.loads(receipt_file.read_text())
         assert codes == expected["sync_exit_codes"]
@@ -202,6 +204,14 @@ class TestReplayingTheCommittedBytes:
         # And sync left the pair where the vector says it did.
         assert spool_file.relative_to(tmp_path).as_posix() == expected["files"]["spool_file"]
         assert receipt_file.relative_to(tmp_path).as_posix() == expected["files"]["receipt"]
+
+    def test_the_store_answers_what_the_committed_transcript_says(self, lane: Lane, tmp_path: Path):
+        """The transcript is the store's side of the conversation. A second
+        implementation builds its receipt from it, so it has to be what the
+        store actually said when the committed spool bytes were replayed."""
+        spool_file, _, run = self._replay(lane, tmp_path)
+        committed = json.loads((lane.directory / "transcript.json").read_text())
+        assert transcript(lane, spool_file, run) == committed
 
     def test_the_chain_verifier_reaches_the_committed_verdict(self, lane: Lane):
         result = verify_session_local(str(_committed(lane, "spool_file")))
@@ -417,6 +427,78 @@ class TestTheVerifierCatchesBundleDamage:
         receipt = _receipt(V2)
         receipt["attempts"][0]["operator"] = "someone-else"
         assert "B2" in _rules(verifier.check_bundle(bundle, receipt)[0])
+
+
+class TestTheVerifierCatchesTranscriptDamage:
+    def _check(self, lane: Lane, mutate: Any) -> set[str]:
+        document = json.loads((lane.directory / "transcript.json").read_text())
+        mutate(document)
+        spool = verifier.read_envelope_lines(_committed(lane, "spool_file").read_bytes())
+        return _rules(verifier.check_transcript(document, spool, _receipt(lane)))
+
+    def test_nothing_on_the_committed_transcripts(self):
+        for lane in LANES:
+            assert self._check(lane, lambda d: None) == set(), lane.slug
+
+    def test_a_request_that_skips_records(self):
+        def mutate(document):
+            exchange = document["attempts"][0]["exchanges"][1]
+            exchange["records"] = [4, 5]
+            for answer, record in zip(exchange["responses"], (4, 5)):
+                answer["record"] = record
+
+        assert "T1" in self._check(V3, mutate)
+
+    def test_an_answer_bound_to_the_wrong_spool_line(self):
+        def mutate(document):
+            document["attempts"][0]["exchanges"][0]["responses"][0]["event_id"] = "not-it"
+
+        assert self._check(V1, mutate) == {"T2"}
+
+    def test_a_receipt_the_store_answers_do_not_support(self):
+        """The store said record 4 was accepted; a receipt filing it as a
+        duplicate contradicts the transcript, whatever else it gets right."""
+
+        def mutate(document):
+            answer = document["attempts"][0]["exchanges"][1]["responses"][1]
+            answer.update(status="rejected", error_code="DUPLICATE_EVENT", retryable=False)
+
+        assert self._check(V3, mutate) == {"T3"}
+
+
+class TestASecondImplementationCanUseTheTranscript:
+    """The path issue #47 exists for, end to end: write a receipt from the spool
+    file and the transcript alone — no store, no hash — and have the verifier
+    accept it against the lane."""
+
+    @pytest.mark.parametrize("lane", LANES, ids=LANE_IDS)
+    def test_a_receipt_written_from_the_transcript_passes_the_lane(
+        self, lane: Lane, tmp_path: Path, capsys
+    ):
+        spool_bytes = _committed(lane, "spool_file").read_bytes()
+        spool = verifier.read_envelope_lines(spool_bytes)
+        document = json.loads((lane.directory / "transcript.json").read_text())
+        attempts = []
+        for n, attempt in enumerate(document["attempts"], start=1):
+            derived = verifier.derive_attempt(spool, attempt["exchanges"])
+            attempts.append(
+                {
+                    "schema_version": "receipt/1.1",
+                    "attempt_id": f"elsewhere-{n}",
+                    "started_at": "2026-10-29T00:00:00Z",
+                    "finished_at": "2026-10-29T00:00:01Z",
+                    "endpoint": "https://another.example.test/ingest",
+                    "sdk_version": "other-implementation 0.0.1",
+                    "operator": "someone-else",
+                    "spool_file_sha256": verifier.sha256_bytes(spool_bytes),
+                    **derived,
+                }
+            )
+        theirs = tmp_path / "theirs.sync.json"
+        theirs.write_text(json.dumps({"session_id": lane.session_id, "attempts": attempts}))
+
+        code = verifier.main(["--lane", str(lane.directory), "--receipt", str(theirs)])
+        assert code == 0, capsys.readouterr().out
 
 
 def test_sha256sums_catches_an_altered_vector(tmp_path: Path):
