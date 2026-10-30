@@ -329,7 +329,8 @@ class TestTheVerifierCatches:
         assert _check(V1, mutate) == {"R10"}
 
     def test_an_overlap(self):
-        assert "R5" in _check(V3, lambda r: _attempt(1)(r)["outcomes"]["duplicate"].append([5, 5]))
+        found = _check(V3, lambda r: _attempt(1)(r)["outcomes"]["duplicate"].append([5, 5]))
+        assert "R5" in found
 
     def test_a_gap(self):
         def mutate(receipt):
@@ -352,10 +353,12 @@ class TestTheVerifierCatches:
         assert "R7" in _check(V3, mutate)
 
     def test_a_halt_that_names_no_rejection(self):
-        assert _check(V1, lambda r: _attempt()(r).update(halted_at_sequence=1)) == {"R8"}
+        found = _check(V1, lambda r: _attempt()(r).update(halted_at_sequence=1))
+        assert found == {"R8"}
 
     def test_a_disposition_that_contradicts_the_outcomes(self):
-        assert "R9" in _check(V1, lambda r: _attempt()(r).update(disposition="fully_accepted"))
+        found = _check(V1, lambda r: _attempt()(r).update(disposition="fully_accepted"))
+        assert "R9" in found
 
     def test_a_duplicate_filed_as_a_rejection(self):
         def mutate(receipt):
@@ -364,10 +367,12 @@ class TestTheVerifierCatches:
         assert "R6" in _check(V1, mutate)
 
     def test_a_missing_bucket(self):
-        assert "R3" in _check(V2, lambda r: _attempt()(r)["outcomes"].pop("not_attempted"))
+        found = _check(V2, lambda r: _attempt()(r)["outcomes"].pop("not_attempted"))
+        assert "R3" in found
 
     def test_another_schema_version(self):
-        assert "R2" in _check(V2, lambda r: _attempt()(r).update(schema_version="receipt/1.0"))
+        found = _check(V2, lambda r: _attempt()(r).update(schema_version="receipt/1.0"))
+        assert "R2" in found
 
     def test_an_exhibit_changed_after_it_was_replayed(self):
         changed = _committed(V3, "spool_file").read_bytes() + b"\n"
