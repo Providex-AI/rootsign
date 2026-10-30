@@ -1,0 +1,56 @@
+{
+  "vector": "v1-contiguous-tamper",
+  "title": "Contiguous tamper: chain verdict TAMPERED, receipt records the store's HASH_CHAIN_BROKEN",
+  "receipt_schema_version": "receipt/1.1",
+  "scenario": {
+    "recorded": "SESSION_OPEN, two ACTION_RECORDs (sequences 1-2), SESSION_CLOSE",
+    "damage": "tool_name of sequence 2 edited in the spool file after recording, before sync",
+    "store": "verifies each ACTION_RECORD's self_hash against its own canonical fields",
+    "sync": "one attempt, batch size 100"
+  },
+  "files": {
+    "spool_file": "spool/sessions/00000001-0005-4000-8000-000000000001.jsonl",
+    "receipt": "spool/receipts/00000001-0005-4000-8000-000000000001.sync.json",
+    "bundle": "bundle/evidence-00000001-0005-4000-8000-000000000001",
+    "transcript": "transcript.json"
+  },
+  "chain": {
+    "verdict": "TAMPERED",
+    "first_invalid_sequence": 2,
+    "missing_ranges": []
+  },
+  "sync_exit_codes": [
+    1
+  ],
+  "attempts": [
+    {
+      "schema_version": "receipt/1.1",
+      "spool_file_sha256": "ba7c94afbf9dcfe96c9f632a5335b04226b02420f4e9d7e1b7181514378cd5af",
+      "record_count": 4,
+      "outcomes": {
+        "accepted": [
+          [
+            1,
+            2
+          ],
+          [
+            4,
+            4
+          ]
+        ],
+        "duplicate": [],
+        "rejected": [
+          {
+            "record": 3,
+            "error_code": "HASH_CHAIN_BROKEN",
+            "retryable": false,
+            "sequence": 2
+          }
+        ],
+        "not_attempted": []
+      },
+      "halted_at_sequence": 2,
+      "disposition": "partial"
+    }
+  ]
+}

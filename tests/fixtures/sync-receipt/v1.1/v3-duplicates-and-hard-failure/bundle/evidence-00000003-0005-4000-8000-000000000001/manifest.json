@@ -1,0 +1,21 @@
+{
+  "bundle_version": "1.0",
+  "generator": "rootsign 0.3.1",
+  "generated_at": "2026-10-21T12:00:00+00:00",
+  "session_id": "00000003-0005-4000-8000-000000000001",
+  "agent": {
+    "agent_id": "00000003-000a-4000-8000-000000000001"
+  },
+  "source": {
+    "backend": "jsonl",
+    "location": "spool/sessions/00000003-0005-4000-8000-000000000001.jsonl"
+  },
+  "verdict": "VALID",
+  "files": {
+    "redaction.json": "79dce68ab1f50b5586b36c823d383ac92d5ad2fe55af227bc31993a66e06e73e",
+    "sync-receipt.json": "eff95953a55ad9999e9511221313795b5a9104c6f750d2aa3e9c00dc7b5553fc",
+    "timeline.json": "90a827927962cc4bfe851e696b449555977743903425f23a9b2414a4899e5b94",
+    "verification.json": "d782db1a5d1cdee1ddf3ea92487da87a517498db66bcb150e1acd64acca8914d"
+  },
+  "compliance": {}
+}

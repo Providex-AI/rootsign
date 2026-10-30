@@ -1,0 +1,57 @@
+{
+  "session": {
+    "session_id": "00000001-0005-4000-8000-000000000001",
+    "agent_id": "00000001-000a-4000-8000-000000000001",
+    "objective": "v1-contiguous-tamper",
+    "user_id": null,
+    "status": "completed",
+    "start_time": "2026-10-21T09:00:00+00:00",
+    "end_time": "2026-10-21T09:00:00+00:00",
+    "action_count": 2,
+    "decision_count": 0,
+    "approval_count": 0
+  },
+  "previews": {
+    "included": false,
+    "note": "payload previews not retained for this session — only the input/output hashes the chain is built from were stored",
+    "withheld_fields": [],
+    "withheld_from_events": 0
+  },
+  "events": [
+    {
+      "type": "SESSION_OPEN",
+      "timestamp": "2026-10-21T09:00:00+00:00",
+      "objective": "v1-contiguous-tamper",
+      "user_id": null
+    },
+    {
+      "type": "ACTION",
+      "timestamp": "2026-10-21T09:00:00+00:00",
+      "sequence_number": 1,
+      "action_id": "00000001-00a1-4000-8000-000000000001",
+      "tool_name": "send_email",
+      "authorization_status": "auto_authorized",
+      "duration_ms": null,
+      "decision_id": null,
+      "input_hash": "99d3a91e7e87eb4997107275226155498555e34322ffebe829e79cb7daeca5b9",
+      "output_hash": "65dc68cb17e842dc89122cf636d5b04f2ced39011bc5886ba0a026da073194c5"
+    },
+    {
+      "type": "ACTION",
+      "timestamp": "2026-10-21T09:00:00+00:00",
+      "sequence_number": 2,
+      "action_id": "00000001-00a1-4000-8000-000000000002",
+      "tool_name": "wire_transfer",
+      "authorization_status": "auto_authorized",
+      "duration_ms": null,
+      "decision_id": null,
+      "input_hash": "7788c1f80817d66503a4acf2e279043f3e9d5d9b9ad4d861ac43d763f8eba5e2",
+      "output_hash": "77c1cff2a71c0e779bf011cae23343c2c559f51ad9436215a5f02289eac8577c"
+    },
+    {
+      "type": "SESSION_CLOSE",
+      "timestamp": "2026-10-21T09:00:00+00:00",
+      "status": "completed"
+    }
+  ]
+}

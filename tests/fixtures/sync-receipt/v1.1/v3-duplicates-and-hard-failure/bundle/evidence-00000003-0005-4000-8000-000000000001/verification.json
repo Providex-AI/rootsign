@@ -1,0 +1,77 @@
+{
+  "verdict": "VALID",
+  "valid": true,
+  "summary": "VALID — 4 records, chain intact",
+  "record_count": 4,
+  "first_invalid_sequence": null,
+  "missing_ranges": [],
+  "error": null,
+  "hash": {
+    "algorithm": "sha256",
+    "canonical_spec": "ADR-001",
+    "note": "Each record's self_hash is recomputed from its canonical fields and checked against the stored value; each record's prev_action_hash must equal its predecessor's self_hash."
+  },
+  "records": [
+    {
+      "sequence_number": 1,
+      "action_id": "00000003-00a1-4000-8000-000000000001",
+      "timestamp": "2026-10-21T09:00:00+00:00",
+      "tool_name": "send_email",
+      "prev_action_hash": null,
+      "self_hash": "8d486afeb3db3e580083aebff950262872a524b8e035073d05a87ec1209b110f",
+      "chain_status": "verified"
+    },
+    {
+      "sequence_number": 2,
+      "action_id": "00000003-00a1-4000-8000-000000000002",
+      "timestamp": "2026-10-21T09:00:00+00:00",
+      "tool_name": "query_db",
+      "prev_action_hash": "8d486afeb3db3e580083aebff950262872a524b8e035073d05a87ec1209b110f",
+      "self_hash": "b68c9676ba97dad8007c2e4fc6d31fe3b329f58d29b44d0a8e8108ad291d14b9",
+      "chain_status": "verified"
+    },
+    {
+      "sequence_number": 3,
+      "action_id": "00000003-00a1-4000-8000-000000000003",
+      "timestamp": "2026-10-21T09:00:00+00:00",
+      "tool_name": "charge_card",
+      "prev_action_hash": "b68c9676ba97dad8007c2e4fc6d31fe3b329f58d29b44d0a8e8108ad291d14b9",
+      "self_hash": "33ea6f37643ecc6a2e0c6dee3ef65f4d1ccb24205045c46cd18365c07a265bd6",
+      "chain_status": "verified"
+    },
+    {
+      "sequence_number": 4,
+      "action_id": "00000003-00a1-4000-8000-000000000004",
+      "timestamp": "2026-10-21T09:00:00+00:00",
+      "tool_name": "write_file",
+      "prev_action_hash": "33ea6f37643ecc6a2e0c6dee3ef65f4d1ccb24205045c46cd18365c07a265bd6",
+      "self_hash": "120c3ea9b583b6165298ef466e3f76cdb2460c8a8167e661fd76310a65ed17bb",
+      "chain_status": "verified"
+    }
+  ],
+  "replay": {
+    "attempts": 2,
+    "latest_attempt_id": "00000003-00a7-4000-8000-000000000002",
+    "latest_disposition": "partial",
+    "finished_at": "2026-10-21T11:00:01+00:00",
+    "endpoint": "https://ingest.example.test/v1/ingest",
+    "spool_file_sha256": "96d09d24e784f95d2b31aa4fb8f33cde2fca909d644d56652577877fcd19d439",
+    "record_count": 6,
+    "halted_at_sequence": 2,
+    "observed_and_rejected": [
+      {
+        "record": 3,
+        "error_code": "VALIDATION_ERROR",
+        "retryable": false,
+        "error_message": "sequence 2 refused by the mock",
+        "sequence": 2
+      }
+    ],
+    "not_attempted": [
+      [
+        5,
+        6
+      ]
+    ]
+  }
+}

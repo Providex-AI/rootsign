@@ -1,0 +1,45 @@
+{
+  "vector": "v1-contiguous-tamper",
+  "description": "Every request rootsign-admin sync sent to the store, and the store's index-aligned answer, per attempt. `records` are spool-file positions; `event_id` binds each answer to its spool line.",
+  "batch_size": 100,
+  "attempts": [
+    {
+      "exchanges": [
+        {
+          "records": [
+            1,
+            2,
+            3,
+            4
+          ],
+          "http_status": 200,
+          "responses": [
+            {
+              "record": 1,
+              "event_id": "00000001-000e-4000-8000-000000000001",
+              "status": "accepted"
+            },
+            {
+              "record": 2,
+              "event_id": "00000001-000e-4000-8000-000000000002",
+              "status": "accepted"
+            },
+            {
+              "record": 3,
+              "event_id": "00000001-000e-4000-8000-000000000003",
+              "status": "rejected",
+              "error_code": "HASH_CHAIN_BROKEN",
+              "retryable": false,
+              "error_message": "self_hash does not match the canonical fields"
+            },
+            {
+              "record": 4,
+              "event_id": "00000001-000e-4000-8000-000000000004",
+              "status": "accepted"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

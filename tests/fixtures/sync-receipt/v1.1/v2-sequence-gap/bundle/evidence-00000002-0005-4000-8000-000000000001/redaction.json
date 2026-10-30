@@ -1,0 +1,12 @@
+{
+  "sentinel": "[REDACTED]",
+  "rule_set": {
+    "name": null,
+    "provenance": "RootSign does not record which redaction rule set was active when a session ran, and it is not derivable from stored records. The paths below are the fields that carry the redaction sentinel in the stored payloads — evidence that redaction happened, not evidence of which rule caused it."
+  },
+  "totals": {
+    "actions_with_redactions": 0,
+    "redacted_fields": 0
+  },
+  "records": []
+}

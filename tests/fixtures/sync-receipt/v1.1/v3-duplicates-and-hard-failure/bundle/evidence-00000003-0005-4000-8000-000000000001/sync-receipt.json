@@ -1,0 +1,87 @@
+{
+  "session_id": "00000003-0005-4000-8000-000000000001",
+  "attempts": [
+    {
+      "schema_version": "receipt/1.1",
+      "attempt_id": "00000003-00a7-4000-8000-000000000001",
+      "started_at": "2026-10-21T10:00:00+00:00",
+      "finished_at": "2026-10-21T10:00:01+00:00",
+      "endpoint": "https://ingest.example.test/v1/ingest",
+      "sdk_version": "0.3.1",
+      "operator": "vector-generator",
+      "spool_file_sha256": "96d09d24e784f95d2b31aa4fb8f33cde2fca909d644d56652577877fcd19d439",
+      "record_count": 6,
+      "outcomes": {
+        "accepted": [
+          [
+            1,
+            2
+          ],
+          [
+            4,
+            4
+          ]
+        ],
+        "duplicate": [],
+        "rejected": [
+          {
+            "record": 3,
+            "error_code": "VALIDATION_ERROR",
+            "retryable": false,
+            "error_message": "sequence 2 refused by the mock",
+            "sequence": 2
+          }
+        ],
+        "not_attempted": [
+          [
+            5,
+            6
+          ]
+        ]
+      },
+      "halted_at_sequence": 2,
+      "disposition": "partial"
+    },
+    {
+      "schema_version": "receipt/1.1",
+      "attempt_id": "00000003-00a7-4000-8000-000000000002",
+      "started_at": "2026-10-21T11:00:00+00:00",
+      "finished_at": "2026-10-21T11:00:01+00:00",
+      "endpoint": "https://ingest.example.test/v1/ingest",
+      "sdk_version": "0.3.1",
+      "operator": "vector-generator",
+      "spool_file_sha256": "96d09d24e784f95d2b31aa4fb8f33cde2fca909d644d56652577877fcd19d439",
+      "record_count": 6,
+      "outcomes": {
+        "accepted": [],
+        "duplicate": [
+          [
+            1,
+            2
+          ],
+          [
+            4,
+            4
+          ]
+        ],
+        "rejected": [
+          {
+            "record": 3,
+            "error_code": "VALIDATION_ERROR",
+            "retryable": false,
+            "error_message": "sequence 2 refused by the mock",
+            "sequence": 2
+          }
+        ],
+        "not_attempted": [
+          [
+            5,
+            6
+          ]
+        ]
+      },
+      "halted_at_sequence": 2,
+      "disposition": "partial"
+    }
+  ]
+}

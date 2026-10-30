@@ -17,6 +17,7 @@ every record in the file it describes without trusting whoever wrote it
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -490,6 +491,46 @@ class TestBundleIntegration:
         assert replay["latest_disposition"] == DISPOSITION_PARTIAL
         assert replay["halted_at_sequence"] == 2
         assert replay["observed_and_rejected"]
+
+    def test_a_fully_synced_session_keeps_its_receipt_in_a_copied_spool_tree(
+        self, monkeypatch, tmp_path: Path, spool: Path, spooled_session, cloud_api_key
+    ):
+        """The clean upload is the case an examiner is handed most often, as a
+        copied spool tree — and the retired `synced/` file used to export with
+        no receipt at all, because only the live `spool/sessions/` shape was
+        recognized (found building the issue #47 vectors)."""
+        from rootsign.sdk.export import RECEIPT_FILE, export_local
+
+        session_id, _ = spooled_session
+        bind_transport(monkeypatch, Endpoint().transport())
+        assert _sync(spool).exit_code == 0
+        copied = tmp_path / "handed-over" / "spool"
+        shutil.copytree(spool, copied)
+
+        bundle = export_local(copied / "synced" / f"{session_id}.jsonl")
+
+        assert RECEIPT_FILE in bundle.documents()
+        assert bundle.verification["replay"]["latest_disposition"] == DISPOSITION_FULLY_ACCEPTED
+
+    def test_a_suffixed_synced_file_is_paired_with_its_own_receipt(
+        self, monkeypatch, spool: Path, spooled_session, cloud_api_key
+    ):
+        """`<id>.1.jsonl` belongs with `<id>.1.sync.json` (ADR-015 D1). Looking
+        the receipt up by session id would hand it the first sync's record."""
+        from rootsign.sdk.export import RECEIPT_FILE, export_local
+
+        session_id, _ = spooled_session
+        bind_transport(monkeypatch, Endpoint().transport())
+        assert _sync(spool).exit_code == 0
+        synced = spool / "synced"
+        shutil.copyfile(synced / f"{session_id}.jsonl", synced / f"{session_id}.1.jsonl")
+        second = load_receipt(receipt_path(session_id, spool, synced=True))
+        second["attempts"][0]["attempt_id"] = "the-second-sync"
+        receipt_path(session_id, spool, synced=True, suffix_index=1).write_text(json.dumps(second))
+
+        bundle = export_local(synced / f"{session_id}.1.jsonl")
+
+        assert bundle.documents()[RECEIPT_FILE]["attempts"][0]["attempt_id"] == "the-second-sync"
 
     def test_the_manifest_hashes_the_receipt_like_every_other_file(
         self, monkeypatch, spool: Path, spooled_session, cloud_api_key

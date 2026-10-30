@@ -1,0 +1,96 @@
+{
+  "vector": "v3-duplicates-and-hard-failure",
+  "title": "Replayed twice with one non-retryable refusal: all four outcome buckets observed",
+  "receipt_schema_version": "receipt/1.1",
+  "scenario": {
+    "recorded": "SESSION_OPEN, four ACTION_RECORDs (sequences 1-4), SESSION_CLOSE",
+    "damage": "none — the chain is intact",
+    "store": "refuses sequence 2 with VALIDATION_ERROR (retryable: false) on every attempt; answers DUPLICATE_EVENT for any event_id it has already accepted",
+    "sync": "two attempts against the same store, batch size 2"
+  },
+  "files": {
+    "spool_file": "spool/sessions/00000003-0005-4000-8000-000000000001.jsonl",
+    "receipt": "spool/receipts/00000003-0005-4000-8000-000000000001.sync.json",
+    "bundle": "bundle/evidence-00000003-0005-4000-8000-000000000001",
+    "transcript": "transcript.json"
+  },
+  "chain": {
+    "verdict": "VALID",
+    "first_invalid_sequence": null,
+    "missing_ranges": []
+  },
+  "sync_exit_codes": [
+    1,
+    1
+  ],
+  "attempts": [
+    {
+      "schema_version": "receipt/1.1",
+      "spool_file_sha256": "96d09d24e784f95d2b31aa4fb8f33cde2fca909d644d56652577877fcd19d439",
+      "record_count": 6,
+      "outcomes": {
+        "accepted": [
+          [
+            1,
+            2
+          ],
+          [
+            4,
+            4
+          ]
+        ],
+        "duplicate": [],
+        "rejected": [
+          {
+            "record": 3,
+            "error_code": "VALIDATION_ERROR",
+            "retryable": false,
+            "sequence": 2
+          }
+        ],
+        "not_attempted": [
+          [
+            5,
+            6
+          ]
+        ]
+      },
+      "halted_at_sequence": 2,
+      "disposition": "partial"
+    },
+    {
+      "schema_version": "receipt/1.1",
+      "spool_file_sha256": "96d09d24e784f95d2b31aa4fb8f33cde2fca909d644d56652577877fcd19d439",
+      "record_count": 6,
+      "outcomes": {
+        "accepted": [],
+        "duplicate": [
+          [
+            1,
+            2
+          ],
+          [
+            4,
+            4
+          ]
+        ],
+        "rejected": [
+          {
+            "record": 3,
+            "error_code": "VALIDATION_ERROR",
+            "retryable": false,
+            "sequence": 2
+          }
+        ],
+        "not_attempted": [
+          [
+            5,
+            6
+          ]
+        ]
+      },
+      "halted_at_sequence": 2,
+      "disposition": "partial"
+    }
+  ]
+}

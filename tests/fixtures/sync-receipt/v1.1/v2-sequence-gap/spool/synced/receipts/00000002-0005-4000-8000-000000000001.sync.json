@@ -1,0 +1,29 @@
+{
+  "session_id": "00000002-0005-4000-8000-000000000001",
+  "attempts": [
+    {
+      "schema_version": "receipt/1.1",
+      "attempt_id": "00000002-00a7-4000-8000-000000000001",
+      "started_at": "2026-10-21T10:00:00+00:00",
+      "finished_at": "2026-10-21T10:00:01+00:00",
+      "endpoint": "https://ingest.example.test/v1/ingest",
+      "sdk_version": "0.3.1",
+      "operator": "vector-generator",
+      "spool_file_sha256": "a8f6fcd0bbef6518fcdd34336996f8b312300d641296c98fae1db67f52a78219",
+      "record_count": 4,
+      "outcomes": {
+        "accepted": [
+          [
+            1,
+            4
+          ]
+        ],
+        "duplicate": [],
+        "rejected": [],
+        "not_attempted": []
+      },
+      "halted_at_sequence": null,
+      "disposition": "fully_accepted"
+    }
+  ]
+}
