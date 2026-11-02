@@ -149,8 +149,12 @@ async def replay_envelopes(
         # must record — discarding them would make the receipt claim records
         # were never attempted when the server had already ruled on them.
         # What stops is *solicitation*: no further batch goes out for this
-        # session, because a chain-linked store that refused sequence N cannot
-        # accept N+1 and asking is the self-DDoS ADR-013 Decision 3 forbids.
+        # session. Not because the store would refuse what follows — spec §7
+        # rule 3 forbids a rejection from aborting later elements, and §8.3
+        # forbids refusing a record for a `prev_action_hash` the store has not
+        # seen, so N+1 would usually be accepted. The reason is ADR-013
+        # Decision 4's resume contract: delivery stays a prefix, so the spool
+        # file alone answers "where does the next run start" (ADR-015 D2).
         if report.failed_index is not None:
             return report
 
