@@ -165,12 +165,16 @@ jobs:
     # job intentionally runs WITHOUT a Postgres service. The
     # ROOTSIGN_SKIP_DB_BOOTSTRAP env var tells the session-autouse fixture
     # in tests/conftest.py to skip alembic / DB connect at session start.
+    #
+    # '1.0' covers the 1.x line, which is what `rootsign[langgraph]` resolves
+    # to today (`langgraph>=0.1` has no cap). Local run against langgraph
+    # 1.2.20 had all 12 contract tests green.
     name: LangGraph contract (langgraph ~=${{ matrix.langgraph-version }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        langgraph-version: ['0.1', '0.2']
+        langgraph-version: ['0.1', '0.2', '1.0']
     env:
       ROOTSIGN_SKIP_DB_BOOTSTRAP: '1'
     steps:
