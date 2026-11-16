@@ -414,3 +414,93 @@ jobs:
       # The python -c checks above ARE the authoritative bare-install gate;
       # the guard-rail + subprocess isolation tests run in the unit-tests job
       # (full env, where the subprocess blocker simulates the missing stack).
+
+  locked-deps-tests:
+    # Every other test job resolves with `pip install -e`, which ignores
+    # uv.lock and installs whatever is newest. So a lockfile-only PR (every
+    # Dependabot PR) went green without anyone running the versions it locks —
+    # #54 did exactly that. This job installs the lockfile itself and runs the
+    # whole suite against it. `--locked` also fails the job if pyproject.toml
+    # changed without a matching `uv lock`.
+    name: Locked dependencies tests (uv.lock)
+    runs-on: ubuntu-latest
+    services:
+      timescaledb:
+        image: timescale/timescaledb:latest-pg16
+        env:
+          POSTGRES_DB: rootsign_dev
+          POSTGRES_USER: rootsign
+          POSTGRES_PASSWORD: rootsign
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+asyncpg://rootsign:rootsign@localhost:5432/rootsign_dev
+      DATABASE_URL_SYNC: postgresql+psycopg2://rootsign:rootsign@localhost:5432/rootsign_dev
+      TEST_DATABASE_URL: postgresql+asyncpg://rootsign:rootsign@localhost:5432/rootsign_test
+      TEST_DATABASE_URL_SYNC: postgresql+psycopg2://rootsign:rootsign@localhost:5432/rootsign_test
+      # Use setup-python's interpreter; never let uv fetch its own.
+      UV_PYTHON_DOWNLOADS: never
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Install uv
+        run: pip install "uv==0.13.6"
+      - name: Install every extra from uv.lock
+        run: |
+          uv sync --locked --all-extras --python 3.12
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+      - name: Bootstrap rootsign_test
+        run: |
+          PGPASSWORD=rootsign psql -h localhost -U rootsign -d rootsign_dev \
+            -c "CREATE DATABASE rootsign_test OWNER rootsign;" || true
+          PGPASSWORD=rootsign psql -h localhost -U rootsign -d rootsign_test \
+            -c "CREATE EXTENSION IF NOT EXISTS timescaledb;"
+      - name: alembic upgrade head
+        run: alembic upgrade head
+      - name: Full suite against the locked versions
+        # Benchmarks stay opt-in, as everywhere else.
+        run: python -m pytest tests/ -m 'not benchmark'
+
+  dependency-audit:
+    # Scans every package in uv.lock against OSV. Dependabot only alerts once
+    # a vulnerable version is on main; this catches one a PR is about to add —
+    # #54 fixed its two alerts but locked httpx2 2.3.0, with four advisories.
+    #
+    # This job can turn red with no code change, when a new advisory lands
+    # against a package already locked. Fix by upgrading it. If the risk is
+    # accepted instead, dismiss the Dependabot alert AND add its GHSA ID below
+    # with the reason, so the two ledgers stay in step. A GHSA ID also
+    # suppresses its PYSEC alias.
+    #
+    # `uv audit` is experimental, hence the exact uv pin.
+    name: Dependency audit (uv.lock)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Install uv
+        run: pip install "uv==0.13.6"
+      - name: uv audit
+        run: |
+          ignores=(
+            # chromadb 1.1.1, via crewai: no upstream fix exists. Dependabot
+            # alerts #2 (not_used), #35, #36, #37 (tolerable_risk).
+            GHSA-f4j7-r4q5-qw2c
+            GHSA-xph7-9rjv-w5fr
+            GHSA-2wm9-hf6c-p5cr
+            GHSA-36p7-vc44-83pf
+            # json-repair 0.25.2: crewai pins it, so the fix is unreachable.
+            # Dependabot alert #16 (tolerable_risk).
+            GHSA-xf7x-x43h-rpqh
+          )
+          args=()
+          for id in "${ignores[@]}"; do args+=(--ignore "$id"); done
+          uv audit --frozen --preview-features audit-command "${args[@]}"
