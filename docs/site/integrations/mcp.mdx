@@ -1,0 +1,259 @@
+---
+title: "Record MCP tool calls with the RootSign proxy and audit server"
+sidebarTitle: "MCP"
+description: "Put RootSign's proxy between any MCP client and server to record every tools/call on a hash chain, and expose the audit log to agents as a read-only MCP server."
+keywords: ["mcp", "model context protocol", "mcp proxy", "tools/call", "audit server", "fastmcp"]
+---
+
+RootSign works at the Model Context Protocol layer, so any agent that uses MCP tools can be recorded without a framework adapter. The **proxy** sits between the agent's MCP client and the MCP server, records each `tools/call`, and forwards it unchanged; the agent only connects to a different URL. The **audit server** goes the other way: it exposes RootSign's own records as read-only MCP tools, so an auditing agent can list sessions and verify chains.
+
+## Install
+
+```bash
+pip install 'rootsign[mcp]'
+```
+
+The proxy speaks MCP's streamable HTTP transport and is tested against servers built with FastMCP from the official MCP Python SDK, with JSON and SSE replies, with and without session IDs.
+
+## See it work
+
+This script runs all three parts on your machine in one process: an ordinary MCP server, the RootSign proxy in front of it, and an MCP client that calls two tools through the proxy. Nothing is mocked; they talk real HTTP to each other on ports 8001 and 8000.
+
+```python demo.py
+from __future__ import annotations
+
+import asyncio
+import os
+from pathlib import Path
+
+import uvicorn
+from mcp import ClientSession
+from mcp.server.fastmcp import FastMCP
+
+import rootsign
+from rootsign.mcp.proxy import create_proxy_app
+
+try:  # mcp >= 1.24
+    from mcp.client.streamable_http import streamable_http_client as connect
+except ImportError:  # older mcp
+    from mcp.client.streamable_http import streamablehttp_client as connect
+
+SERVER_PORT = 8001
+PROXY_PORT = 8000
+
+# 1. An ordinary MCP server.
+billing = FastMCP("billing", log_level="WARNING")
+
+
+@billing.tool()
+def send_invoice(customer_id: str, amount: float) -> str:
+    """Send an invoice to a customer."""
+    return f"invoice sent to {customer_id} for ${amount:,.2f}"
+
+
+@billing.tool()
+def log_payment(customer_id: str, amount: float) -> str:
+    """Record a payment in the ledger."""
+    return f"payment of ${amount:,.2f} recorded for {customer_id}"
+
+
+rootsign.init(agent="mcp-billing-agent", risk_tier="high")
+
+
+async def serve(app, port: int):
+    """Start an ASGI app with uvicorn on 127.0.0.1 and wait until it is up."""
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error"))
+    task = asyncio.create_task(server.serve())
+    while not server.started:
+        await asyncio.sleep(0.05)
+    return server, task
+
+
+async def stop(server, task) -> None:
+    server.should_exit = True
+    await task
+
+
+async def run_agent(url: str) -> None:
+    """3. An ordinary MCP client, pointed at the proxy."""
+    async with connect(url) as (read, write, _):
+        async with ClientSession(read, write) as mcp:
+            await mcp.initialize()
+            for name in ("send_invoice", "log_payment"):
+                result = await mcp.call_tool(name, {"customer_id": "acme-corp", "amount": 1500.0})
+                print(f"tool:  {result.content[0].text}")
+
+
+async def main() -> None:
+    server = await serve(billing.streamable_http_app(), SERVER_PORT)
+
+    # 2. The proxy runs inside a session: every tools/call through it lands on
+    # this session's chain until the proxy stops.
+    async with rootsign.session(objective="invoice acme-corp over MCP") as ctx:
+        proxy = await serve(
+            create_proxy_app(upstream_url=f"http://127.0.0.1:{SERVER_PORT}/mcp"), PROXY_PORT
+        )
+        await run_agent(f"http://127.0.0.1:{PROXY_PORT}/mcp")
+        await stop(*proxy)
+
+    await stop(*server)
+
+    data_dir = Path(os.environ.get("ROOTSIGN_DATA_DIR", "~/.rootsign")).expanduser()
+    target = data_dir / "sessions" / f"{ctx.session_id}.jsonl"
+    print(f"\n{ctx.current_sequence} actions recorded → {target}")
+    print("\nVerify the chain:")
+    print(f"    rootsign verify --local {target}")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+```bash
+python demo.py
+```
+
+```text
+tool:  invoice sent to acme-corp for $1,500.00
+tool:  payment of $1,500.00 recorded for acme-corp
+
+2 actions recorded → ~/.rootsign/sessions/<session_id>.jsonl
+
+Verify the chain:
+    rootsign verify --local ~/.rootsign/sessions/<session_id>.jsonl
+```
+
+### Verify the session
+
+```bash
+rootsign verify --local ~/.rootsign/sessions/<session_id>.jsonl
+```
+
+```text
+VALID ✓  —  2 records, chain intact
+```
+
+## Put the proxy in front of your server
+
+In production the proxy is its own process. Save this as `proxy.py`, point it at your server with `MCP_UPSTREAM_URL`, and change your agent's MCP server URL to `http://127.0.0.1:8000/mcp`:
+
+```python proxy.py
+from __future__ import annotations
+
+import asyncio
+import os
+
+import uvicorn
+
+import rootsign
+from rootsign.mcp.proxy import create_proxy_app
+
+UPSTREAM_URL = os.environ.get("MCP_UPSTREAM_URL", "http://127.0.0.1:8001/mcp")
+
+rootsign.init(agent="mcp-proxied-agent", risk_tier="high")
+
+
+async def main() -> None:
+    async with rootsign.session(objective="proxy MCP tool calls") as ctx:
+        app = create_proxy_app(upstream_url=UPSTREAM_URL)
+        config = uvicorn.Config(app, host="127.0.0.1", port=8000, log_level="warning")
+        await uvicorn.Server(config).serve()
+    print(f"session: {ctx.session_id} ({ctx.current_sequence} actions)")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+```bash
+MCP_UPSTREAM_URL=http://127.0.0.1:8001/mcp python proxy.py
+```
+
+The proxy opens one session at start-up, and every `tools/call` from every client lands on that session's chain until you stop it with Ctrl+C. When it stops, it prints the session ID to verify:
+
+```text
+session: 12fa565a-7e77-4068-ac4a-7b49e33f887a (1 actions)
+```
+
+`create_proxy_app()` also accepts `redaction_config=` to redact arguments and results before they are hashed, and `require_approval=True` to hold each call until a person approves it. Guides for both are on the way; until then the [README](https://github.com/Providex-AI/rootsign#readme) covers them.
+
+## What the proxy records and forwards
+
+| Request | What happens |
+| --- | --- |
+| `tools/call` | Recorded as one `ACTION_RECORD`, then forwarded. The client gets the server's JSON-RPC response as `application/json`. |
+| Everything else (`initialize`, `tools/list`, notifications) | Forwarded unchanged and not recorded. Status codes, bodies and headers such as `Mcp-Session-Id` pass through as the server sent them. |
+| `GET` and `DELETE` on the endpoint | Relayed, so server-initiated message streams and session termination work through the proxy. |
+
+For a `tools/call`, `tool_name` is the MCP tool name and the input is the call's `arguments`, exactly as the client sent them:
+
+```json
+{"customer_id": "acme-corp", "amount": 1500.0}
+```
+
+The output is the server's whole JSON-RPC response under `result`, so the record shows exactly what the agent received:
+
+```json
+{"result": {"jsonrpc": "2.0", "id": 1, "result": {"content": [{"type": "text", "text": "invoice sent to acme-corp for $1,500.00"}], "structuredContent": {"result": "invoice sent to acme-corp for $1,500.00"}, "isError": false}}}
+```
+
+If the server answers a `tools/call` with an HTTP error, the call is still recorded, with an empty output, and the client receives the server's error response. If the server redirects, the proxy follows the redirect itself, so a client can never be sent around the proxy to the server's real address.
+
+## Let an agent query the audit log
+
+The audit server exposes RootSign's records as four read-only MCP tools:
+
+| Tool | Returns |
+| --- | --- |
+| `list_sessions(agent_id=None, limit=20)` | Recent sessions, optionally for one agent |
+| `query_session_chain(session_id)` | A session's action records in order |
+| `verify_session_chain(session_id)` | The same integrity check `rootsign verify` runs |
+| `get_approval_records(action_id)` | Human approval records for one action |
+
+<Note>
+  The audit server reads the **PostgreSQL** store, so it needs `pip install 'rootsign[mcp,postgres]'` and a database set up with `rootsign-admin`. It cannot read JSONL session files.
+</Note>
+
+Save this as `audit_server.py`:
+
+```python audit_server.py
+from rootsign.mcp.server import create_server_app
+
+app = create_server_app()  # serves MCP at /mcp
+```
+
+Run it with uvicorn and connect any MCP client to `http://127.0.0.1:8002/mcp`:
+
+```bash
+uvicorn audit_server:app --port 8002
+```
+
+## How interception works
+
+The proxy is an ASGI app built with FastAPI. It reads each JSON-RPC request, and for `tools/call` it records the call through the same code path as `@rootsign.trace`, with redaction applied before hashing, then forwards it. The session is found the same way as for framework tools: from `rootsign.session()` when the proxy runs inside one, or from `ctx=` and `client=` passed to `create_proxy_app()`. The design is in [ADR-010](https://github.com/Providex-AI/rootsign/blob/main/docs/adr/ADR-010-mcp-interception-strategy.md).
+
+## Limitations
+
+<Warning>
+  **Start the proxy inside a session.** `create_proxy_app()` itself does not need one, but each `tools/call` does. Without an active `rootsign.session()` or explicit `ctx=` and `client=`, the call fails with `RootSignNotInitializedError`.
+</Warning>
+
+- **Streamable HTTP only.** The proxy is an HTTP service, so it cannot sit in front of an MCP server that a client launches over stdio.
+- **Messages a server sends before a tool's result are dropped.** If a server streams progress notifications ahead of a `tools/call` result, the proxy returns only the result.
+- **One session per proxy process.** All clients share it, so their calls interleave on one chain.
+
+## Full example
+
+Both scripts are in [`examples/mcp-proxy`](https://github.com/Providex-AI/rootsign/tree/main/examples/mcp-proxy) in the repository, and CI runs `demo.py`.
+
+<Columns cols={3}>
+  <Card title="LangGraph and LangChain" icon="workflow" href="/integrations/langgraph">
+    Instrument the tools in a LangGraph agent.
+  </Card>
+  <Card title="CrewAI" icon="users" href="/integrations/crewai">
+    Instrument the tools of a CrewAI agent.
+  </Card>
+  <Card title="Any Python function" icon="code" href="/integrations/python">
+    Record calls to functions that are not framework tools.
+  </Card>
+</Columns>

@@ -233,7 +233,7 @@ def create_proxy_app(
             client=client,
             ctx=ctx,
         )
-        # uvicorn rootsign.mcp.proxy:app --host 0.0.0.0 --port 8000
+        # in your own module, e.g. proxy.py: `uvicorn proxy:app --port 8000`
 
     `tools/call` requests are intercepted (ACTION_RECORD emitted, forwarded
     upstream) and answered with the upstream's JSON-RPC response as
