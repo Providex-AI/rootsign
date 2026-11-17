@@ -5,9 +5,10 @@ Subcommands:
 * `rootsign version` — print the installed package version.
 * `rootsign verify <session_id>` — verify the tamper-evident hash chain for
   a session stored in the configured Postgres. Exit 0 = VALID, 1 = TAMPERED
-  (a record was altered), 2 = INCOMPLETE (a record is missing); usage errors
-  also exit 1. The three-verdict vocabulary is ADR-013 Decision 4b; see also
-  Sprint Plan §3.3 and ADR-001/ADR-005.
+  (a record was altered), 2 = INCOMPLETE (a record is missing), 3 = nothing
+  could be verified (unknown session, missing/unreadable/empty file, bad
+  arguments). The three-verdict vocabulary is ADR-013 Decision 4b; see also
+  ADR-001/ADR-005.
 * `rootsign verify --local <path.jsonl>` — verify a session stored offline
   in a JSONL file. No DB required.
 * `rootsign export <session_id>` — write a self-contained evidence bundle for
@@ -26,10 +27,12 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, NoReturn, Optional
 from uuid import UUID
 
+import click
 import typer
+from typer.core import TyperGroup
 
 # A test seam, deliberately NOT an import. Tests monkeypatch
 # `rootsign.sdk.cli.AsyncSessionLocal` to bind the CLI to the test engine
@@ -46,7 +49,41 @@ import typer
 # `_session_factory()` resolves the real factory on demand instead.
 AsyncSessionLocal: Any = None
 
+#: `verify`'s exit code when there was nothing it could verify: an unknown
+#: session ID, a session file that is missing, unreadable or empty, or bad
+#: arguments. Kept apart from the verdict codes (0/1/2) so a CI job never reads
+#: "you pointed me at the wrong thing" as VALID or as TAMPERED. Before this, an
+#: unknown session ID reported VALID with 0 records and exit 0.
+EXIT_CANNOT_VERIFY = 3
+
+
+class _RootSignGroup(TyperGroup):
+    """Command-line usage errors exit 3 instead of Click's default 2.
+
+    Click exits 2 on a mistyped option or command, which is `verify`'s
+    INCOMPLETE code: `rootsign verify --lcal x.jsonl` in a cron job would read
+    as "records missing". Click carries the code on the exception and Typer
+    exits with it, so setting it here is enough. Errors in the top-level
+    options (`make_context`) and in subcommands (`invoke`) are both covered.
+    """
+
+    def make_context(self, *args: Any, **kwargs: Any) -> Any:
+        try:
+            return super().make_context(*args, **kwargs)
+        except click.UsageError as exc:
+            exc.exit_code = EXIT_CANNOT_VERIFY
+            raise
+
+    def invoke(self, ctx: Any) -> Any:
+        try:
+            return super().invoke(ctx)
+        except click.UsageError as exc:
+            exc.exit_code = EXIT_CANNOT_VERIFY
+            raise
+
+
 app = typer.Typer(
+    cls=_RootSignGroup,
     name="rootsign",
     help="RootSign — tamper-evident provenance logging for AI agents (powered by Providex AI).",
     add_completion=False,
@@ -90,6 +127,11 @@ def version() -> None:
         typer.echo("rootsign (development install — version unknown)")
 
 
+def _cannot_verify(message: str) -> NoReturn:
+    typer.echo(f"Error: {message}", err=True)
+    raise typer.Exit(code=EXIT_CANNOT_VERIFY)
+
+
 @app.command()
 def verify(
     session_id: Optional[str] = typer.Argument(None, help="Session ID to verify (UUID)."),
@@ -123,22 +165,72 @@ def verify(
         try:
             parsed = UUID(session_id)
         except ValueError:
-            typer.echo(f"Error: {session_id!r} is not a valid UUID.", err=True)
-            raise typer.Exit(code=1) from None
+            _cannot_verify(f"{session_id!r} is not a valid UUID.")
         _verify_remote(parsed, verbose)
         return
-    typer.echo("Error: provide a session_id or --local path", err=True)
-    raise typer.Exit(code=1)
+    _cannot_verify("provide a session_id or --local path")
 
 
 def _verify_local(path: Path, verbose: bool) -> None:
     from rootsign.sdk.chain import verify_session_local
     from rootsign.verdict import exit_code
 
+    path = path.expanduser()
+    if not path.is_file():
+        _cannot_verify(f"no session file at {path}")
+    try:
+        lines = [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    except (OSError, UnicodeDecodeError) as exc:
+        _cannot_verify(f"cannot read {path}: {exc}")
+    if not lines:
+        # An empty file holds no evidence either way. The library reports it
+        # as TAMPERED (it cannot tell truncation from a blank file), which is
+        # the right answer for a verifier, but on the CLI it would send a
+        # cron job chasing tampering that a mistyped path explains.
+        _cannot_verify(f"{path} is empty; there are no records to verify")
+
     result = verify_session_local(str(path))
-    _print_result(result, verbose=verbose)
+    _print_result(result)
+    if verbose:
+        _print_records(_local_records(lines))
     _spool_breadcrumb(path)
     raise typer.Exit(code=exit_code(result.verdict))
+
+
+def _local_records(lines: list[str]) -> list[dict[str, Any]]:
+    """The ACTION_RECORD lines of a session file, in sequence order, for --verbose.
+
+    Same selection as `verify_session_local`: a line without `event_type` is a
+    legacy store-export record and counts as an action. Lines that do not parse
+    are skipped here; the verdict above already reports them.
+    """
+    import json
+
+    records = []
+    for line in lines:
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if (
+            isinstance(record, dict)
+            and record.get("event_type", "ACTION_RECORD") == "ACTION_RECORD"
+        ):
+            records.append(record)
+    return sorted(records, key=lambda r: r.get("sequence_number") or 0)
+
+
+def _print_records(records: list[dict[str, Any]]) -> None:
+    """--verbose: each action's sequence, tool, and the two hashes that link it."""
+    if not records:
+        return
+    typer.echo("\n  Records:")
+    for r in records:
+        typer.echo(f"    #{r.get('sequence_number')}  {r.get('tool_name')}")
+        typer.echo(f"        self_hash         {r.get('self_hash')}")
+        typer.echo(
+            f"        prev_action_hash  {r.get('prev_action_hash') or '(none: first record)'}"
+        )
 
 
 def _spool_breadcrumb(path: Path) -> None:
@@ -178,18 +270,44 @@ def _verify_remote(session_id: UUID, verbose: bool) -> None:
     # install hint and exit, not surface from inside asyncio.run().
     factory = _session_factory()
 
+    from rootsign.crud import action as action_crud
+    from rootsign.crud import session as session_crud
+
     async def _run():
         async with factory() as db:
-            return await verify_session(session_id, db)
+            # A session ID the database has never seen verifies as an empty,
+            # VALID chain at the library level. Catch it here, before a typo
+            # in a cron job reads as a clean audit.
+            if await session_crud.get(db, session_id) is None:
+                return None, []
+            result = await verify_session(session_id, db)
+            chain = (
+                await action_crud.get_session_chain(db, session_id=session_id) if verbose else []
+            )
+            return result, chain
 
     from rootsign.verdict import exit_code
 
-    result = asyncio.run(_run())
-    _print_result(result, verbose=verbose)
+    result, chain = asyncio.run(_run())
+    if result is None:
+        _cannot_verify(f"no session {session_id} in the database")
+    _print_result(result)
+    if verbose:
+        _print_records(
+            [
+                {
+                    "sequence_number": a.sequence_number,
+                    "tool_name": a.tool_name,
+                    "self_hash": a.self_hash,
+                    "prev_action_hash": a.prev_action_hash,
+                }
+                for a in chain
+            ]
+        )
     raise typer.Exit(code=exit_code(result.verdict))
 
 
-def _print_result(result, *, verbose: bool) -> None:
+def _print_result(result) -> None:
     from rootsign.verdict import Verdict
 
     if result.verdict is Verdict.INCOMPLETE:
@@ -227,11 +345,6 @@ def _print_result(result, *, verbose: bool) -> None:
             )
         )
         typer.echo(f"  Session:  {result.session_id}")
-        if verbose and result.record_count > 0:
-            # Verbose detail is only meaningful for local JSONL verification
-            # right now — the DB path returns aggregate verdict only. Skip
-            # the per-record breakdown gracefully when unavailable.
-            typer.echo("  (per-record detail not yet implemented for DB path)")
         return
 
     typer.echo(

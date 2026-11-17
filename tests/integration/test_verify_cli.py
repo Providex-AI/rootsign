@@ -145,14 +145,60 @@ class TestVerifyCLI:
         assert result.exit_code == 1, result.output
         assert "TAMPERED" in result.output
 
+    async def test_unknown_session_exits_3_not_valid(self, clean_db, patched_cli_session):
+        """A session ID the database has never seen used to report
+        `VALID — 0 records` and exit 0, so a mistyped ID in a cron job read as
+        a clean audit. It is "nothing to verify": exit 3, one line."""
+        unknown = uuid4()
+
+        result = await asyncio.to_thread(runner.invoke, app, ["verify", str(unknown)])
+
+        assert result.exit_code == 3, result.output
+        assert f"no session {unknown} in the database" in result.output
+        assert "VALID" not in result.output
+
+    async def test_verbose_lists_each_record_and_its_link(
+        self, clean_db, seeded_agent, patched_cli_session
+    ):
+        handler = IngestHandler(db=clean_db, idempotency=IdempotencyStore())
+        session_id = uuid4()
+        await handler.handle(
+            _envelope(
+                event_type="SESSION_OPEN",
+                agent_id=seeded_agent.agent_id,
+                session_id=session_id,
+                payload={"objective": "verify cli verbose"},
+            )
+        )
+        for i in range(2):
+            await handler.handle(
+                _envelope(
+                    event_type="ACTION_RECORD",
+                    agent_id=seeded_agent.agent_id,
+                    session_id=session_id,
+                    payload=_action_payload(f"tool_{i}"),
+                )
+            )
+        await clean_db.commit()
+        chain = await action_crud.get_session_chain(clean_db, session_id=session_id)
+
+        result = await asyncio.to_thread(runner.invoke, app, ["verify", str(session_id), "-v"])
+
+        assert result.exit_code == 0, result.output
+        assert "not yet implemented" not in result.output
+        assert "#1  tool_0" in result.output and "#2  tool_1" in result.output
+        assert chain[0].self_hash in result.output
+        assert f"prev_action_hash  {chain[0].self_hash}" in result.output
+
 
 class TestVerifyBadInput:
     """audit #11a: `verify <bad-uuid>` must give a clean one-line error, not a
-    raw ValueError traceback (matching how `approve` already handles it)."""
+    raw ValueError traceback (matching how `approve` already handles it). Bad
+    arguments are "nothing to verify", so they exit 3, never a verdict code."""
 
-    def test_bad_uuid_exits_1_with_clean_message(self):
+    def test_bad_uuid_exits_3_with_clean_message(self):
         # Sync invoke is fine — parsing fails before the CLI's asyncio.run.
         result = runner.invoke(app, ["verify", "not-a-uuid"])
-        assert result.exit_code == 1
+        assert result.exit_code == 3
         assert "not a valid UUID" in result.output
         assert "Traceback" not in result.output
