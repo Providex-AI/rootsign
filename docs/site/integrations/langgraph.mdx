@@ -1,0 +1,249 @@
+---
+title: "Record LangGraph and LangChain tool calls"
+sidebarTitle: "LangGraph and LangChain"
+description: "Instrument the tools in a LangGraph agent with rootsign.wrap_tools() so every ToolNode call lands on a tamper-evident hash chain, with no change to your graph."
+keywords: ["langgraph", "langchain", "ToolNode", "wrap_tools", "BaseTool", "agent audit trail"]
+---
+
+RootSign records every call to a LangChain `BaseTool`, whether LangGraph's `ToolNode` makes the call or your own code does. You pass your tool list through `rootsign.wrap_tools()`, open a `rootsign.session()` around the run, and the graph runs as before. Tool names, descriptions and argument schemas are untouched, so the model sees the same tools.
+
+## Supported versions
+
+| LangGraph | Status |
+| --- | --- |
+| 0.2.x | Tested in CI |
+| 0.6.x | Tested in CI |
+| 1.x | Tested in CI |
+
+The contract suite runs on Python 3.12. See [supported Python versions](/#status-and-supported-versions) for the rest of the SDK.
+
+## Install
+
+```bash
+pip install 'rootsign[langgraph]'
+```
+
+## Instrument your agent
+
+This is a complete agent. It runs offline because the `model` node is scripted: it asks for two tools, then answers. Everything else is a normal LangGraph graph with `ToolNode` and `tools_condition`, which is the path RootSign intercepts in a production agent.
+
+```python agent.py
+from __future__ import annotations
+
+import asyncio
+import os
+from pathlib import Path
+
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.tools import tool
+from langgraph.graph import START, MessagesState, StateGraph
+from langgraph.prebuilt import ToolNode, tools_condition
+
+import rootsign
+
+rootsign.init(agent="langgraph-invoice-agent", risk_tier="high", framework="langgraph")
+
+
+@tool
+async def send_invoice(customer_id: str, amount: float) -> str:
+    """Send an invoice to a customer."""
+    return f"invoice sent to {customer_id} for ${amount:,.2f}"
+
+
+@tool
+async def log_payment(customer_id: str, amount: float) -> str:
+    """Record a payment in the ledger."""
+    return f"payment of ${amount:,.2f} recorded for {customer_id}"
+
+
+def scripted_model(state: MessagesState) -> dict:
+    """Stands in for an LLM: ask for both tools, then answer once they ran."""
+    if not any(isinstance(m, ToolMessage) for m in state["messages"]):
+        return {
+            "messages": [
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": "send_invoice",
+                            "args": {"customer_id": "acme-corp", "amount": 1500.0},
+                            "id": "call_1",
+                        },
+                        {
+                            "name": "log_payment",
+                            "args": {"customer_id": "acme-corp", "amount": 1500.0},
+                            "id": "call_2",
+                        },
+                    ],
+                )
+            ]
+        }
+    return {"messages": [AIMessage(content="Invoice sent and payment recorded for acme-corp.")]}
+
+
+def build_graph(tools: list):
+    graph = StateGraph(MessagesState)
+    graph.add_node("model", scripted_model)
+    graph.add_node("tools", ToolNode(tools))
+    graph.add_edge(START, "model")
+    graph.add_conditional_edges("model", tools_condition)
+    graph.add_edge("tools", "model")
+    return graph.compile()
+
+
+async def main() -> None:
+    async with rootsign.session(objective="invoice acme-corp and record payment") as ctx:
+        graph = build_graph(rootsign.wrap_tools([send_invoice, log_payment]))
+        result = await graph.ainvoke(
+            {
+                "messages": [
+                    HumanMessage(content="Invoice acme-corp for $1,500 and log the payment.")
+                ]
+            }
+        )
+        for message in result["messages"]:
+            if isinstance(message, ToolMessage):
+                print(f"tool:  {message.content}")
+        print(f"agent: {result['messages'][-1].content}")
+
+    data_dir = Path(os.environ.get("ROOTSIGN_DATA_DIR", "~/.rootsign")).expanduser()
+    target = data_dir / "sessions" / f"{ctx.session_id}.jsonl"
+    print(f"\n{ctx.current_sequence} actions recorded → {target}")
+    print("\nVerify the chain:")
+    print(f"    rootsign verify --local {target}")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+The three RootSign lines are `rootsign.init(...)`, `async with rootsign.session(...)`, and `rootsign.wrap_tools([...])` around the list you give `ToolNode`. To use a real model, replace `scripted_model` with a node that calls a chat model bound to the same tools; the RootSign lines stay the same.
+
+Run it:
+
+```bash
+python agent.py
+```
+
+```text
+tool:  invoice sent to acme-corp for $1,500.00
+tool:  payment of $1,500.00 recorded for acme-corp
+agent: Invoice sent and payment recorded for acme-corp.
+
+2 actions recorded → ~/.rootsign/sessions/<session_id>.jsonl
+
+Verify the chain:
+    rootsign verify --local ~/.rootsign/sessions/<session_id>.jsonl
+```
+
+## Verify the session
+
+```bash
+rootsign verify --local ~/.rootsign/sessions/<session_id>.jsonl
+```
+
+```text
+VALID ✓  —  2 records, chain intact
+```
+
+The model's decisions and the final answer are not recorded. RootSign records tool calls: what ran, with which arguments, and what it returned.
+
+## Two ways to instrument tools
+
+Both produce the same records. Use whichever fits where your tools are defined.
+
+<CodeGroup>
+
+```python Wrap a list
+tools = rootsign.wrap_tools([send_invoice, log_payment])
+tool_node = ToolNode(tools)
+```
+
+```python Decorate one tool
+@rootsign.trace()
+@tool
+async def send_invoice(customer_id: str, amount: float) -> str:
+    """Send an invoice to a customer."""
+    ...
+```
+
+</CodeGroup>
+
+`rootsign.trace()` must sit above `@tool`, so it receives the finished `BaseTool`. A tool that is already instrumented is skipped by `wrap_tools()`, so it is never recorded twice.
+
+## LangChain tools outside LangGraph
+
+Instrumentation lives on the tool object, so calls you make yourself are recorded too:
+
+```python lookup.py
+import asyncio
+
+from langchain_core.tools import tool
+
+import rootsign
+
+rootsign.init(agent="order-lookup")
+
+
+@tool
+async def lookup_order(order_id: str) -> str:
+    """Look up an order."""
+    return f"order {order_id}: shipped"
+
+
+async def main() -> None:
+    async with rootsign.session(objective="look up an order") as ctx:
+        [lookup] = rootsign.wrap_tools([lookup_order])
+        print(await lookup.ainvoke({"order_id": "A-1001"}))
+    print(ctx.session_id)
+
+
+asyncio.run(main())
+```
+
+```text
+order A-1001: shipped
+540c4a98-002f-458d-ad84-bd61044840bb
+```
+
+Both `.ainvoke()` and `.invoke()` are recorded, once per call. The repository tests this with LangGraph; other LangChain runners that call `.invoke()` or `.ainvoke()` on the tool take the same path.
+
+## What gets recorded
+
+Each call adds one `ACTION_RECORD` with the tool's `name` as `tool_name`. The input is whatever the tool was called with:
+
+- **From `ToolNode`**, LangGraph passes the full tool call, so the arguments sit inside it along with the call ID:
+
+  ```json
+  {"args": [{"name": "send_invoice", "args": {"customer_id": "acme-corp", "amount": 1500.0}, "id": "call_1", "type": "tool_call"}], "kwargs": {}}
+  ```
+
+- **From your own code**, it holds the dictionary you passed, for example `{"args": [{"order_id": "A-1001"}], "kwargs": {}}`.
+
+If the tool raises, the call is still recorded, with an empty output, and the exception reaches your graph unchanged. If RootSign cannot write the record, it logs a warning and the tool call completes normally.
+
+## How interception works
+
+`wrap_tools()` replaces `.invoke` and `.ainvoke` on each tool instance in place and returns the same objects, so the tools stay `BaseTool` instances and `ToolNode` accepts them as before. The session and storage are looked up at each call, not when you wrap the tools, so you can build tools at import time. The design is in [ADR-004](https://github.com/Providex-AI/rootsign/blob/main/docs/adr/ADR-004-langgraph-interception-strategy.md).
+
+## Limitations
+
+<Warning>
+  **Calls must happen inside a session.** A wrapped tool called outside `async with rootsign.session(...)` raises `RootSignNotInitializedError`, unless you pass `ctx=` and `client=` to `wrap_tools()` yourself.
+</Warning>
+
+- **Human approval is not available on `BaseTool`.** `@rootsign.trace(require_approval=True)` on a LangChain tool raises `NotImplementedError`. Put the approval on the plain function the tool calls instead.
+- **Prefer `await tool.ainvoke()` in async code.** A sync `.invoke()` inside a running event loop works, because RootSign writes the record from a worker thread. On the PostgreSQL backend, do not share a SQLAlchemy `AsyncSession` across that boundary.
+
+## Full example
+
+The agent above is [`examples/langgraph-jsonl`](https://github.com/Providex-AI/rootsign/tree/main/examples/langgraph-jsonl) in the repository, and CI runs it against every LangGraph line listed above. For a ReAct agent with a real OpenAI model on PostgreSQL, see [`examples/langgraph-invoice-agent`](https://github.com/Providex-AI/rootsign/tree/main/examples/langgraph-invoice-agent).
+
+<Columns cols={2}>
+  <Card title="Any Python function" icon="code" href="/integrations/python">
+    Record calls to functions that are not LangChain tools.
+  </Card>
+  <Card title="How it works" icon="network" href="/how-it-works">
+    What the hash covers and what each verdict means.
+  </Card>
+</Columns>

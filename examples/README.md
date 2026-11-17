@@ -5,9 +5,10 @@ Self-contained, runnable apps demonstrating `@rootsign.trace` end-to-end.
 | Example | Framework | What it does |
 |---|---|---|
 | [`quickstart-jsonl`](quickstart-jsonl/) | none (plain `@rootsign.trace`) | **Start here.** Two traced tool calls, zero config — no Docker, no database, no API key. Ends in `rootsign verify --local` → `VALID ✓`. |
+| [`langgraph-jsonl`](langgraph-jsonl/) | LangGraph | A LangGraph graph with `ToolNode` and a scripted model, so it needs no database and no API key. Ends in `rootsign verify --local` → `VALID ✓`. |
 | [`langgraph-invoice-agent`](langgraph-invoice-agent/) | LangGraph + OpenAI | A ReAct agent with three tools (`send_invoice`, `log_payment`, `notify_customer`). Every tool call lands on the hash chain. Verify with `rootsign verify <session-id>`. |
 
-More examples (CrewAI, AutoGen) coming as the SDK lands those integrations. PRs welcome.
+More examples (CrewAI, MCP) are on the way. PRs welcome.
 
 ## Prerequisites for any example
 

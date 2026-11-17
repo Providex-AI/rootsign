@@ -1,0 +1,109 @@
+---
+title: "Record calls to any Python function with @rootsign.trace"
+sidebarTitle: "Any Python function"
+description: "Use the @rootsign.trace() decorator to put calls to any Python function on a RootSign hash chain, with no agent framework required."
+keywords: ["rootsign.trace", "decorator", "python", "custom agent", "tool calls"]
+---
+
+`@rootsign.trace()` records calls to any Python function, so you can audit a hand-written agent, a script, or the tools of a framework RootSign has no adapter for. Each call to a decorated function adds one hash-chained `ACTION_RECORD` with its arguments and its result.
+
+No extra is needed:
+
+```bash
+pip install rootsign
+```
+
+## Instrument your functions
+
+```python tools.py
+import asyncio
+
+import rootsign
+
+rootsign.init(agent="support-agent", risk_tier="high")
+
+
+@rootsign.trace()
+def lookup_customer(customer_id: str) -> dict:
+    return {"id": customer_id, "tier": "gold"}
+
+
+@rootsign.trace(tool_name="refund")
+async def issue_refund(customer_id: str, amount: float) -> str:
+    raise RuntimeError("payment provider unavailable")
+
+
+async def main() -> None:
+    async with rootsign.session(objective="handle a refund request") as ctx:
+        print(await lookup_customer("acme-corp"))
+        try:
+            await issue_refund("acme-corp", 20.0)
+        except RuntimeError as error:
+            print(f"refund failed: {error}")
+    print(ctx.session_id)
+
+
+asyncio.run(main())
+```
+
+```bash
+python tools.py
+```
+
+```text
+{'id': 'acme-corp', 'tier': 'gold'}
+refund failed: payment provider unavailable
+92cfe80f-68ce-48b4-a22e-296da8179dca
+```
+
+## Verify the session
+
+```bash
+rootsign verify --local ~/.rootsign/sessions/<session_id>.jsonl
+```
+
+```text
+VALID ✓  —  2 records, chain intact
+```
+
+## What gets recorded
+
+| Call | `tool_name` | `input_redacted` | `output_redacted` |
+| --- | --- | --- | --- |
+| `lookup_customer("acme-corp")` | `lookup_customer` | `{"args": ["acme-corp"], "kwargs": {}}` | `{"result": {"id": "acme-corp", "tier": "gold"}}` |
+| `issue_refund("acme-corp", 20.0)` | `refund` | `{"args": ["acme-corp", 20.0], "kwargs": {}}` | `null` |
+
+- `tool_name` defaults to the function's name. Pass `tool_name=` to record a different one.
+- Positional and keyword arguments are recorded separately, as you passed them.
+- When the function raises, the call is still recorded with an empty output, and the exception reaches your code unchanged. The error message itself is not recorded.
+
+## The decorated function is async
+
+<Warning>
+  `@rootsign.trace()` always returns an async function, even when the function you decorate is synchronous. Call it with `await`, as `lookup_customer` is called above. Calling it without `await` returns a coroutine and nothing runs or gets recorded.
+</Warning>
+
+Calls must happen inside `async with rootsign.session(...)`. Outside a session, the call raises `RootSignNotInitializedError` with the two lines that fix it.
+
+## Options
+
+| Argument | What it does |
+| --- | --- |
+| `tool_name` | Name to record instead of the function's `__name__` |
+| `redaction_config` | Redacts arguments and results before they are hashed and stored |
+| `require_approval` | Holds the call until a person approves it with `rootsign approve` |
+
+Redaction and human approval each get their own guide; until those pages are published, the [README](https://github.com/Providex-AI/rootsign#readme) covers both.
+
+## LangChain and CrewAI tools
+
+If you put `@rootsign.trace()` on a LangChain `BaseTool` or a CrewAI tool, RootSign detects it and instruments the tool in place instead, so it stays a tool your framework accepts. For tool lists, use `rootsign.wrap_tools()` for LangChain and LangGraph, or `rootsign.wrap_crewai_tools()` for CrewAI.
+
+<Columns cols={2}>
+  <Card title="LangGraph and LangChain" icon="workflow" href="/integrations/langgraph">
+    Instrument the tools in a LangGraph agent.
+  </Card>
+  <Card title="How it works" icon="network" href="/how-it-works">
+    What the hash covers and what each verdict means.
+  </Card>
+</Columns>
