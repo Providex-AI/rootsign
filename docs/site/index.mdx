@@ -36,7 +36,7 @@ RootSign is built by [Providex AI](https://getprovidex.com) and released under t
 | Integration | How you instrument it | Install |
 | --- | --- | --- |
 | [LangGraph and LangChain tools](/integrations/langgraph) | `rootsign.wrap_tools([...])` on `BaseTool` instances | `pip install 'rootsign[langgraph]'` |
-| CrewAI | `rootsign.wrap_crewai_tools([...])` | `pip install 'rootsign[crewai]'` |
+| [CrewAI](/integrations/crewai) | `rootsign.wrap_crewai_tools([...])` | `pip install 'rootsign[crewai]'` |
 | Any MCP agent | A proxy that records every `tools/call` | `pip install 'rootsign[mcp]'` |
 | [Any Python function](/integrations/python) | `@rootsign.trace()` | `pip install rootsign` |
 
