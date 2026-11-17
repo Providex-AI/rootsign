@@ -266,35 +266,6 @@ wheels = [
 ]
 
 [[package]]
-name = "autogen-agentchat"
-version = "0.7.5"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "autogen-core" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/e5/b6/df2f835ce3aaaa2716a3dfbbd4ab8855839184f08b35ce0baa23b26a1885/autogen_agentchat-0.7.5.tar.gz", hash = "sha256:8d9c718db52ef24a518806b3a0ef848f0e4c1902877675dc0abed73a8e6e7755", size = 147716, upload-time = "2025-09-30T06:16:14.413Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/9e/82/23490a70837d77d691948863d393cef71a06d36903249f635b28f579292b/autogen_agentchat-0.7.5-py3-none-any.whl", hash = "sha256:d19ca8ec26cb15e071a56c4269140aea2bf3c718bdc7e06f6677af9a905815ba", size = 119302, upload-time = "2025-09-30T06:16:12.895Z" },
-]
-
-[[package]]
-name = "autogen-core"
-version = "0.7.5"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "jsonref" },
-    { name = "opentelemetry-api" },
-    { name = "pillow" },
-    { name = "protobuf" },
-    { name = "pydantic" },
-    { name = "typing-extensions" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/b1/11/fea52bf3541c5308bed1ee9b9b3596fa510b2c5db893d32b649d22f02b87/autogen_core-0.7.5.tar.gz", hash = "sha256:70c2871389f1d0a7f6db8ef78717a51b7ce877ff4a08a836b7758d604dece203", size = 101980, upload-time = "2025-09-30T06:16:25.957Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/33/83/8ad899fca9dd2d2b3e5e37be13dd9e6aee3e53a621041b0624d74b07e1ee/autogen_core-0.7.5-py3-none-any.whl", hash = "sha256:4f4a0d3b88a36da75b2ef0d40be2d5e3a207cae7f7d951511e498ad1d68f8ef4", size = 101874, upload-time = "2025-09-30T06:16:24.306Z" },
-]
-
-[[package]]
 name = "backoff"
 version = "2.2.1"
 source = { registry = "https://pypi.org/simple" }
@@ -2746,18 +2717,6 @@ wheels = [
 ]
 
 [[package]]
-name = "pyautogen"
-version = "0.10.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "autogen-agentchat" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/85/34/329a2be17d87c3884e3f59acfaa3baf1d0efc6b84bccc5b08677adb6f3e6/pyautogen-0.10.0.tar.gz", hash = "sha256:ed42d7d94144d1333cc5727d904bf1c7a8deb8337b185adba332086997e4d682", size = 3413, upload-time = "2025-07-15T00:37:27.596Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/a2/78/b5ec481c9705a482ae6692270f991548b3d265ed60048a325bbbb571e39d/pyautogen-0.10.0-py3-none-any.whl", hash = "sha256:957be90fae96cb324de168151e758f116d81e249dd2e65cf353550fb4f15f3c6", size = 3029, upload-time = "2025-07-15T00:37:26.17Z" },
-]
-
-[[package]]
 name = "pybase64"
 version = "1.4.3"
 source = { registry = "https://pypi.org/simple" }
@@ -3445,9 +3404,6 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
-autogen = [
-    { name = "pyautogen" },
-]
 cloud = [
     { name = "httpx" },
 ]
@@ -3510,7 +3466,6 @@ requires-dist = [
     { name = "langgraph", marker = "extra == 'langgraph'", specifier = ">=0.1" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.9,<2.0" },
     { name = "psycopg2-binary", marker = "extra == 'postgres'", specifier = ">=2.9,<3.0" },
-    { name = "pyautogen", marker = "extra == 'autogen'", specifier = ">=0.2" },
     { name = "pydantic", specifier = ">=2.7,<3.0" },
     { name = "pydantic-settings", specifier = ">=2.2,<3.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0.3,<10.0" },
@@ -3529,7 +3484,7 @@ requires-dist = [
     { name = "typer", specifier = ">=0.12,<1.0" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'mcp'", specifier = ">=0.30" },
 ]
-provides-extras = ["postgres", "test", "dev", "cloud", "langgraph", "crewai", "autogen", "mcp"]
+provides-extras = ["postgres", "test", "dev", "cloud", "langgraph", "crewai", "mcp"]
 
 [[package]]
 name = "rpds-py"
