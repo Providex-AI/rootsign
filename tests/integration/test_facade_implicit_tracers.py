@@ -8,6 +8,7 @@ real `verify --local` verdict.
 
 from __future__ import annotations
 
+import json
 from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -80,7 +81,13 @@ async def test_crewai_wrap_tools_without_ctx_or_client(tmp_path):
 
 @contextmanager
 def _mock_upstream(json_body):
-    resp = MagicMock(json=lambda: json_body, raise_for_status=lambda: None, status_code=200)
+    resp = MagicMock(
+        json=lambda: json_body,
+        raise_for_status=lambda: None,
+        status_code=200,
+        headers={"content-type": "application/json"},
+        content=json.dumps(json_body).encode(),
+    )
     cm = AsyncMock()
     cm.__aenter__.return_value.post = AsyncMock(return_value=resp)
     cm.__aexit__ = AsyncMock(return_value=None)

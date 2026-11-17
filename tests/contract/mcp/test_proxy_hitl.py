@@ -21,6 +21,8 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
+import json
+
 import pytest
 
 pytest.importorskip("httpx", reason="httpx not installed")
@@ -64,7 +66,11 @@ def _mock_upstream():
     so tests can inspect whether/when the upstream was actually contacted."""
     post = AsyncMock(
         return_value=MagicMock(
-            json=lambda: UPSTREAM, raise_for_status=lambda: None, status_code=200
+            json=lambda: UPSTREAM,
+            raise_for_status=lambda: None,
+            status_code=200,
+            headers={"content-type": "application/json"},
+            content=json.dumps(UPSTREAM).encode(),
         )
     )
     cm = AsyncMock()
