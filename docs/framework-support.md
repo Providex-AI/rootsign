@@ -2,8 +2,8 @@
 
 | Framework | Status | Versions tested | Install |
 |-----------|--------|-----------------|---------|
-| LangGraph | Supported | 0.1.x, 0.2.x, 1.x (CI matrix) | `pip install rootsign[langgraph]` |
-| CrewAI    | Supported | 0.28.x, 0.40.x, 1.x (CI matrix) | `pip install rootsign[crewai]` |
+| LangGraph | Supported | 0.2.x, 0.6.x, 1.x (CI matrix) | `pip install rootsign[langgraph]` |
+| CrewAI    | Supported | 0.95.x, 0.203.x, 1.x (CI matrix) | `pip install rootsign[crewai]` |
 | AutoGen   | Phase 2 (RootSign v1.0) | — | — |
 | Custom    | SDK API available — use `@rootsign.trace` on any async callable | — | `pip install rootsign` |
 

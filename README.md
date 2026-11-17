@@ -254,7 +254,7 @@ async def run_crew():
         # ...run your crew as normal
 ```
 
-Tested against CrewAI `0.28`, `0.40`, and `1.x` (see [CI matrix](https://github.com/Providex-AI/rootsign/actions/workflows/ci.yml)).
+Tested against CrewAI `0.95.x`, `0.203.x`, and `1.x` (see [CI matrix](https://github.com/Providex-AI/rootsign/actions/workflows/ci.yml)).
 
 ## Quickstart — MCP proxy (any framework)
 
