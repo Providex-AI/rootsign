@@ -175,7 +175,7 @@ The proxy opens one session at start-up, and every `tools/call` from every clien
 session: 12fa565a-7e77-4068-ac4a-7b49e33f887a (1 actions)
 ```
 
-`create_proxy_app()` also accepts `redaction_config=` to redact arguments and results before they are hashed, and `require_approval=True` to hold each call until a person approves it. Guides for both are on the way; until then the [README](https://github.com/Providex-AI/rootsign#readme) covers them.
+`create_proxy_app()` also accepts `redaction_config=` to redact arguments and results before they are hashed, and `require_approval=True` to hold each call until a person approves it. See [Redact PII](/guides/redaction) and [Require human approval](/guides/human-approval).
 
 ## What the proxy records and forwards
 
