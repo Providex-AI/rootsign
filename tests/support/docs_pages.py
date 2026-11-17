@@ -73,7 +73,13 @@ class Run:
         return [r for r in records if r["event_type"] == "ACTION_RECORD"]
 
 
-def run_script(source: str, workdir: Path, *, name: str = "script.py") -> Run:
+def run_script(
+    source: str,
+    workdir: Path,
+    *,
+    name: str = "script.py",
+    extra_env: dict[str, str] | None = None,
+) -> Run:
     """Run `source` in `workdir` on the JSONL backend; fail with stderr on error."""
     (workdir / name).write_text(source, encoding="utf-8")
     data_dir = workdir / "data"
@@ -82,6 +88,7 @@ def run_script(source: str, workdir: Path, *, name: str = "script.py") -> Run:
         "ROOTSIGN_DATA_DIR": str(data_dir),
         # A developer's .env or shell may point at Postgres; the pages do not.
         "ROOTSIGN_BACKEND": "jsonl",
+        **(extra_env or {}),
     }
     # cwd=workdir keeps the repo's .env out of pydantic-settings' reach.
     result = subprocess.run(

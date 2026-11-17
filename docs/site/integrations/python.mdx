@@ -99,9 +99,12 @@ Redaction and human approval each get their own guide; until those pages are pub
 
 If you put `@rootsign.trace()` on a LangChain `BaseTool` or a CrewAI tool, RootSign detects it and instruments the tool in place instead, so it stays a tool your framework accepts. For tool lists, use `rootsign.wrap_tools()` for LangChain and LangGraph, or `rootsign.wrap_crewai_tools()` for CrewAI.
 
-<Columns cols={2}>
+<Columns cols={3}>
   <Card title="LangGraph and LangChain" icon="workflow" href="/integrations/langgraph">
     Instrument the tools in a LangGraph agent.
+  </Card>
+  <Card title="CrewAI" icon="users" href="/integrations/crewai">
+    Instrument the tools of a CrewAI agent.
   </Card>
   <Card title="How it works" icon="network" href="/how-it-works">
     What the hash covers and what each verdict means.
