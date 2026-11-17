@@ -16,7 +16,9 @@ This is the single highest-risk failure mode in Phase 1. A broken hash chain at 
 
 Every framework integration MUST include a contract test suite that:
 
-1. **Runs against a minimum of two framework versions** — the latest stable release and the previous minor. Both are pinned explicitly in the CI matrix (`langgraph~=0.1`, `langgraph~=0.2`, etc.).
+1. **Runs against a minimum of two framework versions** — the latest stable release and the previous minor. Both are pinned explicitly in the CI matrix (`langgraph~=0.2.0`, `langgraph~=0.6.0`, etc.).
+
+   > **Erratum (2026-11-17):** this rule originally gave `langgraph~=0.1` and `langgraph~=0.2` as examples. In PEP 440 a two-part `~=0.1` means `>=0.1, <1.0`, so both rows installed the newest 0.x and neither named minor was tested. Pin with three parts (`~=X.Y.0`), and assert the installed version in the job.
 2. **Exercises the complete tool call interception path** end to end: decorator → `SessionContext.next_sequence()` → redaction → `compute_payload_hash` → `IngestClient.handle()` → `IngestHandler` → Action row in DB with correct `tool_name`, `input_hash`, `output_hash`, `sequence_number`, and `prev_action_hash`.
 3. **Is part of the CI matrix.** Contract test jobs run on every PR. They MUST NOT be marked `optional` or `continue-on-error: true` after the integration ships (Sprint 1 may carry empty stubs with `continue-on-error` until Sprint 2 fills them — that's the only exception).
 4. **Fails loudly on framework API drift.** No `try/except` wrappers that swallow `AttributeError` or `TypeError`. If the framework moved a hook, we want CI red, not a partial Action record.
