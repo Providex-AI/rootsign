@@ -1,7 +1,7 @@
 """LangGraph contract tests — verify the interception path against the real
 LangGraph + langchain_core surface. Mock IngestClient (no DB needed).
 
-The CI matrix runs this file against LangGraph 0.1.x and 0.2.x. The same
+The CI matrix runs this file against LangGraph 0.2.x, 0.6.x and 1.x. The same
 tests are exercised locally against whatever version is installed.
 
 Each test pulls a fresh tool from the factory because `wrap_tool` mutates in

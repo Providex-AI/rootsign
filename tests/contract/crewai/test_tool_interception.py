@@ -1,7 +1,7 @@
 """CrewAI contract tests — verify the interception path against the real
 CrewAI surface. Mock IngestClient (no DB needed).
 
-The CI matrix runs this file against two CrewAI versions. Locally we exercise
+The CI matrix runs this file against CrewAI 0.95.x, 0.203.x and 1.x. Locally we exercise
 whatever version `uv pip list` reports.
 
 Each test pulls a fresh tool from the factory because `wrap_tool` mutates in

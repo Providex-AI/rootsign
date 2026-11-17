@@ -192,15 +192,24 @@ jobs:
     # ROOTSIGN_SKIP_DB_BOOTSTRAP env var tells the session-autouse fixture
     # in tests/conftest.py to skip alembic / DB connect at session start.
     #
-    # '1.0' covers the 1.x line, which is what `rootsign[langgraph]` resolves
-    # to today (`langgraph>=0.1` has no cap). Local run against langgraph
-    # 1.2.20 had all 12 contract tests green.
-    name: LangGraph contract (langgraph ~=${{ matrix.langgraph-version }})
+    # Each row pins a real minor with a three-part `~=X.Y.0`. A two-part
+    # `~=0.1` means ">=0.1, <1.0", so the old '0.1' and '0.2' rows both
+    # installed 0.6.11 and the 0.1.x / 0.2.x claims were never tested. The
+    # "Check installed version" step fails the job if a row ever resolves
+    # outside its line again.
+    #
+    # 0.2.x is the oldest line that passes (0.1.x pulls a Pydantic v1
+    # langchain-core); 0.6.x is the last 0.x; 1.x is what `rootsign[langgraph]`
+    # resolves to today.
+    name: LangGraph contract (langgraph ${{ matrix.line }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        langgraph-version: ['0.1', '0.2', '1.0']
+        include:
+          - { line: '0.2.x', spec: '~=0.2.0', prefix: '0.2.' }
+          - { line: '0.6.x', spec: '~=0.6.0', prefix: '0.6.' }
+          - { line: '1.x', spec: '~=1.0', prefix: '1.' }
     env:
       ROOTSIGN_SKIP_DB_BOOTSTRAP: '1'
     steps:
@@ -209,7 +218,12 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install with langgraph extra
-        run: pip install -e '.[dev,langgraph]' "langgraph~=${{ matrix.langgraph-version }}"
+        run: pip install -e '.[dev,langgraph]' "langgraph${{ matrix.spec }}"
+      - name: Check installed version
+        run: |
+          v=$(python -c "import importlib.metadata as m; print(m.version('langgraph'))")
+          echo "langgraph $v"
+          case "$v" in ${{ matrix.prefix }}*) ;; *) echo "::error::expected langgraph ${{ matrix.line }}, got $v"; exit 1 ;; esac
       - name: Contract tests
         run: pytest tests/contract/langgraph/ -v
 
@@ -223,12 +237,22 @@ jobs:
     # crewai 1.6.1 had all 13 contract tests green — the ADR-005
     # heuristic (name + _run callable) survives 1.x's BaseTool refactor
     # because we never imported the class, only the shape.
-    name: CrewAI contract (crewai ~=${{ matrix.crewai-version }})
+    #
+    # Rows pin real lines with `~=X.Y.0`, for the same reason as the langgraph
+    # job: the old '0.28' and '0.40' rows both installed 0.203.2. 0.95.x is the
+    # oldest release that installs next to rootsign AND imports on Python 3.12:
+    # 0.28.x pins typer<0.10 (rootsign needs >=0.12), 0.40 was never published,
+    # and everything up to 0.86 imports pkg_resources, which 3.12 environments
+    # no longer ship.
+    name: CrewAI contract (crewai ${{ matrix.line }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        crewai-version: ['0.28', '0.40', '1.0']
+        include:
+          - { line: '0.95.x', spec: '~=0.95.0', prefix: '0.95.' }
+          - { line: '0.203.x', spec: '~=0.203.0', prefix: '0.203.' }
+          - { line: '1.x', spec: '~=1.0', prefix: '1.' }
     env:
       ROOTSIGN_SKIP_DB_BOOTSTRAP: '1'
     steps:
@@ -237,7 +261,12 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install with crewai extra
-        run: pip install -e '.[dev,crewai]' "crewai~=${{ matrix.crewai-version }}"
+        run: pip install -e '.[dev,crewai]' "crewai${{ matrix.spec }}"
+      - name: Check installed version
+        run: |
+          v=$(python -c "import importlib.metadata as m; print(m.version('crewai'))")
+          echo "crewai $v"
+          case "$v" in ${{ matrix.prefix }}*) ;; *) echo "::error::expected crewai ${{ matrix.line }}, got $v"; exit 1 ;; esac
       - name: Contract tests
         run: pytest tests/contract/crewai/ -v
 
