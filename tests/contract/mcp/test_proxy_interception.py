@@ -23,6 +23,7 @@ Mocking notes for this repo:
 from __future__ import annotations
 
 import inspect
+import json
 from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -58,11 +59,17 @@ TOOLS_CALL_REQUEST = {
 
 @contextmanager
 def mock_upstream(json_body, status_code=200):
-    """Patch the lazily-imported httpx.AsyncClient to a mock MCP upstream."""
+    """Patch the lazily-imported httpx.AsyncClient to a mock MCP upstream.
+
+    The response carries a real content-type and body: the proxy reads the
+    content-type to tell a JSON reply from an SSE one, and relays the body.
+    """
     resp = MagicMock(
         json=lambda: json_body,
         raise_for_status=lambda: None,
         status_code=status_code,
+        headers={"content-type": "application/json"},
+        content=json.dumps(json_body).encode(),
     )
     cm = AsyncMock()
     cm.__aenter__.return_value.post = AsyncMock(return_value=resp)

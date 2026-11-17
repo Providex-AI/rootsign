@@ -19,6 +19,7 @@ after commit.
 
 from __future__ import annotations
 
+import json
 from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -43,7 +44,13 @@ MOCK_RESPONSE = {
 
 @contextmanager
 def mock_upstream(json_body):
-    resp = MagicMock(json=lambda: json_body, raise_for_status=lambda: None, status_code=200)
+    resp = MagicMock(
+        json=lambda: json_body,
+        raise_for_status=lambda: None,
+        status_code=200,
+        headers={"content-type": "application/json"},
+        content=json.dumps(json_body).encode(),
+    )
     cm = AsyncMock()
     cm.__aenter__.return_value.post = AsyncMock(return_value=resp)
     cm.__aexit__ = AsyncMock(return_value=None)
