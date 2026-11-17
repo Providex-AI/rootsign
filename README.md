@@ -251,8 +251,11 @@ async def run_crew():
             goal="Send invoices",
             tools=rootsign.wrap_crewai_tools([send_invoice]),
         )
-        # ...run your crew as normal
+        # ...build your Task and Crew as normal, then start it with:
+        # result = await crew.kickoff_async()
 ```
+
+Start the crew with `await crew.kickoff_async()` inside the session: recent CrewAI 1.x releases raise `RuntimeError` if `crew.kickoff()` is called inside a running event loop. A complete crew that runs offline is in [`examples/crewai-jsonl`](examples/crewai-jsonl/).
 
 Tested against CrewAI `0.95.x`, `0.203.x`, and `1.x` (see [CI matrix](https://github.com/Providex-AI/rootsign/actions/workflows/ci.yml)).
 

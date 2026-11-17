@@ -1,0 +1,208 @@
+---
+title: "Record CrewAI tool calls on a hash chain"
+sidebarTitle: "CrewAI"
+description: "Instrument a CrewAI agent's tools with rootsign.wrap_crewai_tools() so every tool call in a crew run lands on a tamper-evident hash chain."
+keywords: ["crewai", "wrap_crewai_tools", "crew", "agent tools", "kickoff_async", "audit trail"]
+---
+
+RootSign records every tool call a CrewAI agent makes. You pass the agent's tool list through `rootsign.wrap_crewai_tools()`, open a `rootsign.session()` around the run, and start the crew with `kickoff_async()`. Tool names, descriptions and argument schemas are untouched, so the agent sees the same tools.
+
+## Supported versions
+
+| CrewAI | Status |
+| --- | --- |
+| 0.95.x | Tested in CI |
+| 0.203.x | Tested in CI |
+| 1.x | Tested in CI |
+
+Older releases do not work with RootSign: CrewAI 0.28.x conflicts with RootSign's `typer` requirement, and releases up to 0.86 import `pkg_resources`, which Python 3.12 environments no longer include. The contract suite runs on Python 3.12. CrewAI's own wheels can lag on 3.13 and 3.14; if `pip` reports `No matching distribution found for crewai`, use Python 3.12.
+
+## Install
+
+```bash
+pip install 'rootsign[crewai]'
+```
+
+## Instrument your crew
+
+This is a complete crew. It runs offline because the LLM is scripted: it replays three replies (call `send_invoice`, call `log_payment`, give the final answer). Everything else is a normal CrewAI crew, and CrewAI's agent loop is the path RootSign intercepts in production.
+
+```python crew.py
+from __future__ import annotations
+
+import asyncio
+import os
+from pathlib import Path
+
+from crewai import Agent, BaseLLM, Crew, Task
+from crewai.tools import tool
+
+import rootsign
+
+rootsign.init(agent="crewai-invoice-crew", risk_tier="high", framework="crewai")
+
+
+@tool("send_invoice")
+def send_invoice(customer_id: str, amount: float) -> str:
+    """Send an invoice to a customer."""
+    return f"invoice sent to {customer_id} for ${amount:,.2f}"
+
+
+@tool("log_payment")
+def log_payment(customer_id: str, amount: float) -> str:
+    """Record a payment in the ledger."""
+    return f"payment of ${amount:,.2f} recorded for {customer_id}"
+
+
+# One reply per LLM call: a tool, another tool, then the final answer.
+SCRIPT = [
+    "Thought: I need to send the invoice first.\n"
+    "Action: send_invoice\n"
+    'Action Input: {"customer_id": "acme-corp", "amount": 1500.0}',
+    "Thought: Now I record the payment.\n"
+    "Action: log_payment\n"
+    'Action Input: {"customer_id": "acme-corp", "amount": 1500.0}',
+    "Thought: Both steps are done.\nFinal Answer: Invoice sent and payment recorded for acme-corp.",
+]
+_replies = iter(SCRIPT)
+
+
+class ScriptedLLM(BaseLLM):
+    """Stands in for a real LLM by replaying SCRIPT, one reply per call."""
+
+    def call(self, messages, *args, **kwargs) -> str:
+        return next(_replies, SCRIPT[-1])
+
+    def supports_function_calling(self) -> bool:
+        return False
+
+    def supports_stop_words(self) -> bool:
+        return False
+
+    def get_context_window_size(self) -> int:
+        return 8192
+
+
+async def main() -> None:
+    async with rootsign.session(objective="invoice acme-corp and record payment") as ctx:
+        billing = Agent(
+            role="Billing clerk",
+            goal="Invoice customers and record their payments",
+            backstory="You handle accounts receivable.",
+            tools=rootsign.wrap_crewai_tools([send_invoice, log_payment]),
+            llm=ScriptedLLM(model="scripted"),
+        )
+        task = Task(
+            description="Invoice acme-corp for $1,500, then record the payment.",
+            expected_output="A one-line confirmation.",
+            agent=billing,
+        )
+        result = await Crew(agents=[billing], tasks=[task]).kickoff_async()
+        print(f"crew: {result}")
+
+    data_dir = Path(os.environ.get("ROOTSIGN_DATA_DIR", "~/.rootsign")).expanduser()
+    target = data_dir / "sessions" / f"{ctx.session_id}.jsonl"
+    print(f"\n{ctx.current_sequence} actions recorded → {target}")
+    print("\nVerify the chain:")
+    print(f"    rootsign verify --local {target}")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+The three RootSign lines are `rootsign.init(...)`, `async with rootsign.session(...)`, and `rootsign.wrap_crewai_tools([...])` around the agent's tools. To use a real model, pass your usual `llm=` to the `Agent` instead of `ScriptedLLM`; the RootSign lines stay the same. The scripted LLM needs CrewAI 0.120 or later, the first release that exports `BaseLLM`.
+
+Run it:
+
+```bash
+python crew.py
+```
+
+```text
+crew: Invoice sent and payment recorded for acme-corp.
+
+2 actions recorded → ~/.rootsign/sessions/<session_id>.jsonl
+
+Verify the chain:
+    rootsign verify --local ~/.rootsign/sessions/<session_id>.jsonl
+```
+
+CrewAI also prints its own progress output, and on the first run it may ask whether you want to view execution traces. Both come from CrewAI.
+
+## Verify the session
+
+```bash
+rootsign verify --local ~/.rootsign/sessions/<session_id>.jsonl
+```
+
+```text
+VALID ✓  —  2 records, chain intact
+```
+
+The LLM's reasoning and the crew's final answer are not recorded. RootSign records tool calls: what ran, with which arguments, and what it returned.
+
+## Start the crew with kickoff_async()
+
+<Warning>
+  Inside `async with rootsign.session(...)`, start the crew with `await crew.kickoff_async()`. Recent CrewAI 1.x releases raise `RuntimeError: Agent execution was invoked synchronously from within a running event loop` if you call `crew.kickoff()` there. This was observed on CrewAI 1.15.41; 1.6.1 and 0.203.2 still accepted `kickoff()`. `kickoff_async()` works on every supported version.
+</Warning>
+
+## Two ways to instrument tools
+
+Both produce the same records.
+
+<CodeGroup>
+
+```python Wrap a list
+tools = rootsign.wrap_crewai_tools([send_invoice, log_payment])
+agent = Agent(role="Billing clerk", goal="...", backstory="...", tools=tools)
+```
+
+```python Decorate one tool
+@rootsign.trace()
+@tool("send_invoice")
+def send_invoice(customer_id: str, amount: float) -> str:
+    """Send an invoice to a customer."""
+    ...
+```
+
+</CodeGroup>
+
+`rootsign.trace()` must sit above `@tool`, so it receives the finished CrewAI tool. A tool that is already instrumented is skipped by `wrap_crewai_tools()`, so it is never recorded twice.
+
+## What gets recorded
+
+Each tool call adds one `ACTION_RECORD`. `tool_name` is the CrewAI tool's name, the string you gave `@tool(...)`. CrewAI passes arguments by keyword, so they appear under `kwargs`:
+
+```json
+{"args": [], "kwargs": {"customer_id": "acme-corp", "amount": 1500.0}}
+```
+
+The output is the tool's return value, for example `{"result": "invoice sent to acme-corp for $1,500.00"}`. If the tool raises, the call is still recorded, with an empty output, and the exception reaches CrewAI unchanged. If RootSign cannot write the record, it logs a warning and the tool call completes normally.
+
+## How interception works
+
+`wrap_crewai_tools()` replaces `_run` on each tool instance in place and returns the same objects, so they stay CrewAI tools and `Agent(tools=...)` accepts them. RootSign recognises a CrewAI tool by its shape (a string `name` and a callable `_run`) rather than by importing CrewAI, so `pip install rootsign` works without the `crewai` extra. The session and storage are looked up at each call, so you can define tools at import time. The design is in [ADR-005](https://github.com/Providex-AI/rootsign/blob/main/docs/adr/ADR-005-crewai-interception-strategy.md).
+
+## Limitations
+
+<Warning>
+  **Calls must happen inside a session.** A wrapped tool called outside `async with rootsign.session(...)` raises `RootSignNotInitializedError`, unless you pass `ctx=` and `client=` to `wrap_crewai_tools()` yourself.
+</Warning>
+
+- **Human approval is not available on CrewAI tools.** `@rootsign.trace(require_approval=True)` on a CrewAI tool raises `NotImplementedError`. Put the approval on the plain function the tool calls instead.
+- **CrewAI tools are synchronous.** When CrewAI calls `_run` inside a running event loop, RootSign writes the record from a worker thread. On the PostgreSQL backend, do not share a SQLAlchemy `AsyncSession` across that boundary.
+
+## Full example
+
+The crew above is [`examples/crewai-jsonl`](https://github.com/Providex-AI/rootsign/tree/main/examples/crewai-jsonl) in the repository. CI runs it on the CrewAI 0.203.x and 1.x lines; it has also been run on 0.120.1 and 1.6.1.
+
+<Columns cols={2}>
+  <Card title="LangGraph and LangChain" icon="workflow" href="/integrations/langgraph">
+    Instrument the tools in a LangGraph agent.
+  </Card>
+  <Card title="Any Python function" icon="code" href="/integrations/python">
+    Record calls to functions that are not framework tools.
+  </Card>
+</Columns>

@@ -23,6 +23,10 @@
       {
         "group": "Get started",
         "pages": ["index", "quickstart", "how-it-works"]
+      },
+      {
+        "group": "Integrations",
+        "pages": ["integrations/langgraph", "integrations/crewai", "integrations/python"]
       }
     ]
   },
