@@ -1,0 +1,190 @@
+---
+title: "Quickstart: record and verify your first agent session"
+sidebarTitle: "Quickstart"
+description: "Install RootSign, record two traced tool calls to a local file, verify the hash chain, then edit and delete records to see TAMPERED and INCOMPLETE."
+keywords: ["rootsign quickstart", "rootsign verify", "jsonl", "hash chain", "tamper detection"]
+---
+
+This quickstart gets you a verified hash chain in under a minute. You install RootSign, record two tool calls from a small Python script, and run `rootsign verify` on the result. Then you break the record on purpose, twice, to see how RootSign reports an edited record and a missing one.
+
+Nothing here needs a database, Docker, an API key or a network connection. Records go to a local JSONL file.
+
+<Frame caption="Install, record three tool calls, verify the chain">
+  <img src="/images/quickstart-demo.gif" alt="Terminal recording: pip install rootsign, a script records three tool calls, and rootsign verify --local reports VALID" />
+</Frame>
+
+## Prerequisites
+
+- Python 3.11 or 3.12. See [supported versions](/#status-and-supported-versions).
+- A virtual environment is recommended, so the `rootsign` command lands on your path.
+
+<Steps>
+  <Step title="Install RootSign">
+    ```bash
+    pip install rootsign
+    ```
+
+    Check the install:
+
+    ```bash
+    rootsign version
+    ```
+
+    ```text
+    rootsign 0.3.1
+    ```
+  </Step>
+  <Step title="Instrument two tools">
+    Save this as `agent.py`. The three numbered lines are the only RootSign code; everything else is an ordinary async program.
+
+    ```python agent.py
+    import asyncio, rootsign
+
+    rootsign.init(agent="invoice-agent", risk_tier="high")        # 1. once, at startup
+
+    @rootsign.trace()                                            # 2. per tool
+    async def send_invoice(customer_id: str, amount: float) -> str:
+        return "sent"
+
+    @rootsign.trace()
+    async def log_payment(customer_id: str, amount: float) -> str:
+        return "logged"
+
+    async def main():
+        async with rootsign.session(objective="invoice ACME") as ctx:   # 3. per run
+            await send_invoice("acme-corp", 1500.00)
+            await log_payment("acme-corp", 1500.00)
+        print(ctx.session_id)
+
+    asyncio.run(main())
+    ```
+
+    | Call | When | What it does |
+    | --- | --- | --- |
+    | `rootsign.init(...)` | Once, at startup | Validates and stores configuration. It does no I/O, so it is safe at module scope and inside a running event loop. |
+    | `async with rootsign.session(...)` | Around a run | Registers the agent on first use, records the session opening and closing, and makes the session available to your tools. |
+    | `@rootsign.trace()` | On each tool | Records one hash-chained `ACTION_RECORD` per call. |
+  </Step>
+  <Step title="Run it">
+    ```bash
+    python agent.py
+    ```
+
+    The script prints the session ID. Yours will differ:
+
+    ```text
+    88f15492-3be7-4f7e-af16-3f247b1134a9
+    ```
+
+    The session is now in `~/.rootsign/sessions/<session_id>.jsonl`, one JSON object per line: the session opening, one line per tool call, and the session closing.
+  </Step>
+  <Step title="Verify the chain">
+    Replace the ID with the one your script printed:
+
+    ```bash
+    rootsign verify --local ~/.rootsign/sessions/88f15492-3be7-4f7e-af16-3f247b1134a9.jsonl
+    ```
+
+    ```text
+    VALID ✓  —  2 records, chain intact
+      Session:  88f15492-3be7-4f7e-af16-3f247b1134a9
+    ```
+
+    The exit code is `0`.
+  </Step>
+  <Step title="Edit a record and verify again">
+    Make a copy of the session file, then open the copy in an editor. Line 2 is the first tool call. Change the amount `1500.0` to `15000.0` on that line, save, and verify the copy:
+
+    ```bash
+    cp ~/.rootsign/sessions/<session_id>.jsonl tampered.jsonl
+    # edit tampered.jsonl: 1500.0 -> 15000.0 on line 2
+    rootsign verify --local tampered.jsonl
+    ```
+
+    ```text
+    TAMPERED ✗  —  chain broken at record #1
+      Detail:   payload_hash mismatch: input_redacted does not match input_hash
+      Session:  88f15492-3be7-4f7e-af16-3f247b1134a9
+    WARNING: This session log may have been tampered with.
+    ```
+
+    The exit code is `1`. The verifier names the record that broke and why: the stored arguments no longer match the hash recorded when the tool ran.
+  </Step>
+  <Step title="Delete a record and verify again">
+    Make a fresh copy, delete line 2 (the first tool call) entirely, and verify:
+
+    ```bash
+    cp ~/.rootsign/sessions/<session_id>.jsonl gap.jsonl
+    # delete line 2 of gap.jsonl
+    rootsign verify --local gap.jsonl
+    ```
+
+    ```text
+    INCOMPLETE ⚠  —  1 records present and intact, but the chain is missing records
+      Detail:   1 record(s) missing at sequence 1
+      Session:  88f15492-3be7-4f7e-af16-3f247b1134a9
+    The records present verify cleanly; the gap is proven by the chain itself. Check for a spooled session that was never synced (`rootsign-admin sync`) or a deleted row.
+    ```
+
+    The exit code is `2`. A script can tell an edited record (exit `1`) from a missing one (exit `2`), which matters in an investigation: an edit points to tampering, a gap may be a lost upload.
+  </Step>
+</Steps>
+
+<Note>
+  The verifier cannot detect a record deleted from the **end** of a session, because the chain alone does not say how long it was meant to be. [How it works](/how-it-works#what-verify-does-not-check) lists this and the other limits.
+</Note>
+
+## Hand the session to someone else
+
+`verify` answers a developer's question. To give the same session to a reviewer, export it as an evidence bundle:
+
+```bash
+rootsign export --local ~/.rootsign/sessions/<session_id>.jsonl
+```
+
+```text
+VALID — 2 records, chain intact
+  Bundle:   evidence-88f15492-3be7-4f7e-af16-3f247b1134a9
+            redaction.json
+            report.html
+            report.md
+            timeline.json
+            verification.json
+            manifest.json
+
+  manifest.json SHA-256:  268085ddd6b3a04702cff9191b122e50c33ee9709cff673dc1098397e6a873bb
+  Record that hash outside the bundle — a ticket, an email, a chain-of-custody log.
+  It is what proves a bundle you receive later is the one that was generated.
+```
+
+Open `report.html` in a browser. It shows the verdict first, then the chain, then every field of every event.
+
+<Frame caption="report.html from an evidence bundle">
+  <img src="/images/evidence-report.png" alt="Evidence bundle HTML report showing a VALID verdict, the session summary and the chain of recorded tool calls" />
+</Frame>
+
+## Where the data lives
+
+| Path | Contents |
+| --- | --- |
+| `~/.rootsign/sessions/<session_id>.jsonl` | One session, one JSON object per line |
+| `~/.rootsign/agents.jsonl` | The agent registry |
+
+Both are plain text. To keep records somewhere else, such as next to your project, set `ROOTSIGN_DATA_DIR`:
+
+```bash
+ROOTSIGN_DATA_DIR=./audit python agent.py
+```
+
+The JSONL backend is a single-process writer. When you need several writer processes or approvals from another terminal, switch to the PostgreSQL backend. Your instrumentation code does not change.
+
+## Next steps
+
+<Columns cols={2}>
+  <Card title="How it works" icon="network" href="/how-it-works">
+    What a record contains, what the hash covers, and what each verdict means.
+  </Card>
+  <Card title="Runnable examples" icon="github" href="https://github.com/Providex-AI/rootsign/tree/main/examples">
+    The quickstart script and a LangGraph invoice agent, in the RootSign repository.
+  </Card>
+</Columns>

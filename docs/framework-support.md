@@ -2,15 +2,14 @@
 
 | Framework | Status | Versions tested | Install |
 |-----------|--------|-----------------|---------|
-| LangGraph | Supported | 0.1.x, 0.2.x (CI matrix) | `pip install rootsign[langgraph]` |
+| LangGraph | Supported | 0.1.x, 0.2.x, 1.x (CI matrix) | `pip install rootsign[langgraph]` |
 | CrewAI    | Supported | 0.28.x, 0.40.x, 1.x (CI matrix) | `pip install rootsign[crewai]` |
 | AutoGen   | Phase 2 (RootSign v1.0) | — | — |
 | Custom    | SDK API available — use `@rootsign.trace` on any async callable | — | `pip install rootsign` |
 
 > **AutoGen + TypeScript SDK** ship together as part of the RootSign **v1.0**
-> release in Phase 2 — not Phase 1. Phase 1 (this Sprint series) closes out
-> the Python SDK with LangGraph and CrewAI coverage plus the HiTL surface in
-> Sprint 4.
+> release in Phase 2. Until then, the Python SDK covers LangGraph, CrewAI, the
+> MCP proxy, and any async callable via `@rootsign.trace`.
 
 ## The frozen cross-SDK surface
 
