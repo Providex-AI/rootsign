@@ -1,11 +1,12 @@
-"""RootSign SDK — user-facing API surface (Phase 1, Sprint 1).
+"""RootSign SDK — user-facing API surface.
 
 Public re-exports:
-    trace               — @rootsign.trace decorator (Sprint 2 adds LangGraph)
+    trace               — @rootsign.trace decorator
     SessionContext      — agent_id + session_id + monotonic sequence counter
     RedactionConfig     — per-field regex redaction for tool payloads
     IngestClient        — transport-agnostic ABC (ADR-002)
-    LocalIngestClient   — in-process transport (Phase 1 default)
+    LocalIngestClient   — in-process PostgreSQL transport (ROOTSIGN_BACKEND=postgres);
+                          the default backend is JSONL (rootsign.sdk.jsonl_client, ADR-011)
     HttpIngestClient    — cloud transport: batched HTTP ingest (ADR-013)
     get_ingest_client   — env-var-driven factory (reads ROOTSIGN_BACKEND)
     SDKSettings         — pydantic-settings model, env_prefix=ROOTSIGN_

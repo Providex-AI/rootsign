@@ -1,0 +1,57 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "maple",
+  "name": "RootSign",
+  "description": "Developer documentation for RootSign, the open-source Python SDK that records AI agent tool calls on a tamper-evident hash chain.",
+  "colors": {
+    "primary": "#6B4FFF",
+    "light": "#9B87FF",
+    "dark": "#4B32CC"
+  },
+  "favicon": "/logo/favicon.png",
+  "fonts": {
+    "family": "Inter"
+  },
+  "appearance": {
+    "default": "dark"
+  },
+  "icons": {
+    "library": "lucide"
+  },
+  "navigation": {
+    "groups": [
+      {
+        "group": "Get started",
+        "pages": ["index", "quickstart", "how-it-works"]
+      }
+    ]
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "Providex AI",
+        "href": "https://getprovidex.com"
+      },
+      {
+        "type": "discord",
+        "href": "https://discord.gg/tuABzbPdkE"
+      }
+    ],
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/Providex-AI/rootsign"
+    }
+  },
+  "footer": {
+    "socials": {
+      "website": "https://getprovidex.com",
+      "github": "https://github.com/Providex-AI/rootsign",
+      "discord": "https://discord.gg/tuABzbPdkE",
+      "x": "https://x.com/getprovidex",
+      "linkedin": "https://www.linkedin.com/company/providex"
+    }
+  },
+  "contextual": {
+    "options": ["copy", "view", "chatgpt", "claude", "cursor"]
+  }
+}
