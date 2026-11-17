@@ -30,7 +30,6 @@ from pathlib import Path
 from typing import Any, NoReturn, Optional
 from uuid import UUID
 
-import click
 import typer
 from typer.core import TyperGroup
 
@@ -57,28 +56,40 @@ AsyncSessionLocal: Any = None
 EXIT_CANNOT_VERIFY = 3
 
 
+def _is_usage_error(exc: BaseException) -> bool:
+    """True for a command-line usage error (mistyped option, unknown command).
+
+    Typer up to 0.25 raises Click's `UsageError`; later Typer releases vendor
+    Click as a private module and raise their own copy. Both descend from a
+    class named `UsageError`, so match on that instead of importing either.
+    """
+    return any(cls.__name__ == "UsageError" for cls in type(exc).__mro__)
+
+
 class _RootSignGroup(TyperGroup):
     """Command-line usage errors exit 3 instead of Click's default 2.
 
     Click exits 2 on a mistyped option or command, which is `verify`'s
     INCOMPLETE code: `rootsign verify --lcal x.jsonl` in a cron job would read
-    as "records missing". Click carries the code on the exception and Typer
-    exits with it, so setting it here is enough. Errors in the top-level
-    options (`make_context`) and in subcommands (`invoke`) are both covered.
+    as "records missing". The error carries its exit code and Typer exits
+    with it, so setting it here is enough. Errors in the top-level options
+    (`make_context`) and in subcommands (`invoke`) are both covered.
     """
 
     def make_context(self, *args: Any, **kwargs: Any) -> Any:
         try:
             return super().make_context(*args, **kwargs)
-        except click.UsageError as exc:
-            exc.exit_code = EXIT_CANNOT_VERIFY
+        except Exception as exc:
+            if _is_usage_error(exc):
+                exc.exit_code = EXIT_CANNOT_VERIFY
             raise
 
     def invoke(self, ctx: Any) -> Any:
         try:
             return super().invoke(ctx)
-        except click.UsageError as exc:
-            exc.exit_code = EXIT_CANNOT_VERIFY
+        except Exception as exc:
+            if _is_usage_error(exc):
+                exc.exit_code = EXIT_CANNOT_VERIFY
             raise
 
 
