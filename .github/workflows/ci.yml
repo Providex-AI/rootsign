@@ -63,6 +63,32 @@ jobs:
         # run `ruff format .` — that is the intended prompt, not a bug.
         run: ruff format --check --diff .
 
+  docs-site:
+    # The Mintlify docs site in docs/site/ deploys from main on every push, so
+    # a broken docs.json or a dead internal link would go live unreviewed.
+    # `mint validate` builds the site; `mint broken-links` checks every
+    # root-relative link. Code samples are checked separately, by
+    # tests/unit/test_docs_site_quickstart.py, which runs them.
+    #
+    # mint is pinned for the same reason ruff is: a floating CLI can start
+    # failing a PR that touched nothing under docs/site/.
+    name: Docs site (mint)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: docs/site
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - name: Install the Mintlify CLI
+        run: npm install -g mint@4.3.48
+      - name: mint validate
+        run: mint validate
+      - name: mint broken-links
+        run: mint broken-links
+
   unit-tests:
     name: Unit tests (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest

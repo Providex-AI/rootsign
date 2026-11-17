@@ -1,0 +1,131 @@
+---
+title: "How RootSign's hash chain detects edited and missing records"
+sidebarTitle: "How it works"
+description: "What a RootSign action record contains, which fields the SHA-256 chain covers, what VALID, TAMPERED and INCOMPLETE mean, and what verification cannot detect."
+keywords: ["hash chain", "self_hash", "prev_action_hash", "verify", "TAMPERED", "INCOMPLETE", "sha-256"]
+---
+
+RootSign turns each tool call into an `ACTION_RECORD` and links the records of a session into a SHA-256 hash chain. This page explains what a record holds, which parts of it the chain protects, how `rootsign verify` reaches each of its three verdicts, and the cases verification does not cover.
+
+## What gets recorded
+
+Inside a `rootsign.session()`, a session file holds three kinds of event, in order:
+
+| Event | When | Part of the hash chain |
+| --- | --- | --- |
+| `SESSION_OPEN` | You enter the session | No |
+| `ACTION_RECORD` | Each traced tool call | Yes |
+| `SESSION_CLOSE` | You leave the session | No |
+
+This is the first `ACTION_RECORD` from the [quickstart](/quickstart):
+
+```json
+{
+  "schema_version": "1.1",
+  "sdk_version": "0.3.1",
+  "event_type": "ACTION_RECORD",
+  "event_id": "74b35690-ad2a-41ac-a3f5-0381fc6c23cc",
+  "emitted_at": "2026-11-17T04:21:04.052830+00:00",
+  "agent_id": "a98a6529-6da0-4a6f-bc77-006d20f55cb6",
+  "session_id": "88f15492-3be7-4f7e-af16-3f247b1134a9",
+  "action_id": "2820bcbe-4177-46e9-a3e6-a85f1391388b",
+  "tool_name": "send_invoice",
+  "input_hash": "940ecb0a64e367056120c6bbf3df2071dc5903efd2e020aabc3a77630ca7cc81",
+  "output_hash": "4bf238385a439d900f303203f9165a537e2a6b92bd632b882044dfa79a11694e",
+  "prev_action_hash": null,
+  "timestamp": "2026-11-17T04:21:04.052813+00:00",
+  "sequence_number": 1,
+  "self_hash": "435db2e5d26c655c8344737780484d37fffb882c32a84dd7f4307c26b282abdf",
+  "input_redacted": { "args": ["acme-corp", 1500.0], "kwargs": {} },
+  "output_redacted": { "result": "sent" },
+  "authorization_status": "auto_authorized",
+  "decision_id": null,
+  "duration_ms": null,
+  "policy_id": null
+}
+```
+
+`input_redacted` and `output_redacted` are the tool's arguments and result after PII redaction. Redaction runs before hashing, so the stored payload and its hash always describe the same redacted value.
+
+## How the chain is built
+
+Each record gets two kinds of hash.
+
+**Payload hashes.** `input_hash` and `output_hash` are SHA-256 digests of the redacted arguments and result. They bind the stored payloads to the record.
+
+**The record hash.** `self_hash` is the SHA-256 of eight fields, serialized as JSON with sorted keys:
+
+| Field | Meaning |
+| --- | --- |
+| `action_id` | Unique ID of this tool call |
+| `session_id` | The session it belongs to |
+| `tool_name` | The tool that ran |
+| `input_hash` | Hash of the redacted arguments |
+| `output_hash` | Hash of the redacted result |
+| `prev_action_hash` | `self_hash` of the previous record, empty for the first |
+| `timestamp` | When the call ran, ISO 8601 in UTC |
+| `sequence_number` | Position in the session, starting at 1 |
+
+Because `prev_action_hash` is one of the eight fields, each record's hash depends on every record before it. Changing an earlier record changes its `self_hash`, which no longer matches the `prev_action_hash` stored in the record after it.
+
+This formula is frozen. Every backend and every future SDK uses the same eight fields, so a session verifies the same way whether it was stored in a JSONL file or in PostgreSQL. The full specification is in [ADR-001](https://github.com/Providex-AI/rootsign/blob/main/docs/adr/ADR-001-hash-canonical-spec.md).
+
+## The three verdicts
+
+`rootsign verify` recomputes every hash in the session and returns one of three verdicts:
+
+| Verdict | Exit code | Meaning | Example cause |
+| --- | --- | --- | --- |
+| `VALID` | `0` | Every record is present and every hash matches | Nothing was changed |
+| `TAMPERED` | `1` | A record was altered | An argument, result, tool name or timestamp was edited |
+| `INCOMPLETE` | `2` | The records present are intact, but one is missing | A deleted row, or a spool never synced |
+
+When a session has both an altered record and a gap, the verdict is `TAMPERED`, and the missing ranges are still reported. An altered session is never reported as merely incomplete.
+
+The separate exit codes let a CI job or a scheduled audit tell the two failures apart: an edit points to tampering, while a gap may be a lost upload.
+
+## What verify does not check
+
+The chain protects the eight fields above and, through the payload hashes, the stored arguments and results. Some data sits outside it:
+
+- **Records deleted from the end of a session.** A chain cannot tell how long it was meant to be, so removing the last tool calls leaves a shorter chain that still verifies as `VALID`. `SESSION_CLOSE` records a `total_actions` count, but `SESSION_CLOSE` is not hashed and `verify` does not compare against it.
+- **Session events.** `SESSION_OPEN` and `SESSION_CLOSE`, including the session's `objective`, are not part of the chain.
+- **Fields that change after the call.** `authorization_status` is excluded because it legitimately changes when a human approves or rejects a pending action. `duration_ms` is excluded too. Approval decisions are stored as separate approval records, not in the chain.
+
+<Warning>
+  If you need to prove that a session was not cut short, keep the record count somewhere outside the session file. For example, record the `manifest.json` hash that `rootsign export` prints in a ticket or a chain-of-custody log.
+</Warning>
+
+## Recording never breaks your agent
+
+If RootSign fails to write a record, for example because the database is unreachable, it logs a warning and your tool call completes normally. The audit layer never raises an error into the tool it wraps. The design is in [ADR-002](https://github.com/Providex-AI/rootsign/blob/main/docs/adr/ADR-002-transport-agnostic-client.md).
+
+## Where records are stored
+
+| Backend | When to use it | Install |
+| --- | --- | --- |
+| JSONL (default) | One process writing locally. No dependencies. | `pip install rootsign` |
+| PostgreSQL with TimescaleDB | Several writer processes, or approvals from another terminal | `pip install 'rootsign[postgres]'` |
+| Cloud (preview) | Uploading to the hosted Providex service, which is not live yet | `pip install 'rootsign[cloud]'` |
+
+You choose the backend with the `ROOTSIGN_BACKEND` environment variable. The instrumentation code is the same for all three, and all three use the same hash formula.
+
+## Design records
+
+The decisions behind this page are written up as design records in the repository:
+
+- [ADR-001: canonical hash specification](https://github.com/Providex-AI/rootsign/blob/main/docs/adr/ADR-001-hash-canonical-spec.md)
+- [ADR-006: redaction contract](https://github.com/Providex-AI/rootsign/blob/main/docs/adr/ADR-006-redaction-contract.md)
+- [ADR-011: JSONL local backend](https://github.com/Providex-AI/rootsign/blob/main/docs/adr/ADR-011-jsonl-local-backend.md)
+- [All design records](https://github.com/Providex-AI/rootsign/tree/main/docs/adr)
+
+## Next steps
+
+<Columns cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Record a session and see all three verdicts on your own machine.
+  </Card>
+  <Card title="Ingest specification" icon="file-text" href="https://github.com/Providex-AI/rootsign/blob/main/docs/ingest-spec-v1.md">
+    The wire format: envelope fields, event types, error codes and the hashing contract.
+  </Card>
+</Columns>

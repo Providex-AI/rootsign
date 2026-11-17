@@ -1,0 +1,66 @@
+---
+title: "RootSign: tamper-evident audit trails for AI agents"
+sidebarTitle: "Introduction"
+description: "RootSign records every tool call your AI agent makes on a SHA-256 hash chain, so you can prove later what the agent did and that nobody edited the record."
+keywords: ["rootsign", "audit trail", "ai agents", "hash chain", "provenance", "tamper-evident"]
+---
+
+RootSign is an open-source Python SDK that records each tool call your agent makes as a hash-chained record. When something goes wrong, such as a wrong refund or a leaked record, you can show what the agent did, in what order, and on whose approval, and `rootsign verify` tells you whether anyone changed the record afterwards.
+
+RootSign is built by [Providex AI](https://getprovidex.com) and released under the Apache 2.0 license.
+
+## What you get
+
+<Columns cols={2}>
+  <Card title="A hash chain per session" icon="link">
+    Each tool call becomes an `ACTION_RECORD` that carries the SHA-256 hash of the record before it. Edit a hashed field and the chain breaks at that record.
+  </Card>
+  <Card title="Three verdicts" icon="shield-check">
+    `rootsign verify` answers VALID, TAMPERED (a record was altered) or INCOMPLETE (a record is missing), with exit codes 0, 1 and 2 for CI and cron jobs.
+  </Card>
+  <Card title="Evidence bundles" icon="folder-archive">
+    `rootsign export` turns a session into a folder with an HTML report, JSON documents and a SHA-256 for every file, for readers who never open a JSONL file.
+  </Card>
+  <Card title="No changes to your agent logic" icon="plug">
+    You add three calls around existing code: `init()` at startup, `session()` around a run, and `@trace` or `wrap_tools()` on your tools.
+  </Card>
+</Columns>
+
+## How long it takes
+
+- **A verified chain in under a minute.** `pip install rootsign` needs no database, no Docker and no API key. The [quickstart](/quickstart) records two tool calls and verifies them.
+- **LangGraph or CrewAI in under 10 minutes.** Instrumenting an existing agent means wrapping its tool list and opening a session around the run.
+
+## What it works with
+
+| Integration | How you instrument it | Install |
+| --- | --- | --- |
+| LangGraph and LangChain tools | `rootsign.wrap_tools([...])` on `BaseTool` instances | `pip install 'rootsign[langgraph]'` |
+| CrewAI | `rootsign.wrap_crewai_tools([...])` | `pip install 'rootsign[crewai]'` |
+| Any MCP agent | A proxy that records every `tools/call` | `pip install 'rootsign[mcp]'` |
+| Any async Python function | `@rootsign.trace()` | `pip install rootsign` |
+
+The version matrix each integration is tested against is in [framework support](https://github.com/Providex-AI/rootsign/blob/main/docs/framework-support.md) on GitHub.
+
+RootSign also ships human approval checkpoints, PII redaction that runs before hashing, opt-in decision capture, and a PostgreSQL backend for multi-process deployments. Guides for each are on the way; until then, the [README](https://github.com/Providex-AI/rootsign#readme) covers them.
+
+## Status and supported versions
+
+<Info>
+  RootSign is at **v0.3.1** and classified as **alpha**. The five calls `init`, `session`, `wrap_tools`, `trace` and `verify` are the stable public surface; changing their shape requires a new design record. Other classes may still change between releases.
+</Info>
+
+- **Python:** 3.11 or later is required. CI tests 3.11 and 3.12, so those are the supported versions. The core package installs and runs on 3.13 and 3.14, but they are not in CI yet, and the `crewai` extra may not install on them.
+- **Storage:** records go to local JSONL files by default. PostgreSQL 16 with TimescaleDB is available through the `postgres` extra.
+- **Cloud mode is a preview.** The SDK's HTTP transport and offline spool ship today, but the hosted ingest service they upload to is not live yet.
+
+## Next steps
+
+<Columns cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Record two tool calls, verify the chain, then watch it fail when you edit a record.
+  </Card>
+  <Card title="How it works" icon="network" href="/how-it-works">
+    What a record contains, what the hash covers, and what each verdict means.
+  </Card>
+</Columns>
