@@ -294,7 +294,7 @@ RootSign can also run **as an MCP server** — exposing the audit log itself as 
 from rootsign.mcp.server import create_server_app
 
 app = create_server_app()   # ASGI app; mounts the MCP server at /mcp
-# uvicorn rootsign.mcp.server:app --port 8001
+# Save as audit_server.py, then: uvicorn audit_server:app --port 8001
 ```
 
 Four read-only tools (`list_sessions`, `query_session_chain`, `verify_session_chain`, `get_approval_records`) over the existing store — no new tables.

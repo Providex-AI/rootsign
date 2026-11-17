@@ -216,6 +216,6 @@ def create_server_app(session_factory: SessionFactory | None = None) -> Any:
 
         from rootsign.mcp.server import create_server_app
         app = create_server_app()
-        # uvicorn rootsign.mcp.server:app --port 8001   (mounts MCP at /mcp)
+        # in audit_server.py; then `uvicorn audit_server:app --port 8001` (MCP at /mcp)
     """
     return create_server(session_factory).streamable_http_app()
