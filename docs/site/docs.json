@@ -27,6 +27,10 @@
       {
         "group": "Integrations",
         "pages": ["integrations/langgraph", "integrations/crewai", "integrations/mcp", "integrations/python"]
+      },
+      {
+        "group": "Guides",
+        "pages": ["guides/verify", "guides/evidence-bundles"]
       }
     ]
   },

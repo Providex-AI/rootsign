@@ -43,7 +43,8 @@ WARNING: This session log may have been tampered with.
 
 Exit code is `0` for VALID, `1` for TAMPERED (a record was altered) and `2` for
 INCOMPLETE (a record is missing), so this drops straight into CI or a cron
-audit — and a script can tell an edit from a gap.
+audit — and a script can tell an edit from a gap. Exit `3` means there was
+nothing to verify: an unknown session ID, or a missing or empty file.
 
 ## Hand it to someone who doesn't read JSONL
 

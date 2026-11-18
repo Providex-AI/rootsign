@@ -136,7 +136,7 @@ Nothing here needs a database, Docker, an API key or a network connection. Recor
 
 ## Hand the session to someone else
 
-`verify` answers a developer's question. To give the same session to a reviewer, export it as an evidence bundle:
+`verify` answers a developer's question. To give the same session to a reviewer, export it as an [evidence bundle](/guides/evidence-bundles):
 
 ```bash
 rootsign export --local ~/.rootsign/sessions/<session_id>.jsonl
@@ -184,7 +184,13 @@ The JSONL backend is a single-process writer. When you need several writer proce
   <Card title="How it works" icon="network" href="/how-it-works">
     What a record contains, what the hash covers, and what each verdict means.
   </Card>
-  <Card title="Runnable examples" icon="github" href="https://github.com/Providex-AI/rootsign/tree/main/examples">
-    The quickstart script and a LangGraph invoice agent, in the RootSign repository.
+  <Card title="Verify in CI or cron" icon="shield-check" href="/guides/verify">
+    Exit codes, a script that checks every session, and the Python API.
+  </Card>
+  <Card title="Export an evidence bundle" icon="folder-archive" href="/guides/evidence-bundles">
+    Hand a session to a reviewer and prove later it was not changed.
+  </Card>
+  <Card title="Instrument your framework" icon="plug" href="/integrations/langgraph">
+    LangGraph, CrewAI, MCP, or any Python function.
   </Card>
 </Columns>

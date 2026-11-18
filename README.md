@@ -78,7 +78,7 @@ VALID ✓  —  2 records, chain intact
   Session:  f758a636-7bcd-4f96-8940-eff7d80e760a
 ```
 
-Exit code is `0` for VALID, `1` for TAMPERED (a record was altered) and `2` for INCOMPLETE (a record is missing) — so this drops into CI or a cron audit, and a script can tell theft from loss. Change any character in any record and the verifier names the broken link:
+Exit code is `0` for VALID, `1` for TAMPERED (a record was altered) and `2` for INCOMPLETE (a record is missing) — so this drops into CI or a cron audit, and a script can tell theft from loss. Exit `3` means there was nothing to verify (an unknown session ID, or a missing or empty file), so a typo never reads as a verdict. Change any character in any record and the verifier names the broken link:
 
 ```bash
 $ rootsign verify --local ~/.rootsign/sessions/f758a636-7bcd-4f96-8940-eff7d80e760a.jsonl
