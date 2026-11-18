@@ -30,7 +30,7 @@
       },
       {
         "group": "Guides",
-        "pages": ["guides/verify", "guides/evidence-bundles"]
+        "pages": ["guides/verify", "guides/evidence-bundles", "guides/human-approval", "guides/redaction"]
       }
     ]
   },

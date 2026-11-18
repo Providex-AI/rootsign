@@ -1,0 +1,187 @@
+---
+title: "Require human approval before a tool runs"
+sidebarTitle: "Require human approval"
+description: "Hold a high-risk tool call until a person approves it with rootsign approve, and record who decided, why, and what they saw, next to the action."
+keywords: ["human in the loop", "require_approval", "rootsign approve", "HiTL", "approval", "timeout"]
+---
+
+Some tool calls should not run on an agent's say-so: a large payment, deleting data, sending something to a customer. With `require_approval=True`, RootSign records the call as pending, holds it until a person approves or rejects it, and records that decision next to the action. If nobody answers in time, the call is refused and recorded as timed out.
+
+<Note>
+  Approving from another terminal needs the **PostgreSQL backend**, because the agent and `rootsign approve` are different processes reading the same store. On the default JSONL backend, approval is an [inline prompt](#on-the-jsonl-backend) in the agent's own terminal.
+</Note>
+
+## Hold a tool for approval
+
+<Steps>
+  <Step title="Set up the PostgreSQL backend">
+    ```bash
+    pip install 'rootsign[postgres]'
+    rootsign-admin start-db
+    rootsign-admin init
+    export ROOTSIGN_BACKEND=postgres
+    ```
+
+    `start-db` runs PostgreSQL with TimescaleDB in Docker, and `init` creates the tables.
+  </Step>
+  <Step title="Mark the tool">
+    Add `require_approval=True` to `@rootsign.trace()`. The function body runs only after a person approves:
+
+    ```python transfer.py
+    import asyncio
+
+    import rootsign
+    from rootsign import HiTLRejectedError, HiTLTimeoutError
+
+    rootsign.init(agent="payments-agent", risk_tier="critical")
+
+
+    @rootsign.trace(require_approval=True, timeout_seconds=300)
+    async def wire_transfer(account: str, amount: float) -> str:
+        return f"transferred ${amount:,.2f} to {account}"
+
+
+    async def main() -> None:
+        async with rootsign.session(objective="pay supplier") as ctx:
+            try:
+                print(await wire_transfer(account="GB29NWBK60161331926819", amount=250000.0))
+            except HiTLRejectedError as error:
+                print(f"rejected: {error}")
+            except HiTLTimeoutError as error:
+                print(f"timed out: {error}")
+        print(ctx.session_id)
+
+
+    asyncio.run(main())
+    ```
+
+    Run it. The script stops at `wire_transfer` and waits:
+
+    ```bash
+    python transfer.py
+    ```
+  </Step>
+  <Step title="Approve it from another terminal">
+    List what is waiting, then approve by action ID:
+
+    ```bash
+    rootsign approve --list
+    ```
+
+    ```text
+    Pending approvals (1):
+      06f72d12-ec7d-4ac7-9a87-5a988322ffaa  wire_transfer                   session=8bbb4a2e-ce25-46e2-969d-1f7884fcd72a  submitted=2026-11-17T23:22:51.107941+00:00
+    ```
+
+    ```bash
+    rootsign approve 06f72d12-ec7d-4ac7-9a87-5a988322ffaa --reason "Verified with the supplier by phone"
+    ```
+
+    ```text
+    ✓  Action 06f72d12-ec7d-4ac7-9a87-5a988322ffaa approved.
+    ```
+
+    Within a couple of seconds the waiting script runs the tool and finishes:
+
+    ```text
+    transferred $250,000.00 to GB29NWBK60161331926819
+    8bbb4a2e-ce25-46e2-969d-1f7884fcd72a
+    ```
+  </Step>
+</Steps>
+
+## Reject, or let it time out
+
+To refuse the call, add `--reject`:
+
+```bash
+rootsign approve 7d8d56ec-805c-430d-ae2f-ff1141a17f30 --reject --reason "Above the unattended mandate"
+```
+
+```text
+✗  Action 7d8d56ec-805c-430d-ae2f-ff1141a17f30 rejected.
+```
+
+The tool never runs, and the call raises `HiTLRejectedError` in the agent:
+
+```text
+rejected: Action 7d8d56ec-805c-430d-ae2f-ff1141a17f30 rejected by approver. Reason: Above the unattended mandate
+```
+
+If nobody answers within `timeout_seconds`, the call raises `HiTLTimeoutError` and is recorded as timed out, which is kept distinct from a person saying no:
+
+```text
+timed out: HiTL approval timed out after 300s for action b5e0e3d3-fa5e-4cb4-9462-b1048fd54c83. Status set to timed_out.
+```
+
+A decided action is no longer pending, so approving it again fails with `Error: no pending action found with ID <action_id>.` and exit code `1`.
+
+## Options
+
+| Argument | Default | What it does |
+| --- | --- | --- |
+| `require_approval` | `False` | Hold each call until it is approved |
+| `timeout_seconds` | `300` | How long to wait before refusing the call as timed out |
+| `poll_interval_seconds` | `2.0` | How often the waiting call checks for a decision |
+| `approval_context_builder` | none | A function `(tool_name, redacted_input) -> dict` that builds what the approver is shown. By default: the tool name and up to 500 characters of the redacted input. |
+
+`rootsign approve --list` shows the 20 most recent pending actions across all sessions.
+
+## What gets recorded
+
+| Record | What it holds |
+| --- | --- |
+| The action | Written as `pending` before the wait, so the chain has it even if the process dies. On PostgreSQL its `authorization_status` then becomes `human_approved`, `human_rejected` or `timed_out`. |
+| An approval record | `decision` (`approved` or `rejected`), `decision_reason`, `approver_id`, `approver_type` (`human`, or `timeout_auto_rejected`), and the context the approver was shown |
+
+For the three runs above, the approval records read:
+
+| `authorization_status` | `approver_id` | `approver_type` | `decision` | `decision_reason` |
+| --- | --- | --- | --- | --- |
+| `human_approved` | `cli:<os user>` | `human` | `approved` | Verified with the supplier by phone |
+| `human_rejected` | `cli:<os user>` | `human` | `rejected` | Above the unattended mandate |
+| `timed_out` | `system:timeout` | `timeout_auto_rejected` | `rejected` | No response within 300s |
+
+Approval records are not part of the hash chain, so a session with pending, rejected or timed-out actions still verifies as `VALID`. An [evidence bundle](/guides/evidence-bundles) shows each approval next to the action it decided.
+
+<Warning>
+  **`approver_id` is the operating-system login of whoever ran `rootsign approve`**, written as `cli:<user>`. RootSign does not authenticate the approver: anyone who can run the CLI against the database can approve or reject, and `authorization_status` is not covered by the hash chain. Control who can reach the database, and treat `approver_id` as a label, not proof of identity.
+</Warning>
+
+## On the JSONL backend
+
+With the default backend there is no shared store for another process to write to, so RootSign asks in the agent's own terminal instead. The first word decides: `y`, `yes` or `approve` approves, anything else rejects, and the rest of the line is recorded as the reason:
+
+```text
+[rootsign] Approve tool 'wire_transfer'? [y/N] (text after y/n is a note): y Verified with the supplier
+transferred $250,000.00 to GB29NWBK60161331926819
+```
+
+The approval is recorded with `approver_id` `tty:<os user>`.
+
+Without a terminal, for example in a background job or CI, the first call fails before the tool runs:
+
+```text
+rootsign.errors.HiTLUnsupportedBackendError: HiTL not available for tool 'wire_transfer' on this backend. Human-in-the-loop with require_approval=True needs either an interactive terminal (JSONL backend prompts inline) or the shared store: set ROOTSIGN_BACKEND=postgres for the async poll-loop / `rootsign approve` flow.
+```
+
+<Info>
+  A JSONL session file is append-only, so the action keeps `authorization_status` `pending` after the decision. The decision is in the approval record that follows it, and an evidence bundle shows the two together.
+</Info>
+
+## Limitations
+
+- **Plain functions only.** `require_approval=True` on a LangChain `BaseTool` or a CrewAI tool raises `NotImplementedError`. Put it on the plain function the tool calls instead. The [MCP proxy](/integrations/mcp) has its own `require_approval=True` that holds every proxied call.
+- **No timeout on the JSONL prompt.** The inline prompt waits until someone answers.
+- **Approval happens from the CLI.** There is no web interface for approving yet.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Export an evidence bundle" icon="folder-archive" href="/guides/evidence-bundles">
+    Show a reviewer each action with the approval that decided it.
+  </Card>
+  <Card title="Redact PII" icon="eye-off" href="/guides/redaction">
+    Keep personal data out of what the approver is shown and what is stored.
+  </Card>
+</Columns>

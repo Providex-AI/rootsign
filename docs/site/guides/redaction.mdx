@@ -1,0 +1,175 @@
+---
+title: "Redact personal data before it is hashed and stored"
+sidebarTitle: "Redact PII"
+description: "Use StandardPIIConfig and the other redaction configs to replace emails, phone numbers and other PII with [REDACTED] in tool inputs and outputs before RootSign hashes them."
+keywords: ["pii", "redaction", "StandardPIIConfig", "RedactionConfig", "gdpr", "privacy", "extra_rules"]
+---
+
+Tool arguments and results often contain personal data: an email address, a phone number, an account number. A redaction config replaces those values with `[REDACTED]` before RootSign hashes and stores the call, so the raw value never reaches the session file, the database or an evidence bundle, and it cannot be recovered from the stored hashes. The chain still verifies, because it is built from the redacted values.
+
+## Redact a tool's inputs and outputs
+
+<Steps>
+  <Step title="Pick a config">
+    `StandardPIIConfig` covers email, phone, US Social Security, credit card and UK National Insurance numbers. [Pre-built configs](#pre-built-configs) lists the others.
+  </Step>
+  <Step title="Pass it where you instrument">
+    Every instrumentation entry point takes `redaction_config=`:
+
+    | Entry point | Example |
+    | --- | --- |
+    | Any function | `@rootsign.trace(redaction_config=config)` |
+    | LangGraph and LangChain tools | `rootsign.wrap_tools(tools, redaction_config=config)` |
+    | CrewAI tools | `rootsign.wrap_crewai_tools(tools, redaction_config=config)` |
+    | MCP proxy | `create_proxy_app(upstream_url=..., redaction_config=config)` |
+
+    ```python support.py
+    import asyncio
+
+    import rootsign
+    from rootsign import StandardPIIConfig
+
+    rootsign.init(agent="support-agent", risk_tier="high")
+    redaction = StandardPIIConfig()
+
+
+    @rootsign.trace(redaction_config=redaction)
+    async def email_customer(email: str, subject: str) -> str:
+        return f"sent '{subject}' to {email}"
+
+
+    @rootsign.trace(redaction_config=redaction)
+    async def lookup_customer(customer_id: str) -> dict:
+        return {"customer_id": customer_id, "email": "alice@example.com", "phone": "+44 20 7946 0958"}
+
+
+    async def main() -> None:
+        async with rootsign.session(objective="answer a billing question") as ctx:
+            customer = await lookup_customer("acme-corp")
+            await email_customer(customer["email"], "Your invoice")
+        print(ctx.session_id)
+
+
+    asyncio.run(main())
+    ```
+  </Step>
+  <Step title="Check what was stored">
+    Run it and look at the two action records in the session file:
+
+    ```json lookup_customer
+    {"input_redacted": {"args": ["acme-corp"], "kwargs": {}},
+     "output_redacted": {"result": {"customer_id": "acme-corp", "email": "[REDACTED]", "phone": "[REDACTED]"}}}
+    ```
+
+    ```json email_customer
+    {"input_redacted": {"args": ["[REDACTED]", "Your invoice"], "kwargs": {}},
+     "output_redacted": {"result": "sent 'Your invoice' to alice@example.com"}}
+    ```
+
+    The `email` and `phone` fields were redacted wherever they appeared, including the email passed positionally. The second tool's result still contains the address. The next section explains why.
+  </Step>
+</Steps>
+
+## How matching works
+
+A value is redacted when **its field name has a rule and the value matches that rule's pattern**. Field names are matched wherever they are nested:
+
+| Value | Field name used | Redacted by `StandardPIIConfig`? |
+| --- | --- | --- |
+| `email_customer(email="alice@example.com", ...)` | `email` | Yes |
+| `email_customer("alice@example.com", ...)` | `email`, the parameter's name | Yes |
+| A result `{"email": "alice@example.com"}` | `email` | Yes |
+| A result `{"contact": {"email": "alice@example.com"}}` | `email` | Yes, at any depth |
+| A result `"sent 'Your invoice' to alice@example.com"` | `result` | **No** |
+| `email_customer(email="not an address")` | `email` | No: the value does not match the pattern |
+
+<Warning>
+  **Free text is not scanned.** Rules match field names, then test the value. A string in a field whose name has no rule, such as a tool's plain-text result, a `body` or a `notes` field, is stored as it is, even if it contains an email address. Return structured results with named fields, or add a rule for that field name.
+</Warning>
+
+<Info>
+  Redaction of positional arguments by parameter name was added after RootSign 0.3.1. In 0.3.1 and earlier, `email_customer("alice@example.com", ...)` stored the address unredacted; only the keyword form was redacted.
+</Info>
+
+Other details:
+
+- Numbers are matched by their text form, so an account number stored as a JSON number is redacted like a string.
+- Lists are walked item by item, and each item is matched under the list's field name.
+- Past five levels of nesting, the whole value is replaced with `[REDACTED]` rather than stored unchecked.
+
+## Pre-built configs
+
+| Config | Field names it redacts |
+| --- | --- |
+| `StandardPIIConfig` | `email`, `phone`, `ssn`, `credit_card`, `uk_ni` |
+| `FinancialPIIConfig` | Everything in Standard, plus `account_number`, `routing_number`, `iban` |
+| `HealthcarePIIConfig` | Everything in Standard, plus `mrn`, `npi`, `dob` |
+
+The patterns are deliberately broad: they accept some false positives to avoid false negatives. Each field name has one pattern, for example `ssn` matches nine digits with optional separators and `iban` matches the international bank account format. The full patterns are in [`rootsign/sdk/redaction.py`](https://github.com/Providex-AI/rootsign/blob/main/rootsign/sdk/redaction.py).
+
+## Add your own rules
+
+All three pre-built configs take `extra_rules`, a dictionary of field name to regular expression, added to the built-in rules:
+
+```python
+from rootsign import FinancialPIIConfig
+
+redaction = FinancialPIIConfig(extra_rules={"policy_number": r"POL-\d{6}"})
+```
+
+<Info>
+  `extra_rules` on `FinancialPIIConfig` and `HealthcarePIIConfig` was added after RootSign 0.3.1. In 0.3.1 and earlier, only `StandardPIIConfig` accepts it.
+</Info>
+
+To start from nothing, build a `RedactionConfig` with only your rules:
+
+```python
+from rootsign import RedactionConfig
+
+redaction = RedactionConfig({"email": r".+@.+", "kwargs.customer.tax_id": r".+"})
+```
+
+| Key | Matches |
+| --- | --- |
+| A bare name, `"email"` | That field name at any depth, in inputs and outputs |
+| A dotted path, `"kwargs.customer.tax_id"` | Only that exact path |
+
+For a function traced with `@rootsign.trace`, a path starts at the top of what RootSign records for the call: `kwargs.<parameter>` for an argument (a positional argument is matched at the same path) and `result` for the return value, so `result.email` matches an `email` field in a returned dictionary. LangGraph tools, CrewAI tools and the MCP proxy record inputs in other shapes, shown on each [integration page](/integrations/langgraph#what-gets-recorded), so prefer bare names there.
+
+<Warning>
+  A dotted path that does not start at `kwargs` or `result` never matches a tool call. `"customer.tax_id"` redacts nothing, because the recorded input is `{"args": [...], "kwargs": {"customer": {...}}}`. Write `"kwargs.customer.tax_id"`.
+</Warning>
+
+When a path rule and a name rule both match a field, the path rule wins. Pass `match_mode="path"` to treat bare names as paths too, so that `"email"` no longer matches nested fields.
+
+## What gets recorded
+
+- The redacted value is the literal string `[REDACTED]`.
+- `input_hash` and `output_hash` are hashes of the redacted payload, so the original value cannot be recovered from them, and the chain verifies as `VALID`.
+- An [evidence bundle](/guides/evidence-bundles) lists every redacted field in `redaction.json`. For the example above:
+
+  ```json redaction.json
+  {"totals": {"actions_with_redactions": 2, "redacted_fields": 3},
+   "records": [
+     {"sequence_number": 1, "input_paths": [], "output_paths": ["result.email", "result.phone"]},
+     {"sequence_number": 2, "input_paths": ["args[0]"], "output_paths": []}
+   ]}
+  ```
+
+## What it does not do
+
+- **It does not scan free text**, as described above.
+- **It does not record which config was used.** A bundle shows which fields were redacted, not which rule caused it.
+- **It cannot redact retroactively.** Records written before you added a config keep their original values. To withhold stored content from a bundle you are about to share, use [`--redact-previews`](/guides/evidence-bundles#withhold-stored-content-before-sharing) when you export.
+- **It applies to tool calls.** The session `objective` you pass to `rootsign.session()` is stored as written.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="How it works" icon="network" href="/how-it-works">
+    What each hash covers and how redaction fits before hashing.
+  </Card>
+  <Card title="Export an evidence bundle" icon="folder-archive" href="/guides/evidence-bundles">
+    Read redaction.json and withhold content when you share a bundle.
+  </Card>
+</Columns>
