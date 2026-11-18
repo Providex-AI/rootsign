@@ -279,6 +279,51 @@ def trace(
     return decorator
 
 
+def _positional_names(func: Callable[..., Any], count: int) -> list[str] | None:
+    """Parameter names for the first `count` positional arguments of `func`.
+
+    Extra positionals bound to `*args` take that parameter's name. Returns
+    None when the signature cannot be read, so the caller can fail closed.
+    """
+    import inspect
+
+    try:
+        parameters = list(inspect.signature(func).parameters.values())
+    except (TypeError, ValueError):
+        return None
+    names: list[str] = []
+    for parameter in parameters:
+        if len(names) >= count:
+            break
+        if parameter.kind in (parameter.POSITIONAL_ONLY, parameter.POSITIONAL_OR_KEYWORD):
+            names.append(parameter.name)
+        elif parameter.kind is parameter.VAR_POSITIONAL:
+            names.extend([parameter.name] * (count - len(names)))
+            break
+        else:
+            break
+    return names
+
+
+def _redacted_call_input(
+    func: Callable[..., Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    redaction_config: RedactionConfig | None,
+) -> dict[str, Any]:
+    """The recorded input of one call, `{"args": [...], "kwargs": {...}}`, redacted.
+
+    Redaction rules match field names, and positional arguments have none in
+    the recorded payload, so without help `send(email)` would store the
+    address in the clear while `send(email=...)` redacts it. Positional values
+    are therefore also matched under their parameter names (ADR-006).
+    """
+    payload: dict[str, Any] = _to_json_safe({"args": list(args), "kwargs": dict(kwargs)})
+    if redaction_config is None:
+        return payload
+    return redaction_config.redact_call(payload, _positional_names(func, len(args)))
+
+
 async def _emit_action_record(
     *,
     func: Callable[..., Any],
@@ -308,10 +353,7 @@ async def _emit_action_record(
     if _input_payload_override is not None:
         redacted_input: Any = _input_payload_override
     else:
-        input_payload: dict[str, Any] = _to_json_safe({"args": list(args), "kwargs": dict(kwargs)})
-        redacted_input = (
-            redaction_config.redact(input_payload) if redaction_config else input_payload
-        )
+        redacted_input = _redacted_call_input(func, args, kwargs, redaction_config)
     input_hash = compute_payload_hash(redacted_input)
     timestamp = datetime.now(timezone.utc)
 
@@ -531,10 +573,7 @@ async def _emit_hitl_action(
     if _input_payload_override is not None:
         redacted_input: Any = _input_payload_override
     else:
-        input_payload: dict[str, Any] = _to_json_safe({"args": list(args), "kwargs": dict(kwargs)})
-        redacted_input = (
-            redaction_config.redact(input_payload) if redaction_config else input_payload
-        )
+        redacted_input = _redacted_call_input(func, args, kwargs, redaction_config)
     input_hash = compute_payload_hash(redacted_input)
     timestamp = datetime.now(timezone.utc)
 
@@ -651,10 +690,7 @@ async def _emit_hitl_action_sync(
     if _input_payload_override is not None:
         redacted_input: Any = _input_payload_override
     else:
-        input_payload: dict[str, Any] = _to_json_safe({"args": list(args), "kwargs": dict(kwargs)})
-        redacted_input = (
-            redaction_config.redact(input_payload) if redaction_config else input_payload
-        )
+        redacted_input = _redacted_call_input(func, args, kwargs, redaction_config)
     input_hash = compute_payload_hash(redacted_input)
     timestamp = datetime.now(timezone.utc)
 

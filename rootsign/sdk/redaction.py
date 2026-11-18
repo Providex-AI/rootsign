@@ -121,6 +121,40 @@ class RedactionConfig:
             return payload
         return self._redact_dict(payload, path="", depth=0)
 
+    def redact_call(self, payload: Any, positional_names: list[str] | None) -> Any:
+        """`redact` for a recorded call, `{"args": [...], "kwargs": {...}}`.
+
+        Rules match field names, and a positional argument has none in the
+        recorded payload: `send("alice@example.com")` sits at `args`, where no
+        `email` rule can see it. Each positional value is therefore also
+        matched under its parameter name, at the path it would have had as a
+        keyword argument (`kwargs.<name>`), so a call redacts the same way
+        however it was made. The recorded shape is unchanged.
+
+        `positional_names` comes from the called function's signature. None
+        means it could not be read; then every positional value that is not
+        a container is redacted, because redaction fails CLOSED (ADR-006).
+        """
+        redacted = self.redact(payload)
+        if not isinstance(redacted, dict) or not self._has_rules():
+            return redacted
+        args = redacted.get("args")
+        if not isinstance(args, list) or not args:
+            return redacted
+        if positional_names is None:
+            named = [
+                value if isinstance(value, (dict, list)) or value is None else REDACTED_PLACEHOLDER
+                for value in args
+            ]
+        else:
+            named = [
+                self._redact_value(f"kwargs.{positional_names[i]}", value, depth=2)
+                if i < len(positional_names)
+                else value
+                for i, value in enumerate(args)
+            ]
+        return {**redacted, "args": named}
+
     def _redact_dict(self, obj: dict[str, Any], path: str, depth: int) -> Any:
         # Fail CLOSED past the depth limit — return the redaction
         # placeholder rather than the raw subtree. Audit fix.
@@ -224,12 +258,13 @@ class StandardPIIConfig(RedactionConfig):
 class FinancialPIIConfig(StandardPIIConfig):
     """StandardPIIConfig + financial field names commonly seen in fintech agents."""
 
-    def __init__(self):
+    def __init__(self, extra_rules: dict[str, str] | None = None):
         super().__init__(
             extra_rules={
                 "account_number": r"\d{8,17}",
                 "routing_number": r"\d{9}",
                 "iban": r"[A-Z]{2}\d{2}[A-Z0-9]{4}\d{7}([A-Z0-9]?){0,16}",
+                **(extra_rules or {}),
             }
         )
 
@@ -237,11 +272,12 @@ class FinancialPIIConfig(StandardPIIConfig):
 class HealthcarePIIConfig(StandardPIIConfig):
     """StandardPIIConfig + healthcare field names (HIPAA-relevant)."""
 
-    def __init__(self):
+    def __init__(self, extra_rules: dict[str, str] | None = None):
         super().__init__(
             extra_rules={
                 "mrn": r"MRN\d{6,10}",
                 "npi": r"\d{10}",
                 "dob": r"\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4}",
+                **(extra_rules or {}),
             }
         )
