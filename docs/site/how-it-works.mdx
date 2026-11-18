@@ -84,6 +84,8 @@ When a session has both an altered record and a gap, the verdict is `TAMPERED`, 
 
 The separate exit codes let a CI job or a scheduled audit tell the two failures apart: an edit points to tampering, while a gap may be a lost upload.
 
+Exit code `3` is not a verdict. It means there was nothing to verify: a session ID the database has never seen, a session file that is missing, unreadable or empty, or bad arguments. In 0.3.1 and earlier, an unknown session ID reported `VALID` with 0 records and exit code `0`.
+
 ## What verify does not check
 
 The chain protects the eight fields above and, through the payload hashes, the stored arguments and results. Some data sits outside it:

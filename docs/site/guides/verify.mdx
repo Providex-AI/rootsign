@@ -1,0 +1,207 @@
+---
+title: "Verify a session's hash chain from the CLI or Python"
+sidebarTitle: "Verify a session"
+description: "Check that a RootSign session is intact with rootsign verify or verify_session_local(), read the four exit codes, and run verification in CI or cron."
+keywords: ["rootsign verify", "verify_session_local", "exit codes", "ci", "cron", "tamper detection"]
+---
+
+`rootsign verify` recomputes every hash in a session and tells you whether the records are intact. Run it before you rely on a session in an investigation, after you receive session files from somewhere else, or on a schedule over everything an agent has recorded. This page covers the command, its exit codes, the Python API, and how to wire it into CI.
+
+<Note>
+  Verifying a JSONL session file needs only `pip install rootsign`. Verifying by session ID reads the PostgreSQL store and needs `pip install 'rootsign[postgres]'` and `ROOTSIGN_BACKEND=postgres`.
+</Note>
+
+## Verify one session
+
+<Steps>
+  <Step title="Find the session">
+    With the default JSONL backend, each session is a file named after its ID in `~/.rootsign/sessions/`, or in `$ROOTSIGN_DATA_DIR/sessions/` if you set it. Your code can print the ID from `ctx.session_id`, as in the [quickstart](/quickstart).
+  </Step>
+  <Step title="Run verify">
+    <CodeGroup>
+
+    ```bash JSONL file
+    rootsign verify --local ~/.rootsign/sessions/<session_id>.jsonl
+    ```
+
+    ```bash PostgreSQL
+    rootsign verify <session_id>
+    ```
+
+    </CodeGroup>
+
+    ```text
+    VALID ✓  —  2 records, chain intact
+      Session:  f7feef27-a9ff-452b-a9a7-a373219914ea
+    ```
+  </Step>
+  <Step title="Read the exit code">
+    The command exits `0` for VALID. Any other code means the session cannot be trusted as it stands, or could not be checked at all. The next section lists them.
+  </Step>
+</Steps>
+
+## Exit codes
+
+| Code | Meaning | What to do |
+| --- | --- | --- |
+| `0` | **VALID.** Every record is present and every hash matches. | Nothing. |
+| `1` | **TAMPERED.** A record was altered after it was written. | Treat the session as evidence of tampering. The output names the first broken record. |
+| `2` | **INCOMPLETE.** The records present are intact, but some are missing. | Look for the missing sequence numbers: a deleted row, or a spooled session that was never uploaded. |
+| `3` | **Nothing was verified.** An unknown session ID, a session file that is missing, unreadable or empty, or a command-line mistake. | Fix the path, ID or command. This is never a verdict on any records. |
+
+Codes `0` to `2` only ever report a verdict, so a script can act on them without parsing the output.
+
+<Info>
+  Exit code `3` was added after RootSign 0.3.1. In 0.3.1 and earlier, an unknown session ID reported `VALID` with 0 records and exit code `0`, and a missing file exited `1`.
+</Info>
+
+What each failure looks like:
+
+<CodeGroup>
+
+```text TAMPERED (exit 1)
+TAMPERED ✗  —  chain broken at record #1
+  Detail:   payload_hash mismatch: input_redacted does not match input_hash
+  Session:  f7feef27-a9ff-452b-a9a7-a373219914ea
+WARNING: This session log may have been tampered with.
+```
+
+```text INCOMPLETE (exit 2)
+INCOMPLETE ⚠  —  1 records present and intact, but the chain is missing records
+  Detail:   1 record(s) missing at sequence 1
+  Session:  f7feef27-a9ff-452b-a9a7-a373219914ea
+The records present verify cleanly; the gap is proven by the chain itself. Check for a spooled session that was never synced (`rootsign-admin sync`) or a deleted row.
+```
+
+```text Nothing to verify (exit 3)
+Error: no session file at missing.jsonl
+```
+
+</CodeGroup>
+
+A session in which no tools ran is not an error. It verifies as `VALID` with 0 records.
+
+## See each record's hashes
+
+Add `--verbose` to list every action with the two hashes that link it to the chain:
+
+```bash
+rootsign verify --local ~/.rootsign/sessions/<session_id>.jsonl --verbose
+```
+
+```text
+VALID ✓  —  2 records, chain intact
+  Session:  f7feef27-a9ff-452b-a9a7-a373219914ea
+
+  Records:
+    #1  send_invoice
+        self_hash         3e4497b7b6ead18c78760287b25cfac9952e73ed967174f3cc6473656d0345bf
+        prev_action_hash  (none: first record)
+    #2  log_payment
+        self_hash         f0f346e8c4bd21fe64a988811626f1099389e8581c3c4fd055fccaf8d82eaf3d
+        prev_action_hash  3e4497b7b6ead18c78760287b25cfac9952e73ed967174f3cc6473656d0345bf
+```
+
+Each record's `prev_action_hash` is the `self_hash` of the record before it. [How it works](/how-it-works#how-the-chain-is-built) explains what goes into each hash.
+
+## Verify every session in CI or cron
+
+This script verifies every session file in the sessions folder and fails if any of them is not VALID:
+
+```bash verify-all.sh
+#!/usr/bin/env bash
+# Verify every RootSign session file; exit non-zero unless all are VALID.
+status=0
+for f in "${ROOTSIGN_DATA_DIR:-$HOME/.rootsign}"/sessions/*.jsonl; do
+  rootsign verify --local "$f" > /dev/null
+  case $? in
+    0) ;;
+    1) echo "TAMPERED:   $f"; status=1 ;;
+    2) echo "INCOMPLETE: $f"; status=1 ;;
+    *) echo "NOT CHECKED: $f"; status=1 ;;
+  esac
+done
+exit $status
+```
+
+With one altered session among them, it prints that file's path and exits `1`:
+
+```text
+TAMPERED:   <data_dir>/sessions/<session_id>.jsonl
+```
+
+## Verify from Python
+
+`verify_session_local()` checks a JSONL file and returns a `VerifyResult`. It does not print anything or exit:
+
+```python check_local.py
+import sys
+
+from rootsign import verify_session_local
+
+result = verify_session_local(sys.argv[1])
+print(result.verdict.value, result.record_count, result.first_invalid_sequence, result.missing_ranges)
+print(result.summary)
+```
+
+```bash
+python check_local.py ~/.rootsign/sessions/<session_id>.jsonl
+```
+
+```text
+VALID 2 None []
+VALID — 2 records, chain intact
+```
+
+| Field | Meaning |
+| --- | --- |
+| `verdict` | `Verdict.VALID`, `Verdict.TAMPERED` or `Verdict.INCOMPLETE` |
+| `valid` | `True` only for VALID |
+| `record_count` | Action records checked |
+| `first_invalid_sequence` | Sequence number of the first broken or missing record, or `None` |
+| `missing_ranges` | Missing sequence numbers as inclusive `(start, end)` pairs, for example `[(1, 1)]` |
+| `error` | Why the chain failed, for example `payload_hash mismatch: ...` |
+| `summary` | The one-line description, as printed above |
+
+For the PostgreSQL store, `verify_session()` takes a session ID and an async database session:
+
+```python check_db.py
+import asyncio
+import sys
+from uuid import UUID
+
+from rootsign import verify_session
+from rootsign.database import AsyncSessionLocal
+
+
+async def main() -> None:
+    async with AsyncSessionLocal() as db:
+        result = await verify_session(UUID(sys.argv[1]), db)
+    print(result.summary)
+
+
+asyncio.run(main())
+```
+
+```text
+VALID — 2 records, chain intact
+```
+
+<Warning>
+  The Python functions do not report "nothing to verify" separately. For an empty file, `verify_session_local()` returns TAMPERED, and it raises `FileNotFoundError` for a missing one. For an unknown session ID, `verify_session()` returns VALID with 0 records. Check that the session exists before you rely on the result, or use the CLI, which exits `3` in these cases.
+</Warning>
+
+## What it does not check
+
+Verification proves that the action records present are unaltered and that none are missing from the middle of the chain. It does not detect records deleted from the end of a session, edits to the session open and close events, or changes to `authorization_status`. [How it works](/how-it-works#what-verify-does-not-check) explains each limit.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Export an evidence bundle" icon="folder-archive" href="/guides/evidence-bundles">
+    Turn a verified session into a report someone else can check.
+  </Card>
+  <Card title="How it works" icon="network" href="/how-it-works">
+    What each hash covers and how the verdicts are decided.
+  </Card>
+</Columns>

@@ -78,7 +78,7 @@ VALID ✓  —  2 records, chain intact
   Session:  f758a636-7bcd-4f96-8940-eff7d80e760a
 ```
 
-Exit code is `0` for VALID, `1` for TAMPERED (a record was altered) and `2` for INCOMPLETE (a record is missing) — so this drops into CI or a cron audit, and a script can tell theft from loss. Change any character in any record and the verifier names the broken link:
+Exit code is `0` for VALID, `1` for TAMPERED (a record was altered) and `2` for INCOMPLETE (a record is missing) — so this drops into CI or a cron audit, and a script can tell theft from loss. Exit `3` means there was nothing to verify (an unknown session ID, or a missing or empty file), so a typo never reads as a verdict. Change any character in any record and the verifier names the broken link:
 
 ```bash
 $ rootsign verify --local ~/.rootsign/sessions/f758a636-7bcd-4f96-8940-eff7d80e760a.jsonl
@@ -345,7 +345,9 @@ redaction = StandardPIIConfig()
 tools = rootsign.wrap_tools([send_invoice], redaction_config=redaction)
 ```
 
-`FinancialPIIConfig` adds account / routing / IBAN patterns; `HealthcarePIIConfig` adds MRN / NPI / DOB. Each accepts `extra_rules={...}` for domain-specific patterns without subclassing. See [ADR-006](docs/adr/ADR-006-redaction-contract.md).
+`FinancialPIIConfig` adds account / routing / IBAN patterns; `HealthcarePIIConfig` adds MRN / NPI / DOB. Each accepts `extra_rules={...}` for domain-specific patterns without subclassing.
+
+Rules match **field names**: a value is redacted when its field (or, for a positional argument, its parameter) is named `email`, `phone` and so on and the value matches the pattern. Free text in a field with any other name, such as a tool's string result, is not scanned. See [ADR-006](docs/adr/ADR-006-redaction-contract.md).
 
 ## Evidence bundles
 

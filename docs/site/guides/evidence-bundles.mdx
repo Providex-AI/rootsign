@@ -1,0 +1,156 @@
+---
+title: "Export a session as an evidence bundle for a reviewer"
+sidebarTitle: "Export an evidence bundle"
+description: "Use rootsign export to turn a session into a folder with an HTML report, JSON evidence and a SHA-256 manifest, then check that a bundle you receive is genuine."
+keywords: ["rootsign export", "evidence bundle", "manifest", "chain of custody", "compliance report", "redact-previews"]
+---
+
+`rootsign verify` answers a developer's question. A compliance officer, an auditor or a customer's security team asks a different one, what the agent did and whether they can trust the file, and they will not read JSONL. `rootsign export` turns one session into a folder they can open: a report in HTML and Markdown, the same facts as JSON, and a manifest with a SHA-256 for every file.
+
+<Note>
+  Exporting a JSONL session file needs only `pip install rootsign`. Exporting by session ID reads the PostgreSQL store and needs `pip install 'rootsign[postgres]'` and `ROOTSIGN_BACKEND=postgres`.
+</Note>
+
+## Export a session
+
+<Steps>
+  <Step title="Run export">
+    <CodeGroup>
+
+    ```bash JSONL file
+    rootsign export --local ~/.rootsign/sessions/<session_id>.jsonl --out ./bundles
+    ```
+
+    ```bash PostgreSQL
+    rootsign export <session_id> --out ./bundles
+    ```
+
+    </CodeGroup>
+
+    ```text
+    VALID — 2 records, chain intact
+      Bundle:   bundles/evidence-f7feef27-a9ff-452b-a9a7-a373219914ea
+                redaction.json
+                report.html
+                report.md
+                timeline.json
+                verification.json
+                manifest.json
+
+      manifest.json SHA-256:  4cb7492f5d0d60313d62fdf9cb4d04859b855bfe8afb93fa35b91c972a01b26a
+      Record that hash outside the bundle — a ticket, an email, a chain-of-custody log.
+      It is what proves a bundle you receive later is the one that was generated.
+    ```
+
+    Without `--out`, the bundle is written to the current directory.
+  </Step>
+  <Step title="Record the manifest hash outside the bundle">
+    Copy the `manifest.json SHA-256` line into the ticket, email or log where you record the hand-over. This value is what later proves a bundle is the one you exported. The [checking](#check-a-bundle-you-receive) section shows why it has to live somewhere else.
+
+    Each export has its own manifest hash, because the manifest records when the bundle was generated. Exporting the same session again produces a different hash, so record the one printed for the bundle you actually send.
+  </Step>
+  <Step title="Send the folder">
+    Send the whole `evidence-<session_id>` folder. The reviewer opens `report.html` in any browser. It has no JavaScript and makes no network requests, so it opens the same from a file share, an email attachment or an offline machine.
+  </Step>
+</Steps>
+
+<Frame caption="report.html: the verdict first, then the chain, then what happened">
+  <img src="/images/evidence-report.png" alt="Evidence report showing a VALID verdict banner, the session and agent details, and the chain of records with their hashes" />
+</Frame>
+
+## What the bundle contains
+
+| File | What it holds |
+| --- | --- |
+| `manifest.json` | Bundle version, generator, session and agent IDs, where the session was read from, the verdict, and a SHA-256 for every other file |
+| `verification.json` | The verdict, and for each record its sequence, `action_id`, `self_hash`, `prev_action_hash` and whether it was verified |
+| `timeline.json` | The session in order (open, decisions, actions, approvals, close) with every field each record carries |
+| `redaction.json` | Which fields held the `[REDACTED]` placeholder |
+| `report.md`, `report.html` | The same facts, written for people |
+
+The reports are built from the three JSON documents and nothing else, so the report cannot state anything the machine-readable evidence does not contain. When a session includes a human approval, the report shows the approval next to the action it decided:
+
+<Frame caption="An action a person rejected, and the approval record that rejected it">
+  <img src="/images/evidence-report-approval.png" alt="Evidence report section showing a wire_transfer action with status human_rejected and no output hash, followed by the approval record with the approver, the decision, the reason and the context the approver was shown" />
+</Frame>
+
+<Warning>
+  `manifest.json` records where the session was read from. For a JSONL export that is the full path of the session file on your machine, for example `/Users/you/.rootsign/sessions/<session_id>.jsonl`.
+</Warning>
+
+## Check a bundle you receive
+
+Run `--check` on the folder. It hashes every file again, compares each with the manifest, and prints the manifest's own hash:
+
+```bash
+rootsign export --check ./bundles/evidence-<session_id>
+```
+
+```text
+✓  INTACT — 5 file(s) match manifest.json
+
+  manifest.json SHA-256:  4cb7492f5d0d60313d62fdf9cb4d04859b855bfe8afb93fa35b91c972a01b26a
+  Compare this against the hash recorded when the bundle was exported.
+  The file checks above cannot detect an edit that also updated the manifest.
+```
+
+If a file was changed, `--check` names it and exits `1`:
+
+```text
+✗  ALTERED — 1 altered (timeline.json)
+  altered:     timeline.json
+
+  manifest.json SHA-256:  dd1cf56f9fa94ad117cb1323910da0948aae0414ff5d75088b13720eeb02ef93
+  Compare this against the hash recorded when the bundle was exported.
+  The file checks above cannot detect an edit that also updated the manifest.
+```
+
+<Warning>
+  **`INTACT` alone does not prove the bundle is genuine.** Someone who edits a file and then updates its hash in `manifest.json` passes the file checks. What they cannot keep is the manifest hash: editing the manifest changes it. Always compare the printed `manifest.json SHA-256` with the value recorded at export. If they differ, the bundle is not the one that was exported, whatever the file checks say.
+</Warning>
+
+## Withhold stored content before sharing
+
+When a bundle leaves your organisation, `--redact-previews` leaves out the stored content of the session: the tool arguments and results, the context a person saw when approving, and captured decision summaries.
+
+```bash
+rootsign export --local ~/.rootsign/sessions/<session_id>.jsonl --out ./outgoing --redact-previews
+```
+
+The report says what was left out and what to ask for. In `report.md`:
+
+```markdown report.md
+_stored content withheld from this bundle (--redact-previews); hashes, identities and timings are unaffected._
+
+_Withheld from 2 event(s): input_preview, output_preview. Ask the exporter for an unredacted bundle if you need them._
+```
+
+Hashes, IDs and timestamps stay in the bundle, so the verdict and the chain are unchanged. `--redact-previews` withholds content at export time; to keep personal data out of the stored records in the first place, redact it before it is hashed.
+
+## Other options
+
+| Option | What it does |
+| --- | --- |
+| `--out <dir>` | Write `evidence-<session_id>/` into this directory. Default: the current directory. |
+| `--format json` | Write only the JSON documents. `md` and `html` add that report; `all`, the default, writes everything. The JSON evidence is always included. |
+| `--force` | Overwrite an existing bundle folder. Without it, exporting into a folder that already holds that bundle fails with an error. |
+
+## Exit codes
+
+| Command | Exit code |
+| --- | --- |
+| `rootsign export` | `0` when the bundle was written, **whatever the verdict**. A TAMPERED session still produces a bundle that records TAMPERED. Read the first line of output, or `verdict` in `manifest.json`, for the verdict. |
+| `rootsign export --check` | `0` when every file matches the manifest. `1` when a file was altered or is missing, or the folder has no `manifest.json` (`✗ UNREADABLE`). |
+
+When `rootsign export` cannot read the session (a path that does not exist, an unknown session ID) or the bundle folder already exists, it prints one line starting with `Error:` and exits `1`.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Verify a session" icon="shield-check" href="/guides/verify">
+    Check a session's chain and read the exit codes.
+  </Card>
+  <Card title="How it works" icon="network" href="/how-it-works">
+    What the hashes cover and what verification cannot detect.
+  </Card>
+</Columns>

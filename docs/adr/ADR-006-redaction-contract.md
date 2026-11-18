@@ -80,6 +80,29 @@ Current semantics:
   inferred. This lets users tighten a broad leaf rule with a narrow
   path-specific override.
 
+### Positional arguments match by parameter name (amendment, 2026-11-17)
+
+Leaf-key matching still missed one shape: a positional argument has no key
+in the recorded payload. `email_customer("alice@example.com", "Invoice")` is
+recorded as `{"args": ["alice@example.com", "Invoice"], "kwargs": {}}`, where
+the address sits under `args` and no `email` rule can see it, so it was stored
+and hashed in the clear while the keyword call redacted it. The chain still
+verified, and `redaction.json` correctly reported no redacted field.
+
+The decorator now redacts a call with `RedactionConfig.redact_call(payload,
+positional_names)`. It runs `redact()` as before, then matches each positional
+value under its parameter name, at the path it would have had as a keyword
+argument (`kwargs.<name>`). Names come from the called function's signature;
+extra values bound to `*args` take that parameter's name. If the signature
+cannot be read, every positional value that is not a container is redacted
+(fails closed, as the depth limit does).
+
+* The recorded shape does not change: positional values stay in `args`.
+* `redact()` and the golden vectors are unchanged; only what the decorator
+  calls changed.
+* Free text in a field whose name matches no rule (a `result` string, a
+  `body`) is still not scanned. Rules match names, not content.
+
 ### Nested field support
 
 `RedactionConfig` walks dicts and lists recursively. List items keep
