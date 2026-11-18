@@ -97,3 +97,47 @@ async def test_tty_reject_raises_and_skips_tool(tmp_path):
         r for r in _lines(client, ctx.session_id) if r.get("event_type") == "APPROVAL_RECORD"
     ]
     assert approvals and approvals[0]["payload"]["decision"] == "rejected"
+
+
+@pytest.mark.parametrize(
+    ("answer", "approved", "note"),
+    [
+        ("y", True, None),
+        ("yes", True, None),
+        ("Yes", True, None),
+        ("yes, verified with the supplier", True, "verified with the supplier"),
+        ("y verified", True, "verified"),
+        ("approve", True, None),
+        ("n", False, None),
+        ("no", False, None),
+        ("no too risky", False, "too risky"),
+        ("", False, None),
+        ("maybe later", False, "later"),
+    ],
+)
+def test_the_answer_is_split_by_word_not_by_letter(answer, approved, note):
+    """Typing "yes" used to approve with the note "es" (and "no" reject with "o")."""
+    from rootsign.sdk.decorator import _parse_approval_answer
+
+    assert _parse_approval_answer(answer) == (approved, note)
+
+
+async def test_answering_yes_records_no_stray_note(tmp_path):
+    client = _client(tmp_path)
+    ctx = _ctx()
+
+    @trace(ingest_client=client, session_context=ctx, require_approval=True)
+    async def tool(x: int) -> int:
+        return x
+
+    with (
+        patch("sys.stdin.isatty", return_value=True),
+        patch("builtins.input", return_value="yes"),
+    ):
+        await tool(1)
+
+    [approval] = [
+        r for r in _lines(client, ctx.session_id) if r.get("event_type") == "APPROVAL_RECORD"
+    ]
+    assert approval["payload"]["decision"] == "approved"
+    assert approval["payload"]["decision_reason"] is None

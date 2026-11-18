@@ -657,6 +657,24 @@ def _is_jsonl_backend(client: IngestClient) -> bool:
     return isinstance(client, JsonlIngestClient) or isinstance(inner, JsonlIngestClient)
 
 
+#: First words the inline approval prompt accepts as "approve". Anything else,
+#: including an empty answer, rejects: the prompt's default is No.
+_APPROVE_WORDS = frozenset({"y", "yes", "a", "approve", "approved"})
+
+
+def _parse_approval_answer(raw: str) -> tuple[bool, str | None]:
+    """Split an inline approval answer into (approved, note).
+
+    The first word decides; the rest of the line is the note recorded in the
+    APPROVAL_RECORD. This used to read only the first character and keep the
+    rest as the note, so typing "yes" approved with the note "es", and "no"
+    rejected with the note "o", both written into the audit trail.
+    """
+    first, _, rest = raw.strip().partition(" ")
+    approved = first.lower().rstrip(",.:;!") in _APPROVE_WORDS
+    return approved, rest.strip() or None
+
+
 async def _emit_hitl_action_sync(
     *,
     func: Callable[..., Any],
@@ -723,8 +741,7 @@ async def _emit_hitl_action_sync(
 
     prompt = f"[rootsign] Approve tool {tool_name!r}? [y/N] (text after y/n is a note): "
     raw = (await asyncio.to_thread(input, prompt)).strip()
-    approved = raw[:1].lower() in ("y", "a")
-    note = raw[1:].strip() or None
+    approved, note = _parse_approval_answer(raw)
 
     await _emit_approval_record(
         client=client,
