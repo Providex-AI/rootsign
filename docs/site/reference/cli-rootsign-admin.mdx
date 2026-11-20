@@ -1,0 +1,215 @@
+---
+title: "rootsign-admin CLI reference"
+sidebarTitle: "rootsign-admin"
+description: "Every rootsign-admin command with its options, output and exit codes: start and stop the local database, create its tables, count rows, and upload the spool."
+keywords: ["rootsign-admin", "start-db", "stop-db", "init", "sync", "status", "postgresql", "timescaledb", "spool"]
+---
+
+`rootsign-admin` is the operator CLI: it runs the local PostgreSQL database, creates RootSign's tables, and uploads sessions that were spooled while the cloud endpoint was unreachable. It is installed with `rootsign`. Commands you run against sessions, such as `verify` and `approve`, are on [`rootsign`](/reference/cli-rootsign).
+
+| Command | What it does | Needs |
+| --- | --- | --- |
+| [`start-db`](#rootsign-admin-start-db) | Starts PostgreSQL with TimescaleDB in Docker | Docker |
+| [`stop-db`](#rootsign-admin-stop-db) | Stops that container | Docker |
+| [`init`](#rootsign-admin-init) | Creates or upgrades the tables | `rootsign[postgres]` |
+| [`status`](#rootsign-admin-status) | Counts the rows in each table | `rootsign[postgres]` |
+| [`sync`](#rootsign-admin-sync) | Uploads spooled sessions | `rootsign[cloud]`, except `--dry-run` |
+
+`init` and `status` connect to the database at `DATABASE_URL_SYNC`. Its default, `postgresql+psycopg2://rootsign:rootsign@localhost:5432/rootsign_dev`, is the database `start-db` creates. Settings come from environment variables, or from a `.env` file in the directory you run the command from.
+
+A command-line mistake, such as an unknown option, exits `2`. `--help` exits `0`.
+
+## rootsign-admin start-db
+
+```text
+rootsign-admin start-db [--port PORT]
+```
+
+Starts a container named `rootsign-timescaledb` from `timescale/timescaledb:latest-pg16` (PostgreSQL 16 with TimescaleDB 2), then waits up to 30 seconds for it to accept connections. If the container already exists, it is started again. The data lives in a Docker volume named `rootsign_pgdata`, so it survives removing the container.
+
+<ResponseField name="--port, -p" type="integer" default="5432">
+  The host port to publish PostgreSQL on. It applies only when the container is created: an existing container keeps the port it was created with. With another port, set `DATABASE_URL` and `DATABASE_URL_SYNC` to match.
+</ResponseField>
+
+```bash
+rootsign-admin start-db
+```
+
+```text
+Pulling timescale/timescaledb:latest-pg16 and starting rootsign-timescaledb on port 5432...
+Waiting for Postgres to accept connections...
+Ready. Next: `rootsign-admin init`
+```
+
+Docker's own output, such as the new container's ID, appears between these lines. If the container exists, the first line is `Starting existing rootsign-timescaledb...`. If it is already running, the command prints `rootsign-timescaledb already running.` and does nothing else.
+
+The database is `rootsign_dev`, with user `rootsign` and password `rootsign`. It is meant for a laptop, not for production.
+
+| Code | Meaning |
+| --- | --- |
+| `0` | The database is ready. |
+| `1` | `docker` is not on your `PATH`, Docker failed, or the database was not ready within 30 seconds. |
+
+<Info>
+  The `rootsign_pgdata` volume was added after RootSign 0.3.1. In 0.3.1 and earlier, each new container got an empty volume, so `stop-db --remove` followed by `start-db` started with no data.
+</Info>
+
+## rootsign-admin stop-db
+
+```text
+rootsign-admin stop-db [--remove]
+```
+
+Stops the `rootsign-timescaledb` container. Docker prints the container's name when it stops. If there is no such container, the command prints `rootsign-timescaledb not found — nothing to stop.` and exits `0`.
+
+<ResponseField name="--remove, -r" type="flag">
+  Also remove the container. The data stays in the `rootsign_pgdata` volume, and the next `start-db` uses it again. To delete the data as well, run `docker volume rm rootsign_pgdata` after removing the container.
+</ResponseField>
+
+Exits `0` when the container is stopped, and `1` when `docker` is not on your `PATH` or Docker fails.
+
+## rootsign-admin init
+
+```text
+rootsign-admin init [--reset [--yes]]
+```
+
+Creates RootSign's tables, or upgrades them to the installed version, in the database at `DATABASE_URL_SYNC`. Running it again is safe: an up-to-date database is left as it is. Run it after installing a new RootSign version, before you start recording.
+
+<ResponseField name="--reset" type="flag">
+  Drop the whole `public` schema, and everything in it, before creating the tables. You are asked to confirm first.
+</ResponseField>
+
+<ResponseField name="--yes, -y" type="flag">
+  Skip the `--reset` confirmation, for scripts and CI.
+</ResponseField>
+
+```bash
+rootsign-admin init
+```
+
+```text
+Running alembic upgrade head...
+Done in 0.40s
+```
+
+With `--reset`, it asks before dropping anything. The password in the URL is hidden:
+
+```text
+This will DROP the entire public schema (postgresql://rootsign:***@localhost:5432/rootsign_dev) and destroy all data. Continue? [y/N]:
+```
+
+Answering `n`, or pressing Enter, prints `Aborted.` and exits `1` without changing the database.
+
+| Code | Meaning |
+| --- | --- |
+| `0` | The tables are up to date. |
+| `1` | The reset was declined, or the database could not be used. |
+
+When the database cannot be used, `init` prints one line, such as `Error: cannot use the database at postgresql+psycopg2://rootsign:***@localhost:5432/rootsign_dev: ... Check that it is running and that DATABASE_URL_SYNC points at it.`
+
+## rootsign-admin status
+
+```text
+rootsign-admin status
+```
+
+Prints the number of rows in each RootSign table:
+
+```text
+table                rows
+--------------------------
+agents                  1
+sessions                1
+decisions               0
+actions                 2
+approvals               0
+policies                0
+incidents               0
+```
+
+A table that does not exist shows `(missing)`. If every table is missing, run `rootsign-admin init`.
+
+Exits `0` when the database could be reached, even if tables are missing, and `1` when it could not.
+
+## rootsign-admin sync
+
+```text
+rootsign-admin sync [--dry-run] [--spool-dir DIR]
+```
+
+<Warning>
+  **Preview.** `sync` uploads to the hosted Providex ingest endpoint, which is not live yet. `--dry-run` works today.
+</Warning>
+
+When the cloud endpoint is unreachable, RootSign records to the spool instead of losing records. `sync` uploads every spooled session, and moves each fully accepted file to `spool/synced/`. Running it again is safe: records the endpoint already has count as delivered, and a session that did not finish is picked up where it stopped.
+
+<ResponseField name="--dry-run" type="flag">
+  List what would be uploaded, without contacting anything. Needs no extras and no API key.
+</ResponseField>
+
+<ResponseField name="--spool-dir" type="path" default="$ROOTSIGN_DATA_DIR/spool">
+  The spool folder to read. Defaults to `ROOTSIGN_SPOOL_DIR` if set, and otherwise to `spool` inside `ROOTSIGN_DATA_DIR` (`~/.rootsign/spool`).
+</ResponseField>
+
+An upload uses these settings:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `ROOTSIGN_API_KEY` | none | Required. Without it, `sync` exits `1` before uploading anything. |
+| `ROOTSIGN_CLOUD_URL` | `https://ingest.getprovidex.com/v1` | The endpoint. Records are posted to `<ROOTSIGN_CLOUD_URL>/ingest`. |
+| `ROOTSIGN_HTTP_TIMEOUT_SECONDS` | `10.0` | Timeout for each request |
+| `ROOTSIGN_HTTP_MAX_RETRIES` | `3` | Attempts per request, including the first |
+
+```bash
+rootsign-admin sync --dry-run
+```
+
+```text
+1 spooled session(s), 3 record(s) under <data_dir>/spool
+  would upload  88c2ab59-4dc3-437f-8d46-1df2b7308220  3 record(s), actions 1-1
+Dry run — nothing was uploaded.
+```
+
+With nothing in the spool, it prints `Nothing to sync — no spooled sessions under <spool>.` and exits `0`.
+
+An upload prints one line per session, followed by the path and SHA-256 of its sync receipt:
+
+| Line | Meaning | The spool file |
+| --- | --- | --- |
+| `synced <session_id> <n> accepted, <n> already present -> synced/` | Every record was taken. | Moved to `spool/synced/` with its receipt |
+| `REJECTED <session_id> <n>/<total> delivered, rejected at sequence <n>: <code> (<message>). File left in place.` | The endpoint refused a record. Re-running sends the same data, so fix the cause first. | Stays where it is |
+| `FAILED <session_id> <n>/<total> delivered, then the transport gave up: <code>: <message>. File left in place; re-run when the endpoint is reachable.` | The endpoint could not be reached. | Stays where it is |
+
+For example, against an unreachable endpoint:
+
+```text
+1 spooled session(s), 3 record(s) under <data_dir>/spool
+Uploading to http://localhost:1/v1/ingest
+  FAILED    88c2ab59-4dc3-437f-8d46-1df2b7308220  0/3 delivered, then the transport gave up: STORE_UNAVAILABLE: transport failure: All connection attempts failed. File left in place; re-run when the endpoint is reachable.
+            receipt <data_dir>/spool/receipts/88c2ab59-4dc3-437f-8d46-1df2b7308220.sync.json
+            receipt SHA-256 8480957bf2cde213890f1f6d574120cd9785788350e805f35e725e2f0ce88bb1
+1 session(s) did not finish. Re-run to resume.
+```
+
+Every attempt adds an entry to the session's receipt, `spool/receipts/<session_id>.sync.json`: what the endpoint accepted, already had, or refused and why. `rootsign export` includes the receipt in the session's evidence bundle as `sync-receipt.json`. Record the printed receipt hash somewhere outside the spool if you need to prove later that the receipt was not edited.
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Every session was uploaded, or there was nothing to upload. With `--dry-run`: every spool file could be read. |
+| `1` | At least one session did not finish, a spool file could not be read, `ROOTSIGN_API_KEY` is not set, or `rootsign[cloud]` is not installed. |
+
+<Info>
+  The `FAILED` line for an unreachable endpoint was added after RootSign 0.3.1. In 0.3.1 and earlier, an outage was reported as `REJECTED`, although the receipt recorded it as a transport failure.
+</Info>
+
+## Related
+
+<Columns cols={2}>
+  <Card title="rootsign" icon="terminal" href="/reference/cli-rootsign">
+    Verify, export and approve sessions.
+  </Card>
+  <Card title="Require human approval" icon="user-check" href="/guides/human-approval">
+    Set up the PostgreSQL backend and approve held tool calls.
+  </Card>
+</Columns>

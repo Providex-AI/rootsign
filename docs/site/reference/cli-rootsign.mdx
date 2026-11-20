@@ -1,0 +1,277 @@
+---
+title: "rootsign CLI reference"
+sidebarTitle: "rootsign"
+description: "Every rootsign command with its arguments, options, output and exit codes: version, verify, export and approve, and which of them need a database."
+keywords: ["rootsign cli", "rootsign verify", "rootsign export", "rootsign approve", "exit codes", "command line"]
+---
+
+`rootsign` is the command you run against recorded sessions: check one, export it as evidence, or approve a tool call that is waiting for a person. It is installed with `pip install rootsign`. Commands that manage the database or upload the spool are on the operator CLI, [`rootsign-admin`](/reference/cli-rootsign-admin).
+
+| Command | What it does | Reads |
+| --- | --- | --- |
+| [`version`](#rootsign-version) | Prints the installed version | Nothing |
+| [`verify`](#rootsign-verify) | Checks a session's hash chain | A session file, or PostgreSQL |
+| [`export`](#rootsign-export) | Writes an evidence bundle, or checks one you received | A session file, a bundle folder, or PostgreSQL |
+| [`approve`](#rootsign-approve) | Approves or rejects a held tool call | PostgreSQL |
+
+## Where each command reads from
+
+- **A path** given with `--local` or `--check` is read directly. No database and no extras are needed.
+- **A session ID or action ID** is looked up in PostgreSQL, at the URL in `DATABASE_URL`. This needs `pip install 'rootsign[postgres]'`. These commands use the database whatever `ROOTSIGN_BACKEND` is set to.
+
+Settings come from environment variables, or from a `.env` file in the directory you run the command from.
+
+## Exit codes
+
+Each command's own codes are listed in its section. One rule covers them all: a command-line mistake, such as an unknown option, a mistyped command or `rootsign` on its own, exits `3`. `--help` exits `0`.
+
+For `verify`, `3` always means nothing was verified, so a script never reads a typing mistake as a verdict.
+
+## rootsign version
+
+```bash
+rootsign version
+```
+
+```text
+rootsign 0.3.1
+```
+
+Exits `0`.
+
+## rootsign verify
+
+```text
+rootsign verify [SESSION_ID] [--local PATH] [--verbose]
+```
+
+Recomputes every hash in a session and prints one of three verdicts. The [Verify a session](/guides/verify) guide shows each verdict's output and how to run it in CI.
+
+<ResponseField name="SESSION_ID" type="UUID">
+  The session to verify in PostgreSQL. Ignored when `--local` is given.
+</ResponseField>
+
+<ResponseField name="--local, -l" type="path">
+  A JSONL session file to verify instead, such as `~/.rootsign/sessions/<session_id>.jsonl`. A `~` in the path is expanded. Spool files work too.
+</ResponseField>
+
+<ResponseField name="--verbose, -v" type="flag">
+  After the verdict, list every action with its `self_hash` and `prev_action_hash`.
+</ResponseField>
+
+```bash
+rootsign verify --local ~/.rootsign/sessions/<session_id>.jsonl
+```
+
+```text
+VALID ✓  —  2 records, chain intact
+  Session:  fe478124-ff91-4519-ab3e-726184fa92b4
+```
+
+When the file is in the spool, the output ends with a reminder to upload it with `rootsign-admin sync`.
+
+### Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | **VALID.** Every record is present and every hash matches. |
+| `1` | **TAMPERED.** A record was altered after it was written. |
+| `2` | **INCOMPLETE.** The records present are intact, but some are missing. |
+| `3` | **Nothing was verified.** See the errors below. |
+
+### Errors
+
+Each prints one line to stderr and exits `3`:
+
+| Message | Cause |
+| --- | --- |
+| `Error: provide a session_id or --local path` | Neither was given. |
+| `Error: '<value>' is not a valid UUID.` | The session ID is not a UUID. |
+| `Error: no session file at <path>` | The path does not exist, or is a folder. |
+| `Error: cannot read <path>: <reason>` | The file exists but cannot be read as text. |
+| `Error: <path> is empty; there are no records to verify` | The file has no records. |
+| `Error: no session <session_id> in the database` | PostgreSQL has no session with that ID. |
+| `Error: cannot use the database at <url>: <reason>. Check that it is running and that DATABASE_URL points at it.` | The server is unreachable, the database does not exist, or the login was refused. The password in `<url>` is shown as `***`. |
+| ``Error: the database at <url> has no RootSign tables. Run `rootsign-admin init` first.`` | The database exists but was never initialised. |
+
+<Info>
+  The database errors were added after RootSign 0.3.1. In 0.3.1 and earlier, an unreachable or uninitialised database printed a traceback and exited `1`, the TAMPERED code.
+</Info>
+
+## rootsign export
+
+```text
+rootsign export [SESSION_ID] [--local PATH] [--check DIR] [--out DIR]
+                [--format all|json|md|html] [--redact-previews] [--force]
+```
+
+Writes one session as an evidence bundle: a folder of JSON documents and reports, with a SHA-256 for every file in `manifest.json`. With `--check`, it re-hashes a bundle you received instead. The [Export an evidence bundle](/guides/evidence-bundles) guide explains what to do with the bundle and the manifest hash.
+
+<ResponseField name="SESSION_ID" type="UUID">
+  The session to export from PostgreSQL. Ignored when `--local` or `--check` is given.
+</ResponseField>
+
+<ResponseField name="--local, -l" type="path">
+  Export a JSONL session file or a spool file instead. No database is needed.
+</ResponseField>
+
+<ResponseField name="--check" type="path">
+  Re-hash the bundle in this folder against its `manifest.json`, and write nothing. When given, every other option is ignored.
+</ResponseField>
+
+<ResponseField name="--out, -o" type="path" default=".">
+  The folder to write `evidence-<session_id>/` into.
+</ResponseField>
+
+<ResponseField name="--format, -f" type="all | json | md | html" default="all">
+  Which reports to include. The JSON documents and `manifest.json` are always written.
+
+  | Value | Reports written |
+  | --- | --- |
+  | `all` | `report.md` and `report.html` |
+  | `json` | None |
+  | `md` | `report.md` |
+  | `html` | `report.html` |
+</ResponseField>
+
+<ResponseField name="--redact-previews" type="flag">
+  Leave out the stored content of the session: tool arguments and results, the context shown to an approver, and decision summaries. Hashes, IDs, timings and the verdict are kept.
+</ResponseField>
+
+<ResponseField name="--force" type="flag">
+  Overwrite an existing bundle folder.
+</ResponseField>
+
+```bash
+rootsign export --local ~/.rootsign/sessions/<session_id>.jsonl --out bundles
+```
+
+```text
+VALID — 2 records, chain intact
+  Bundle:   bundles/evidence-fe478124-ff91-4519-ab3e-726184fa92b4
+            redaction.json
+            report.html
+            report.md
+            timeline.json
+            verification.json
+            manifest.json
+
+  manifest.json SHA-256:  e9b0202780e6e236659051acf4839ba62a74595be5240cb8474cece671975576
+  Record that hash outside the bundle — a ticket, an email, a chain-of-custody log.
+  It is what proves a bundle you receive later is the one that was generated.
+```
+
+The first line is the session's verdict. A session that was synced from the spool also gets `sync-receipt.json`.
+
+```bash
+rootsign export --check bundles/evidence-<session_id>
+```
+
+```text
+✓  INTACT — 5 file(s) match manifest.json
+
+  manifest.json SHA-256:  e9b0202780e6e236659051acf4839ba62a74595be5240cb8474cece671975576
+  Compare this against the hash recorded when the bundle was exported.
+  The file checks above cannot detect an edit that also updated the manifest.
+```
+
+### Exit codes
+
+| Code | Export | `--check` |
+| --- | --- | --- |
+| `0` | The bundle was written, **whatever the verdict**. Read the first line, or `verification.json`, for the verdict. | Every file matches `manifest.json`. |
+| `1` | Nothing was written. See the errors below. | A file was altered, missing or unexpected, or the folder has no `manifest.json`. |
+| `3` | A command-line mistake. | A command-line mistake. |
+
+To fail a script on a bad session, run `rootsign verify` first. `export` does not exit non-zero for TAMPERED or INCOMPLETE.
+
+### Errors
+
+Each prints one line to stderr and exits `1`:
+
+| Message | Cause |
+| --- | --- |
+| `Error: provide a session_id, --local <path>, or --check <dir>.` | None of the three was given. |
+| `Error: '<value>' is not a valid UUID.` | The session ID is not a UUID. |
+| `Error: --format must be one of all, json, md, html, got '<value>'.` | An unknown `--format`. |
+| `Error: Session file not found: <path>` | The `--local` file does not exist. |
+| `Error: Session <session_id> not found in the configured database` | PostgreSQL has no session with that ID. |
+| `Error: <dir> already exists and is not empty. ...` | The bundle folder exists. Use `--force`, or another `--out`. |
+| `Error: cannot use the database at <url>: ...` | As for [`verify`](#rootsign-verify), with exit code `1`. |
+
+## rootsign approve
+
+```text
+rootsign approve ACTION_ID [--reject] [--reason TEXT]
+rootsign approve --list
+```
+
+Approves or rejects a tool call held by `@rootsign.trace(require_approval=True)`. Needs the PostgreSQL backend, because the agent and this command are different processes reading the same store. On the default JSONL backend, approval is a prompt in the agent's own terminal. [Require human approval](/guides/human-approval) walks through both.
+
+<ResponseField name="ACTION_ID" type="UUID">
+  The held action, as shown by `--list`. Required unless `--list` is given.
+</ResponseField>
+
+<ResponseField name="--reject, -r" type="flag">
+  Reject the action instead of approving it. The tool never runs, and the call raises `HiTLRejectedError` in the agent.
+</ResponseField>
+
+<ResponseField name="--reason" type="text">
+  A note recorded with the decision as `decision_reason`.
+</ResponseField>
+
+<ResponseField name="--list, -l" type="flag">
+  List the 20 most recent actions waiting for approval, across all sessions, newest first.
+</ResponseField>
+
+```bash
+rootsign approve --list
+```
+
+```text
+Pending approvals (1):
+  06f72d12-ec7d-4ac7-9a87-5a988322ffaa  wire_transfer                   session=8bbb4a2e-ce25-46e2-969d-1f7884fcd72a  submitted=2026-11-17T23:22:51.107941+00:00
+```
+
+With nothing waiting, it prints `No pending approvals.`
+
+```bash
+rootsign approve 06f72d12-ec7d-4ac7-9a87-5a988322ffaa --reason "Verified with the supplier by phone"
+```
+
+```text
+✓  Action 06f72d12-ec7d-4ac7-9a87-5a988322ffaa approved.
+```
+
+The decision is recorded with `approver_id` set to `cli:` and your operating-system user name, such as `cli:alice`. RootSign does not authenticate that name: anyone who can reach the database can approve.
+
+### Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | The decision was recorded, or the list was printed. |
+| `1` | Nothing was recorded. See the errors below. |
+| `3` | A command-line mistake. |
+
+### Errors
+
+Each prints one line to stderr and exits `1`:
+
+| Message | Cause |
+| --- | --- |
+| `Error: provide an action_id, or use --list to see pending approvals.` | No action ID and no `--list`. |
+| `Error: '<value>' is not a valid UUID.` | The action ID is not a UUID. |
+| `Error: no pending action found with ID <action_id>.` | No such action, or it was already decided or timed out. |
+| `Error: action <action_id> was already resolved between selection and write (...)` | The agent's timeout fired while you were approving. Your decision was not recorded. |
+| `Error: cannot use the database at <url>: ...` | As for [`verify`](#rootsign-verify), with exit code `1`. |
+
+## Related
+
+<Columns cols={2}>
+  <Card title="rootsign-admin" icon="terminal" href="/reference/cli-rootsign-admin">
+    Start the database, create its tables, and upload the spool.
+  </Card>
+  <Card title="Verify a session" icon="shield-check" href="/guides/verify">
+    Each verdict's output, the Python API, and running verify in CI.
+  </Card>
+</Columns>
