@@ -19,18 +19,32 @@
     "library": "lucide"
   },
   "navigation": {
-    "groups": [
+    "tabs": [
       {
-        "group": "Get started",
-        "pages": ["index", "quickstart", "how-it-works"]
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get started",
+            "pages": ["index", "quickstart", "how-it-works"]
+          },
+          {
+            "group": "Integrations",
+            "pages": ["integrations/langgraph", "integrations/crewai", "integrations/mcp", "integrations/python"]
+          },
+          {
+            "group": "Guides",
+            "pages": ["guides/verify", "guides/evidence-bundles", "guides/human-approval", "guides/redaction"]
+          }
+        ]
       },
       {
-        "group": "Integrations",
-        "pages": ["integrations/langgraph", "integrations/crewai", "integrations/mcp", "integrations/python"]
-      },
-      {
-        "group": "Guides",
-        "pages": ["guides/verify", "guides/evidence-bundles", "guides/human-approval", "guides/redaction"]
+        "tab": "Reference",
+        "groups": [
+          {
+            "group": "CLI",
+            "pages": ["reference/cli-rootsign", "reference/cli-rootsign-admin"]
+          }
+        ]
       }
     ]
   },
