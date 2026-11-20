@@ -459,7 +459,12 @@ def _sync_one(client: Any, session: Any, root: Path | None, mark_synced: Any) ->
     from datetime import datetime, timezone
 
     from rootsign.replay import ReplayReport, replay_envelopes
-    from rootsign.sdk.receipt import append_attempt, build_attempt, sha256_file
+    from rootsign.sdk.receipt import (
+        DISPOSITION_TRANSPORT_FAILED,
+        append_attempt,
+        build_attempt,
+        sha256_file,
+    )
 
     started_at = datetime.now(timezone.utc)
     # Hashed BEFORE the upload, over the bytes actually about to be replayed:
@@ -487,10 +492,16 @@ def _sync_one(client: Any, session: Any, root: Path | None, mark_synced: Any) ->
     )
     receipt_file, receipt_sha = append_attempt(session.session_id, attempt, root)
 
-    if transport_error is not None:
+    # The line follows the receipt's disposition, not whether an exception
+    # escaped. `HttpIngestClient` does not raise when the endpoint dies; it
+    # returns a retryable STORE_UNAVAILABLE. Keyed off exceptions, a plain
+    # outage printed REJECTED ("fix your data") beside a receipt that said
+    # `transport_failed` ("try again later") (ADR-015 §3c).
+    if attempt["disposition"] == DISPOSITION_TRANSPORT_FAILED:
         typer.echo(
-            f"  FAILED    {session.session_id}  transport failed before any record was "
-            f"observed: {transport_error}. File left in place.",
+            f"  FAILED    {session.session_id}  {report.delivered}/{report.total} delivered, "
+            f"then the transport gave up: {attempt.get('transport_error') or transport_error}. "
+            "File left in place; re-run when the endpoint is reachable.",
             err=True,
         )
         _echo_receipt(receipt_file, receipt_sha)
