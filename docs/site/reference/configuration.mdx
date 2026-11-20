@@ -1,0 +1,185 @@
+---
+title: "Configuration reference: environment variables"
+sidebarTitle: "Configuration"
+description: "Every environment variable RootSign reads, with its default and allowed values, plus where settings come from, when they are read, and how a .env file applies."
+keywords: ["configuration", "environment variables", "ROOTSIGN_BACKEND", "ROOTSIGN_DATA_DIR", "DATABASE_URL", ".env", "settings"]
+---
+
+RootSign is configured with environment variables. Every setting has a default, so a plain `pip install rootsign` records to local JSONL files with nothing set. This page lists each variable, grouped by what it controls.
+
+## How settings are read
+
+**Sources.** Each variable is read from the environment, then from a `.env` file in the **current working directory**, then from its default. An environment variable wins over the same name in `.env`. The `.env` file is found from the directory you run the program from, not the directory the script is in. Names are not case-sensitive.
+
+<Warning>
+  A `.env` file in your working directory applies to RootSign even if it was written for something else. If a project's `.env` sets `ROOTSIGN_BACKEND` or `DATABASE_URL`, every RootSign script and command run from that directory uses it.
+</Warning>
+
+**When they are read.** The `ROOTSIGN_` settings are read when `rootsign.init()` runs, and stay fixed for the rest of the process: changing a variable after `init()` has no effect. Setting one in code before `init()` works:
+
+```python
+import os
+
+import rootsign
+
+os.environ["ROOTSIGN_CAPTURE_DECISIONS"] = "true"
+rootsign.init(agent="invoice-agent")
+```
+
+Without `init()`, for example when you build a `SessionContext` and client yourself, each setting is read when it is used. The database settings are read the first time RootSign connects to PostgreSQL. The CLIs read everything when they start.
+
+<Info>
+  Before the release after RootSign 0.3.1, `ROOTSIGN_CAPTURE_DECISIONS` and `ROOTSIGN_REASONING_DEPTH` were read when `rootsign` was imported, so setting them in code after the import was ignored.
+</Info>
+
+**Invalid values.** A `ROOTSIGN_` variable with a value outside its allowed list stops `import rootsign` with a pydantic `ValidationError` that names the setting:
+
+```text
+pydantic_core._pydantic_core.ValidationError: 1 validation error for SDKSettings
+BACKEND
+  Input should be 'jsonl', 'postgres', 'cloud' or 'local' [type=literal_error, input_value='sqlite', input_type=str]
+```
+
+## Storage backend
+
+<ResponseField name="ROOTSIGN_BACKEND" type="jsonl | postgres | cloud" default="jsonl">
+  Where records are written.
+
+  | Value | Records go to | Needs |
+  | --- | --- | --- |
+  | `jsonl` | One file per session under `ROOTSIGN_DATA_DIR` | Nothing |
+  | `postgres` | PostgreSQL with TimescaleDB, at `DATABASE_URL` | `pip install 'rootsign[postgres]'` |
+  | `cloud` | The hosted ingest endpoint, **preview** | `pip install 'rootsign[cloud]'` |
+
+  `local` is a deprecated name for `postgres`, and prints a `FutureWarning`. With `rootsign.init()`, use `jsonl` or `postgres`: `cloud` is refused with a `ValueError` when the first session opens. While the hosted endpoint is in preview, the cloud transport is used through an explicit `HttpIngestClient`.
+</ResponseField>
+
+<ResponseField name="ROOTSIGN_DATA_DIR" type="path" default="~/.rootsign">
+  The folder for the JSONL backend. Sessions are written to `sessions/<session_id>.jsonl` inside it, and registered agents to `agents.jsonl`. It also moves the spool, unless `ROOTSIGN_SPOOL_DIR` is set.
+</ResponseField>
+
+<ResponseField name="ROOTSIGN_JSONL_FSYNC" type="chain | always | never" default="chain">
+  When the JSONL backend forces a write to disk with `fsync`.
+
+  | Value | `fsync` after |
+  | --- | --- |
+  | `chain` | Each action and approval record, the records the hash chain depends on |
+  | `always` | Every record, including session open and close |
+  | `never` | No record. The operating system writes them when it chooses, so a power loss can lose the last records. |
+</ResponseField>
+
+## PostgreSQL
+
+These have no `ROOTSIGN_` prefix. They apply with `ROOTSIGN_BACKEND=postgres`, to the `rootsign` commands that take a session or action ID, and to `rootsign-admin`.
+
+<ResponseField name="DATABASE_URL" type="URL" default="postgresql+asyncpg://rootsign:rootsign@localhost:5432/rootsign_dev">
+  The database the SDK and the `rootsign` CLI connect to. Use the `postgresql+asyncpg://` form: `rootsign[postgres]` installs the asyncpg driver. With a plain `postgresql://` URL, SQLAlchemy chooses another driver, and the connection fails unless that driver is installed and supports asyncio. The default is the database [`rootsign-admin start-db`](/reference/cli-rootsign-admin#rootsign-admin-start-db) creates.
+</ResponseField>
+
+<ResponseField name="DATABASE_URL_SYNC" type="URL" default="postgresql+psycopg2://rootsign:rootsign@localhost:5432/rootsign_dev">
+  The same database, with the `psycopg2` driver. `rootsign-admin init` and `status` connect with it. Point it at the same database as `DATABASE_URL`.
+</ResponseField>
+
+<ResponseField name="DB_POOL_SIZE" type="integer" default="10">
+  Connections the SDK keeps open to the database.
+</ResponseField>
+
+<ResponseField name="DB_MAX_OVERFLOW" type="integer" default="20">
+  Extra connections allowed above `DB_POOL_SIZE` under load.
+</ResponseField>
+
+<ResponseField name="DB_POOL_TIMEOUT" type="integer" default="30">
+  Seconds to wait for a free connection before failing.
+</ResponseField>
+
+<ResponseField name="ENVIRONMENT" type="text" default="development">
+  Set it to `production` in a real deployment. RootSign then refuses to use the default database URLs, which point at a local database with the password `rootsign`, so a deployment that forgot to set `DATABASE_URL` fails instead of writing to the wrong place. The refusal is a `ValidationError` raised the first time RootSign reads the database settings: when `rootsign-admin` starts, or when the SDK first connects.
+
+  ```text
+  Value error, ENVIRONMENT=production but DATABASE_URL still points at the dev-credentialed local database. Set DATABASE_URL (and DATABASE_URL_SYNC) explicitly for production deployments.
+  ```
+
+  This is not the agent's environment, which you pass to `rootsign.init(environment=...)`.
+</ResponseField>
+
+## Cloud transport and spool
+
+<Warning>
+  **Preview.** The hosted ingest endpoint is not live yet. The spool and `rootsign-admin sync --dry-run` work today.
+</Warning>
+
+<ResponseField name="ROOTSIGN_CLOUD_URL" type="URL" default="https://ingest.getprovidex.com/v1">
+  The ingest endpoint. Records are posted to `<ROOTSIGN_CLOUD_URL>/ingest`, so the value ends in `/v1`, not `/v1/ingest`.
+</ResponseField>
+
+<ResponseField name="ROOTSIGN_API_KEY" type="text">
+  The key sent with each request. Required for `rootsign-admin sync` to upload anything.
+</ResponseField>
+
+<ResponseField name="ROOTSIGN_SPOOL_DIR" type="path" default="$ROOTSIGN_DATA_DIR/spool">
+  Where records are kept when the endpoint is unreachable. Spooled sessions are ordinary session files, so `rootsign verify --local` and `rootsign export --local` read them.
+</ResponseField>
+
+<ResponseField name="ROOTSIGN_HTTP_TIMEOUT_SECONDS" type="number" default="10.0">
+  Timeout for each request.
+</ResponseField>
+
+<ResponseField name="ROOTSIGN_HTTP_MAX_RETRIES" type="integer" default="3">
+  Attempts per request, including the first. `3` means one send and at most two retries.
+</ResponseField>
+
+<ResponseField name="ROOTSIGN_ON_RECORD_LOSS" type="warn | fail" default="warn">
+  What the cloud transport does when a record can be neither sent nor spooled, for example because the endpoint is down and the disk is full.
+
+  | Value | Behaviour |
+  | --- | --- |
+  | `warn` | Log at CRITICAL, keep the agent running, and leave a gap in the chain that verifies as INCOMPLETE. |
+  | `fail` | Raise `RecordPersistenceError` into the tool call, for deployments that prefer a stopped agent to a missing record. |
+
+  Approval records never follow this setting: if one cannot be stored, the held tool does not run and `HiTLPersistenceError` is raised. See [Errors](/reference/errors).
+</ResponseField>
+
+## Decision capture
+
+<ResponseField name="ROOTSIGN_CAPTURE_DECISIONS" type="boolean" default="false">
+  Record what the agent decided, and why, before each action. When off, `ctx.record_decision()` does nothing and returns `None`, so the same code can run with capture on or off. Off by default because reasoning text is where personal data tends to collect.
+</ResponseField>
+
+<ResponseField name="ROOTSIGN_REASONING_DEPTH" type="minimal | summary | full" default="summary">
+  How much of each decision is kept. Ignored when capture is off.
+
+  | Value | `reasoning_summary` | `alternatives_considered` |
+  | --- | --- | --- |
+  | `minimal` | Not kept | Not kept |
+  | `summary` | First 500 characters | Not kept |
+  | `full` | First 10,000 characters | Kept |
+</ResponseField>
+
+## Batching
+
+<ResponseField name="ROOTSIGN_BUFFERED" type="boolean" default="false">
+  Queue records in memory and write them in batches, so tool calls do not wait for each write. Records are still written in order and the chain verifies the same way. The batch is written when the session closes.
+</ResponseField>
+
+<ResponseField name="ROOTSIGN_BUFFER_INTERVAL" type="number" default="0.5">
+  Seconds between background writes of the batch.
+</ResponseField>
+
+<ResponseField name="ROOTSIGN_BUFFER_MAX_SIZE" type="integer" default="100">
+  Records queued before a write is forced.
+</ResponseField>
+
+## Accepted but unused
+
+`ROOTSIGN_WAL_PATH`, `ROOTSIGN_MAX_RETRIES`, `ROOTSIGN_RETRY_BASE_DELAY` and `ROOTSIGN_RETRY_MAX_DELAY` are still accepted, so an existing `.env` that sets them keeps loading, but nothing reads them. For retries, use `ROOTSIGN_HTTP_MAX_RETRIES`.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="rootsign-admin" icon="terminal" href="/reference/cli-rootsign-admin">
+    Start the local database, create its tables, and upload the spool.
+  </Card>
+  <Card title="Errors" icon="triangle-alert" href="/reference/errors">
+    Every exception RootSign raises into your code.
+  </Card>
+</Columns>

@@ -41,6 +41,10 @@
         "tab": "Reference",
         "groups": [
           {
+            "group": "SDK",
+            "pages": ["reference/configuration", "reference/errors"]
+          },
+          {
             "group": "CLI",
             "pages": ["reference/cli-rootsign", "reference/cli-rootsign-admin"]
           }
