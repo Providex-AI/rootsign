@@ -456,6 +456,35 @@ class TestSyncWritesReceipts:
         assert attempt["disposition"] == DISPOSITION_TRANSPORT_FAILED
         assert "transport_error" in attempt
 
+    def test_an_outage_is_reported_as_failed_not_rejected(
+        self, monkeypatch, spool: Path, spooled_session, cloud_api_key
+    ):
+        """The terminal line must say what the receipt says. `HttpIngestClient`
+        does not raise when the endpoint dies; it returns a retryable
+        STORE_UNAVAILABLE. The CLI used to pick its line by whether an
+        exception escaped, so a plain outage printed `REJECTED ... rejected at
+        record 1`, telling the operator to fix data that was fine, while the
+        receipt beside it said `transport_failed` (ADR-015 §3c)."""
+        import httpx
+
+        session_id, path = spooled_session
+
+        def _dead(request: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectError("All connection attempts failed")
+
+        bind_transport(monkeypatch, httpx.MockTransport(_dead))
+
+        result = _sync(spool)
+
+        assert result.exit_code == 1
+        (attempt,) = _receipt_for(session_id, spool)["attempts"]
+        assert attempt["disposition"] == DISPOSITION_TRANSPORT_FAILED
+        assert "REJECTED" not in result.output
+        assert f"FAILED    {session_id}  0/5 delivered" in result.output
+        assert "STORE_UNAVAILABLE" in result.output
+        assert "re-run when the endpoint is reachable" in result.output
+        assert path.exists()
+
 
 # ---------------------------------------------------------------------------
 # The bundle (ADR-015 Decision 5)
