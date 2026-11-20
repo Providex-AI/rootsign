@@ -52,7 +52,8 @@ if TYPE_CHECKING:
 
 app = typer.Typer(
     name="rootsign-admin",
-    help="RootSign Phase 0 — schema and storage operations (powered by Providex AI).",
+    help="RootSign operator commands: the local database, its tables, and spool upload "
+    "(powered by Providex AI).",
     add_completion=False,
     no_args_is_help=True,
 )
@@ -121,6 +122,14 @@ def _dsn_role() -> str:
     return make_url(settings.DATABASE_URL_SYNC).username or "rootsign"
 
 
+def _masked_dsn() -> str:
+    """The sync DSN for display, password hidden: the --reset prompt is often
+    read over someone's shoulder or captured in a terminal recording."""
+    from sqlalchemy.engine import make_url
+
+    return _strip_driver(make_url(settings.DATABASE_URL_SYNC).render_as_string(hide_password=True))
+
+
 def _drop_public_schema() -> None:
     psycopg2 = _require("psycopg2")
     sql = _require("psycopg2.sql")
@@ -175,10 +184,16 @@ def _container_running() -> bool:
 
 @app.command("start-db")
 def start_db(
-    port: int = typer.Option(5432, "--port", "-p", help="Host port to bind (default 5432)."),
+    port: int = typer.Option(
+        5432, "--port", "-p", help="Host port to bind. Applies only when the container is created."
+    ),
 ) -> None:
     """Launch a local TimescaleDB container (PostgreSQL 16 + TimescaleDB 2.x).
 
+    Starts the existing rootsign-timescaledb container if there is one,
+    otherwise pulls the image and creates it. Waits until PostgreSQL accepts
+    connections.
+    \f
     Equivalent to `docker-compose up -d db` but doesn't require the repo's
     docker-compose.yml — useful for users who installed rootsign from PyPI.
     """
@@ -282,7 +297,10 @@ def init(
         help="Skip the confirmation prompt for --reset (for non-interactive use).",
     ),
 ) -> None:
-    """Apply migrations to the dev database. Use --reset to start from scratch."""
+    """Create or upgrade the RootSign tables in the database at DATABASE_URL_SYNC.
+
+    Safe to re-run. --reset drops the whole public schema first, after asking.
+    """
     # Resolve the DB stack before any output or the destructive --reset prompt,
     # so a missing extra fails cleanly instead of half-way through.
     alembic_command = _require("alembic.command")
@@ -293,7 +311,7 @@ def init(
         if not yes:
             typer.confirm(
                 "This will DROP the entire public schema "
-                f"({_strip_driver(settings.DATABASE_URL_SYNC)}) and destroy all "
+                f"({_masked_dsn()}) and destroy all "
                 "data. Continue?",
                 abort=True,
             )
@@ -318,18 +336,20 @@ def sync(
         help="Spool root to read (default: ROOTSIGN_SPOOL_DIR, else $ROOTSIGN_DATA_DIR/spool).",
     ),
 ) -> None:
-    """Upload spooled sessions to the cloud ingest endpoint (ADR-013 Decision 4).
+    """Upload spooled sessions to the cloud ingest endpoint.
 
     When the endpoint is unreachable, the SDK keeps recording to
-    `$ROOTSIGN_DATA_DIR/spool/` instead of losing records. This uploads what
-    accumulated there and retires each fully-accepted file to `spool/synced/`.
+    $ROOTSIGN_DATA_DIR/spool/ instead of losing records. This uploads what
+    accumulated there and moves each fully accepted file to spool/synced/.
 
-    Safe to re-run: idempotency is server-side by `event_id`, so records the
-    store already has come back `DUPLICATE_EVENT` and count as delivered. A
-    partially-uploaded session stays in place and resumes on the next run.
+    Safe to re-run: records the endpoint already has count as delivered. A
+    session that did not finish stays in place and resumes on the next run.
 
-    Exit 0 = everything synced (or nothing to sync), 1 = at least one session
-    did not finish.
+    Exit 0 when everything was uploaded or there was nothing to upload,
+    1 when at least one session did not finish.
+    \f
+    ADR-013 Decision 4. Idempotency is server-side by `event_id`, so records
+    the store already has come back `DUPLICATE_EVENT`.
     """
     # Lazy: reading the spool needs neither extra, so `--dry-run` works on a
     # bare install. The cloud transport is only imported once we are actually
