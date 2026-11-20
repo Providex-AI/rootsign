@@ -520,6 +520,15 @@ jobs:
         run: alembic upgrade head
       - name: Full suite against the locked versions
         # Benchmarks stay opt-in, as everywhere else.
+        #
+        # PYTHONFAULTHANDLER: this job (the only one with every extra
+        # installed) segfaulted during interpreter shutdown, after every test
+        # had passed, on most runs of #76-#78 and never on main. Any
+        # faulthandler instrumentation made it pass 10 of 10, so no stack was
+        # ever captured (issue #79). Armed here, a recurrence
+        # prints every thread's stack instead of a bare exit 139.
+        env:
+          PYTHONFAULTHANDLER: "1"
         run: python -m pytest tests/ -m 'not benchmark'
 
   dependency-audit:

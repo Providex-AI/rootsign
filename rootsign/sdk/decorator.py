@@ -27,7 +27,11 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from rootsign._version import SDK_VERSION
-from rootsign.errors import RecordPersistenceError, postgres_extra_required
+from rootsign.errors import (
+    HiTLPersistenceError,
+    RecordPersistenceError,
+    postgres_extra_required,
+)
 from rootsign.ingest.schemas import SCHEMA_VERSION, EventType, IngestResponse
 from rootsign.sdk.client import IngestClient
 from rootsign.sdk.context import SessionContext
@@ -35,6 +39,12 @@ from rootsign.sdk.hashing import compute_payload_hash
 from rootsign.sdk.redaction import RedactionConfig
 
 logger = logging.getLogger("rootsign.sdk")
+
+#: Why a held call stops when its pending ACTION_RECORD was not stored. The
+#: ingest failure itself is already logged at WARNING by `_try_ingest`.
+_PENDING_NOT_STORED = (
+    "the pending action record was not stored (the cause is logged above at WARNING)"
+)
 
 # SCHEMA_VERSION is re-exported from rootsign.ingest.schemas — the wire version
 # belongs with the wire schema, and two copies of it drift (it lived here and in
@@ -617,11 +627,9 @@ async def _emit_hitl_action(
         decision_id=decision_id,
     )
     if response is None or response.entity_id is None:
-        raise RuntimeError(
-            f"rootsign: failed to submit pending ACTION_RECORD for tool "
-            f"{tool_name!r}; HiTL gate cannot proceed without an action_id. "
-            "Check IngestClient connectivity and SESSION_OPEN status."
-        )
+        # A RootSignError, so `except RootSignError` catches it on every
+        # backend; the cloud transport raises the same class for this case.
+        raise HiTLPersistenceError(_PENDING_NOT_STORED, tool_name=tool_name)
     action_id = response.entity_id
 
     # 4. Wait for resolution. The checkpoint opens its own session per
@@ -733,10 +741,7 @@ async def _emit_hitl_action_sync(
         decision_id=decision_id,
     )
     if response is None or response.entity_id is None:
-        raise RuntimeError(
-            f"rootsign: failed to submit pending ACTION_RECORD for {tool_name!r} "
-            "(jsonl HiTL); cannot proceed without a chain row."
-        )
+        raise HiTLPersistenceError(_PENDING_NOT_STORED, tool_name=tool_name)
     action_id = response.entity_id
 
     prompt = f"[rootsign] Approve tool {tool_name!r}? [y/N] (text after y/n is a note): "
@@ -753,6 +758,8 @@ async def _emit_hitl_action_sync(
         context_presented=context_presented,
         decision="approved" if approved else "rejected",
         decision_reason=note,
+        required=True,
+        tool_name=tool_name,
     )
 
     if not approved:
@@ -781,8 +788,16 @@ async def _emit_approval_record(
     decision_reason: str | None = None,
     parent_approval_id: UUID | None = None,
     response_latency_ms: int | None = None,
+    required: bool = False,
+    tool_name: str | None = None,
 ) -> None:
     """Emit an APPROVAL_RECORD via the IngestClient.
+
+    `required=True` is for a caller that is about to act on the decision, as
+    the JSONL inline prompt is: if the record is not stored, raise
+    `HiTLPersistenceError` (naming `tool_name`) so the held tool never runs.
+    An approval record is the authorization control, not telemetry; the
+    JSONL prompt used to log the failure and run the approved tool anyway.
 
     Sibling of `_emit_action_record`. Two intentional differences:
 
@@ -826,7 +841,14 @@ async def _emit_approval_record(
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             },
         }
-        await client.handle(envelope)
+        response = await client.handle(envelope)
+        if required and getattr(response, "status", None) != "accepted":
+            raise HiTLPersistenceError(
+                "the approval record was refused "
+                f"({getattr(response, 'error_code', None)}: "
+                f"{getattr(response, 'error_message', None)})",
+                tool_name=tool_name,
+            )
         logger.debug(
             "APPROVAL_RECORD emitted action_id=%s decision=%s approver_type=%s",
             action_id,
@@ -842,6 +864,11 @@ async def _emit_approval_record(
         # the setting that exists to prevent it.
         raise
     except Exception as ingest_err:  # noqa: BLE001 — see failure isolation rule
+        if required:
+            raise HiTLPersistenceError(
+                f"the approval record was not written ({type(ingest_err).__name__}: {ingest_err})",
+                tool_name=tool_name,
+            ) from ingest_err
         logger.warning(
             "rootsign: _emit_approval_record failed for action_id=%s: %s",
             action_id,
