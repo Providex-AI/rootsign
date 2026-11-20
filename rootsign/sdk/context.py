@@ -82,13 +82,10 @@ class SessionContext:
 
         Keyword-only signature (Sprint 4 Flag 1).
         """
-        # Lazy import — Decision capture is opt-in and pulling settings at
-        # module load would pessimize cold start. `from ... import` re-reads
-        # module attributes each call, so importlib.reload of the config
-        # module in tests is honored.
-        from rootsign.sdk.config import sdk_settings
+        # Read like every other setting: from init() if it ran, else now.
+        from rootsign.sdk.facade import _active_settings
 
-        if not sdk_settings.CAPTURE_DECISIONS:
+        if not _active_settings().CAPTURE_DECISIONS:
             return None
 
         from rootsign.sdk.facade import _resolve_ctx_client

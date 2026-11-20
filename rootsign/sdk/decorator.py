@@ -885,12 +885,11 @@ async def _emit_decision_record(
 
     Keyword-only signature (Sprint 4 Flag 1).
     """
-    # Lazy import — capture is opt-in; avoid module-load cost on the
-    # default no-capture path. `from ... import` re-reads on each call so
-    # importlib.reload in tests is honored.
-    from rootsign.sdk.config import ReasoningDepth, sdk_settings
+    # Read like every other setting: from init() if it ran, else now.
+    from rootsign.sdk.config import ReasoningDepth
+    from rootsign.sdk.facade import _active_settings
 
-    depth = sdk_settings.REASONING_DEPTH
+    depth = _active_settings().REASONING_DEPTH
     if depth == ReasoningDepth.MINIMAL:
         summary: str | None = None
         alts: list[str] = []

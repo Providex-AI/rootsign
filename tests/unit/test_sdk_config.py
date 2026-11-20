@@ -43,7 +43,7 @@ class TestSDKSettingsDefaults:
     def test_local_backend_alias_deprecated_maps_to_postgres(self, monkeypatch):
         # ADR-011: 'local' is the deprecated alias for 'postgres'.
         monkeypatch.setenv("ROOTSIGN_BACKEND", "local")
-        with pytest.warns(DeprecationWarning, match="deprecated"):
+        with pytest.warns(FutureWarning, match="deprecated"):
             s = SDKSettings()
         assert s.BACKEND == "postgres"
 
