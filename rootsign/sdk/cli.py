@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from collections.abc import Callable, Coroutine
 from typing import Any, NoReturn, Optional
 from uuid import UUID
 
@@ -125,6 +126,40 @@ def _session_factory() -> Any:
         )
         raise typer.Exit(code=1) from exc
     return factory
+
+
+def _run_against_database(
+    work: Callable[[], Coroutine[Any, Any, Any]], factory: Any, *, exit_code: int
+) -> Any:
+    """`asyncio.run(work())`, turning a database it cannot use into one line.
+
+    An unreachable server, a missing database, a refused login or a schema that
+    was never initialised used to escape as a long traceback, and on `verify`
+    as exit 1, which is TAMPERED's code: a cron job read "the database is
+    down" as "the records were altered". Any other exception is a bug and
+    still raises.
+    """
+    from rootsign._cli_db import database_problem
+
+    try:
+        return asyncio.run(work())
+    except Exception as exc:
+        message = database_problem(exc, _database_url(factory))
+        if message is None:
+            raise
+        typer.echo(f"Error: {message}", err=True)
+        raise typer.Exit(code=exit_code) from None
+
+
+def _database_url(factory: Any) -> Any:
+    """The URL the factory connects to, or the configured one if it can't say."""
+    bind = getattr(factory, "kw", {}).get("bind")
+    url = getattr(bind, "url", None)
+    if url is not None:
+        return url
+    from rootsign.config import settings
+
+    return settings.DATABASE_URL
 
 
 @app.command()
@@ -301,7 +336,7 @@ def _verify_remote(session_id: UUID, verbose: bool) -> None:
 
     from rootsign.verdict import exit_code
 
-    result, chain = asyncio.run(_run())
+    result, chain = _run_against_database(_run, factory, exit_code=EXIT_CANNOT_VERIFY)
     if result is None:
         _cannot_verify(f"no session {session_id} in the database")
     _print_result(result)
@@ -496,7 +531,7 @@ def _export_remote(
             return await export_session(session_id, db, redact_previews=redact_previews)
 
     try:
-        bundle = asyncio.run(_run())
+        bundle = _run_against_database(_run, factory, exit_code=1)
     except RootSignPostgresExtraRequired as exc:
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(code=1) from None
@@ -676,7 +711,7 @@ def _list_pending_approvals() -> None:
             )
             return list(result.scalars().all())
 
-    actions = asyncio.run(_run())
+    actions = _run_against_database(_run, factory, exit_code=1)
     if not actions:
         typer.echo("No pending approvals.")
         return
@@ -758,7 +793,7 @@ def _submit_approval(*, action_id: UUID, decision: str, reason: str | None) -> N
                 typer.echo(f"Error: {exc}", err=True)
                 raise typer.Exit(code=1) from exc
 
-    asyncio.run(_run())
+    _run_against_database(_run, factory, exit_code=1)
     colour = typer.colors.GREEN if decision == "approved" else typer.colors.RED
     symbol = "✓" if decision == "approved" else "✗"
     typer.echo(

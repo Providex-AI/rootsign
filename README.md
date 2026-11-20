@@ -160,7 +160,7 @@ rootsign-admin init       # alembic upgrade head
 export ROOTSIGN_BACKEND=postgres
 ```
 
-`start-db` wraps a single `docker run` so you don't need to clone the repo. If you *have* cloned it, `docker-compose up -d db` is the equivalent developer path. Both reuse the same `rootsign-timescaledb` container name and `rootsign_pgdata` volume — pick either, not both.
+`start-db` wraps a single `docker run` so you don't need to clone the repo. It keeps the data in a Docker volume named `rootsign_pgdata`, which survives `rootsign-admin stop-db --remove`. If you *have* cloned it, `docker-compose up -d db` is the equivalent developer path. Both use the `rootsign-timescaledb` container name, so pick either, not both. Compose prefixes its volume with the project name (`<project>_rootsign_pgdata`), so the two paths do not share data.
 
 **Your application code does not change.** The same `init()` / `session()` / `wrap_tools()` above now writes to Postgres, and sessions are verified by id instead of by path:
 

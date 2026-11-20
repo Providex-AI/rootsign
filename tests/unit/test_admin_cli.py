@@ -16,7 +16,10 @@ module object, so patching the attribute on `alembic.command` still applies.
 
 from __future__ import annotations
 
+import os
 from unittest.mock import patch
+
+import pytest
 
 from typer.testing import CliRunner
 
@@ -77,3 +80,41 @@ class TestDsnRole:
             "postgresql+psycopg2://host:5432/db",
         )
         assert _dsn_role() == "rootsign"
+
+
+class TestStartDbVolume:
+    """`stop-db --remove` promised the data volume was preserved, but
+    `start-db` ran the container with no `-v`. The image declares a VOLUME,
+    so Docker gave each new container a fresh anonymous volume: after
+    `stop-db --remove` and `start-db`, the database came back empty.
+
+    `start-db` now mounts the named volume `rootsign_pgdata`, which outlives
+    the container and is reattached by the next `docker run`.
+
+    The `docker` on PATH here is a stub script that logs its arguments, so the
+    test sees the exact command line without a Docker daemon.
+    """
+
+    @pytest.fixture
+    def docker_log(self, tmp_path, monkeypatch):
+        log = tmp_path / "docker.log"
+        stub = tmp_path / "bin" / "docker"
+        stub.parent.mkdir()
+        # `ps` lists nothing (no container yet); `run`, `start` and the
+        # pg_isready probe all succeed.
+        stub.write_text(f'#!/bin/sh\necho "$@" >> {log}\nexit 0\n')
+        stub.chmod(0o755)
+        monkeypatch.setenv("PATH", f"{stub.parent}{os.pathsep}{os.environ['PATH']}")
+        return log
+
+    def test_new_container_mounts_the_named_volume(self, docker_log):
+        result = runner.invoke(app, ["start-db"])
+
+        assert result.exit_code == 0, result.output
+        run = next(line for line in docker_log.read_text().splitlines() if line.startswith("run "))
+        assert "-v rootsign_pgdata:/var/lib/postgresql/data" in run
+
+    def test_stop_db_help_names_the_volume(self):
+        result = runner.invoke(app, ["stop-db", "--help"])
+
+        assert "rootsign_pgdata" in result.output

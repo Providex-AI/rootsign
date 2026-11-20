@@ -81,6 +81,10 @@ def _require(module: str) -> Any:
 # freely between `rootsign-admin start-db` and `docker-compose up -d db`.
 _DB_CONTAINER = "rootsign-timescaledb"
 _DB_IMAGE = "timescale/timescaledb:latest-pg16"
+# Named, so the data outlives the container. The image declares a VOLUME, and
+# without `-v` Docker gave every new container a fresh anonymous one: after
+# `stop-db --remove`, the next `start-db` came back with an empty database.
+_DB_VOLUME = "rootsign_pgdata"
 
 
 def _strip_driver(sqla_url: str) -> str:
@@ -219,6 +223,8 @@ def start_db(
                 "POSTGRES_DB=rootsign_dev",
                 "-p",
                 f"{port}:5432",
+                "-v",
+                f"{_DB_VOLUME}:/var/lib/postgresql/data",
                 _DB_IMAGE,
             ],
             check=True,
@@ -241,7 +247,11 @@ def start_db(
 @app.command("stop-db")
 def stop_db(
     remove: bool = typer.Option(
-        False, "--remove", "-r", help="Also remove the container (data volume is preserved)."
+        False,
+        "--remove",
+        "-r",
+        help=f"Also remove the container. The data stays in the {_DB_VOLUME} volume, "
+        "and the next start-db reuses it.",
     ),
 ) -> None:
     """Stop the local TimescaleDB container."""
@@ -253,6 +263,26 @@ def stop_db(
         subprocess.run([docker, "stop", _DB_CONTAINER], check=True)
     if remove:
         subprocess.run([docker, "rm", _DB_CONTAINER], check=True)
+
+
+@contextlib.contextmanager
+def _database_errors() -> "Iterator[None]":
+    """Turn a database these commands cannot use into one line and exit 1.
+
+    Same message as the `rootsign` commands (`rootsign._cli_db`), naming
+    `DATABASE_URL_SYNC`, which is the URL `init` and `status` connect with.
+    Anything else, including a declined `--reset` prompt, passes through.
+    """
+    from rootsign._cli_db import database_problem
+
+    try:
+        yield
+    except Exception as exc:
+        message = database_problem(exc, settings.DATABASE_URL_SYNC, setting="DATABASE_URL_SYNC")
+        if message is None:
+            raise
+        typer.echo(f"Error: {message}", err=True)
+        raise typer.Exit(code=1) from None
 
 
 @app.command()
@@ -286,9 +316,11 @@ def init(
                 abort=True,
             )
         typer.echo("Dropping public schema...")
-        _drop_public_schema()
+        with _database_errors():
+            _drop_public_schema()
     typer.echo("Running alembic upgrade head...")
-    alembic_command.upgrade(_alembic_config(), "head")
+    with _database_errors():
+        alembic_command.upgrade(_alembic_config(), "head")
     elapsed = time.perf_counter() - start
     typer.echo(f"Done in {elapsed:.2f}s")
 
@@ -447,7 +479,12 @@ def _sync_one(client: Any, session: Any, root: Path | None, mark_synced: Any) ->
     from datetime import datetime, timezone
 
     from rootsign.replay import ReplayReport, replay_envelopes
-    from rootsign.sdk.receipt import append_attempt, build_attempt, sha256_file
+    from rootsign.sdk.receipt import (
+        DISPOSITION_TRANSPORT_FAILED,
+        append_attempt,
+        build_attempt,
+        sha256_file,
+    )
 
     started_at = datetime.now(timezone.utc)
     # Hashed BEFORE the upload, over the bytes actually about to be replayed:
@@ -475,10 +512,16 @@ def _sync_one(client: Any, session: Any, root: Path | None, mark_synced: Any) ->
     )
     receipt_file, receipt_sha = append_attempt(session.session_id, attempt, root)
 
-    if transport_error is not None:
+    # The line follows the receipt's disposition, not whether an exception
+    # escaped. `HttpIngestClient` does not raise when the endpoint dies; it
+    # returns a retryable STORE_UNAVAILABLE. Keyed off exceptions, a plain
+    # outage printed REJECTED ("fix your data") beside a receipt that said
+    # `transport_failed` ("try again later") (ADR-015 §3c).
+    if attempt["disposition"] == DISPOSITION_TRANSPORT_FAILED:
         typer.echo(
-            f"  FAILED    {session.session_id}  transport failed before any record was "
-            f"observed: {transport_error}. File left in place.",
+            f"  FAILED    {session.session_id}  {report.delivered}/{report.total} delivered, "
+            f"then the transport gave up: {attempt.get('transport_error') or transport_error}. "
+            "File left in place; re-run when the endpoint is reachable.",
             err=True,
         )
         _echo_receipt(receipt_file, receipt_sha)
@@ -553,7 +596,8 @@ def status() -> None:
     """Print row counts for every RootSign table."""
     psycopg2 = _require("psycopg2")
     dsn = _strip_driver(settings.DATABASE_URL_SYNC)
-    conn = psycopg2.connect(dsn)
+    with _database_errors():
+        conn = psycopg2.connect(dsn)
     try:
         with conn.cursor() as cur:
             tables = [
