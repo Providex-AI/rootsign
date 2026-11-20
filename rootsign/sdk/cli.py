@@ -165,7 +165,9 @@ def verify(
 
         rootsign verify 550e8400-e29b-41d4-a716-446655440001
 
-        rootsign verify --local ~/.rootsign/sessions/my_session.jsonl
+        rootsign verify --local ~/.rootsign/sessions/<session_id>.jsonl
+
+    Exit 0 VALID, 1 TAMPERED, 2 INCOMPLETE, 3 nothing was verified.
     """
     if local is not None:
         _verify_local(local, verbose)
@@ -413,23 +415,26 @@ def export(
     ),
     force: bool = typer.Option(False, "--force", help="Overwrite an existing bundle directory."),
 ) -> None:
-    """Export one session as a self-contained evidence bundle (ADR-014).
+    """Export one session as a self-contained evidence bundle.
 
     The bundle is a directory of JSON documents plus human-readable reports,
-    with a SHA-256 for every file in `manifest.json`. The manifest's own hash is
-    printed here — note it somewhere outside the bundle, because it is the only
+    with a SHA-256 for every file in manifest.json. The manifest's own hash is
+    printed at the end. Record it somewhere outside the bundle: it is the only
     value that proves a bundle you receive later is the one that was generated.
 
-    `export <session_id>` reads **Postgres only** in this release. Cloud-backed
-    export needs a server read API that does not exist yet, so a cloud-mode user
-    exports from the spool with `--local`.
+    A session ID is read from PostgreSQL. For a JSONL session file or a spool
+    file, use --local. --check re-hashes a bundle you received.
 
     Examples:
 
         rootsign export 550e8400-e29b-41d4-a716-446655440001
-        rootsign export --local ~/.rootsign/sessions/my_session.jsonl
-        rootsign export --local ~/.rootsign/spool/sessions/my_session.jsonl --redact-previews
+
+        rootsign export --local ~/.rootsign/sessions/<session_id>.jsonl
+
         rootsign export --check ./evidence-550e8400-e29b-41d4-a716-446655440001
+    \f
+    ADR-014. Cloud-backed export needs a server read API that does not exist
+    yet, so a cloud-mode user exports from the spool with `--local`.
     """
     if check is not None:
         _check_bundle(check)
@@ -600,7 +605,7 @@ def _check_bundle(directory: Path) -> None:
 def approve(
     action_id: Optional[str] = typer.Argument(
         None,
-        help="Action ID of the pending HiTL action (UUID). Omit when using --list.",
+        help="ID of the action waiting for approval (UUID). Omit when using --list.",
     ),
     reject: bool = typer.Option(
         False,
@@ -620,7 +625,7 @@ def approve(
         help="List the 20 most-recent pending approvals across all sessions.",
     ),
 ) -> None:
-    """Approve or reject a pending HiTL action.
+    """Approve or reject a tool call waiting for human approval (PostgreSQL).
 
     Examples:
 
