@@ -350,3 +350,20 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if "benchmark" in item.keywords:
             item.add_marker(skip_benchmark)
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Collect the suite's garbage while the interpreter is still whole (#79).
+
+    The uv.lock CI job, the only one with every extra installed, segfaulted
+    during interpreter shutdown after every test had passed: faulthandler put
+    the main thread in "Garbage-collecting" with no Python frame. Thousands of
+    objects (5,000-15,000 in CI) were still waiting for the collector when
+    pytest returned, so they were freed during finalization, after modules had
+    been torn down, and a C extension's dealloc crashed on the way out.
+    Collecting here, before finalization, made the same code pass 3 of 3 runs
+    that had crashed 8 of 9.
+    """
+    import gc
+
+    gc.collect()
