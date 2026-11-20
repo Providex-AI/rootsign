@@ -1,0 +1,200 @@
+---
+title: "Errors reference: exceptions RootSign raises"
+sidebarTitle: "Errors"
+description: "Every exception RootSign can raise into your code, when each one happens, its attributes and message, and the failures RootSign logs instead of raising."
+keywords: ["errors", "exceptions", "RootSignError", "HiTLRejectedError", "HiTLTimeoutError", "RootSignNotInitializedError", "RecordPersistenceError"]
+---
+
+RootSign is built so that recording never breaks the agent it records. When a record cannot be written, RootSign logs a `WARNING` on the `rootsign` logger and your tool returns its real result. Exceptions reach your code in three cases only:
+
+- **An approval decides against a tool call.** A person rejects it, nobody answers in time, or the approval itself cannot be stored. The tool does not run.
+- **You asked for failures to stop the agent**, with `ROOTSIGN_ON_RECORD_LOSS=fail`.
+- **RootSign is set up wrongly**: no session is open, or an extra is missing.
+
+## Catch everything from RootSign
+
+Every exception on this page, apart from those under [Other exceptions](#other-exceptions), derives from `RootSignError`:
+
+```python
+from rootsign import RootSignError
+
+try:
+    await wire_transfer(account="GB29NWBK60161331926819", amount=250000.0)
+except RootSignError as error:
+    print(f"not run: {error}")
+```
+
+```text
+RootSignError
+├── HiTLRejectedError
+├── HiTLTimeoutError
+├── HiTLUnsupportedBackendError
+├── RecordPersistenceError
+│   └── HiTLPersistenceError
+├── RootSignNotInitializedError
+├── RootSignPostgresExtraRequired
+├── RootSignCloudExtraRequired
+├── EscalationDepthExceededError
+└── IngestError
+```
+
+Import any of them from `rootsign.errors`. `RootSignError`, `RootSignNotInitializedError`, `HiTLRejectedError`, `HiTLTimeoutError` and `EscalationDepthExceededError` can also be imported from `rootsign`.
+
+## Approval
+
+These come from tools marked `@rootsign.trace(require_approval=True)`. [Require human approval](/guides/human-approval) shows each one in context.
+
+### HiTLRejectedError
+
+A person rejected the call, with `rootsign approve <action_id> --reject` or by answering anything but yes at the inline prompt. The tool did not run, and the rejection is recorded.
+
+```text
+Action 7d8d56ec-805c-430d-ae2f-ff1141a17f30 rejected by approver. Reason: Above the unattended mandate
+```
+
+<ResponseField name="action_id" type="UUID">The held action.</ResponseField>
+<ResponseField name="reason" type="str | None">The note given with the rejection, if any.</ResponseField>
+
+### HiTLTimeoutError
+
+Nobody decided within `timeout_seconds`, on the PostgreSQL backend. The tool did not run. The action is recorded as `timed_out`, which is kept apart from a person rejecting it. The inline prompt on the JSONL backend has no timeout.
+
+```text
+HiTL approval timed out after 300s for action b5e0e3d3-fa5e-4cb4-9462-b1048fd54c83. Status set to timed_out.
+```
+
+<ResponseField name="action_id" type="UUID">The held action.</ResponseField>
+<ResponseField name="timeout_seconds" type="int | float">The timeout that expired.</ResponseField>
+
+### HiTLUnsupportedBackendError
+
+`require_approval=True` was used on the JSONL backend with no terminal to prompt in, such as a background job or CI. Raised on the tool's first call, before it runs. Run it in a terminal, or use the PostgreSQL backend and `rootsign approve`.
+
+```text
+HiTL not available for tool 'wire_transfer' on this backend. Human-in-the-loop with require_approval=True needs either an interactive terminal (JSONL backend prompts inline) or the shared store: set ROOTSIGN_BACKEND=postgres for the async poll-loop / `rootsign approve` flow.
+```
+
+<ResponseField name="tool_name" type="str | None">The tool that was called.</ResponseField>
+
+### HiTLPersistenceError
+
+The record of a held call, or of the decision on it, could not be stored: the session file could not be written, the database refused it, or, on the cloud transport, the endpoint was unreachable and the spool could not be written either. Raised before the tool runs, on every backend and whatever `ROOTSIGN_ON_RECORD_LOSS` says: a decision that cannot be recorded is not acted on.
+
+```text
+HiTL record for tool 'pay' could not be persisted: spool write to <spool_dir> failed (PermissionError: [Errno 13] Permission denied: '<spool_dir>/sessions'). The gated action was not executed.
+```
+
+<ResponseField name="tool_name" type="str | None">The held tool.</ResponseField>
+
+It is a subclass of `RecordPersistenceError`, so `except RecordPersistenceError` catches both.
+
+<Info>
+  Before the release after RootSign 0.3.1, the JSONL backend ran an approved tool even when the approval record could not be written, and the JSONL and PostgreSQL backends raised `RuntimeError` when the pending record could not be written.
+</Info>
+
+## Recording
+
+### RecordPersistenceError
+
+A record could not be stored anywhere, and you set `ROOTSIGN_ON_RECORD_LOSS=fail`. Raised by the cloud transport when the endpoint is unreachable and the spool cannot be written. It can come from the call that writes the record: opening the session, a tool call, or closing the session.
+
+```text
+record for session <session_id> could not be persisted (PermissionError: [Errno 13] Permission denied: '<spool_dir>/sessions') and ROOTSIGN_ON_RECORD_LOSS=fail
+```
+
+With the default, `warn`, nothing is raised. RootSign logs the loss at `CRITICAL`, the agent keeps running, and the gap in the chain makes the session verify as INCOMPLETE. See [`ROOTSIGN_ON_RECORD_LOSS`](/reference/configuration#cloud-transport-and-spool).
+
+## Setup
+
+### RootSignNotInitializedError
+
+A traced tool, `wrap_tools()`, the MCP proxy or `record_decision()` was used with no session to record into: outside `async with rootsign.session(...)`, and without an explicit `ctx=` and `client=`.
+
+```text
+@rootsign.trace requires a session context. No rootsign session is active. Either open one:
+    rootsign.init(agent="my-agent")
+    async with rootsign.session(objective="..."):  # then wrap/trace inside
+or pass the context explicitly: ctx=<SessionContext>, client=<IngestClient>.
+```
+
+<ResponseField name="surface" type="str | None">What needed the session, such as `@rootsign.trace`.</ResponseField>
+
+### RootSignPostgresExtraRequired
+
+`ROOTSIGN_BACKEND=postgres` was set, but the database packages are not installed. Raised when the first session opens. Install them with `pip install 'rootsign[postgres]'`.
+
+```text
+ROOTSIGN_BACKEND=postgres requires the database extra. Install with:  pip install 'rootsign[postgres]'  (missing module: sqlalchemy)
+```
+
+### RootSignCloudExtraRequired
+
+An `HttpIngestClient` was created without the HTTP package. Install it with `pip install 'rootsign[cloud]'`.
+
+```text
+ROOTSIGN_BACKEND=cloud requires the cloud extra. Install with:  pip install 'rootsign[cloud]'  (missing module: httpx)
+```
+
+### EscalationDepthExceededError
+
+Reserved for chained approval escalations. This version never raises it.
+
+## Ingest errors
+
+`IngestError` and its subclasses are raised inside the store when it refuses a record, and are turned into an error code in the store's response. They do not reach your code. You see the codes in `rootsign-admin sync` output and in sync receipts.
+
+| Exception | Error code |
+| --- | --- |
+| `UnknownAgentError` | `UNKNOWN_AGENT` |
+| `SessionNotFoundError` | `SESSION_NOT_FOUND` |
+| `SessionClosedError` | `SESSION_CLOSED` |
+| `SessionAlreadyExistsError` | `SESSION_ALREADY_EXISTS` |
+| `ActionNotFoundError` | `ACTION_NOT_FOUND` |
+| `ActionAlreadyResolvedError` | `ACTION_ALREADY_RESOLVED` |
+| `ApprovalParentNotFoundError` | `APPROVAL_PARENT_NOT_FOUND` |
+| `IngestValidationError` | `VALIDATION_ERROR` |
+| `HashChainBrokenError` | `HASH_CHAIN_BROKEN` |
+
+Each carries `error_code` and `retryable` attributes. The full list of codes, with which ones to retry, is in the [ingest specification](https://github.com/Providex-AI/rootsign/blob/main/docs/ingest-spec-v1.md#5-error-code-registry).
+
+## Other exceptions
+
+Some mistakes raise standard Python exceptions rather than `RootSignError`:
+
+| Exception | When |
+| --- | --- |
+| `ValueError` | `rootsign.init()` gets an invalid value, such as `risk_tier="extreme"`, or is called a second time with different arguments. A session opened after `init()` with `ROOTSIGN_BACKEND=cloud`. |
+| `pydantic.ValidationError` | A `ROOTSIGN_` environment variable has a value outside its allowed list, which stops `import rootsign`. `ENVIRONMENT=production` with the default database URLs. See [Configuration](/reference/configuration#how-settings-are-read). |
+| `NotImplementedError` | `require_approval=True` on a LangChain `BaseTool` or a CrewAI tool. Put it on the plain function the tool calls. |
+| `FileNotFoundError` | `verify_session_local()` is given a path that does not exist. |
+
+For example:
+
+```text
+ValueError: rootsign.init() was already called with different arguments (agent='a'/'development', backend='jsonl' → agent='b'/'development', backend='jsonl'). init() configures one agent identity per process; for multiple identities use the explicit API (SessionContext + get_ingest_client).
+```
+
+## What is logged instead of raised
+
+Failures that do not affect whether a tool should run are logged on the `rootsign` logger and never raised:
+
+- A record that could not be written, on any backend, logged at `WARNING`. On the cloud transport it goes to the spool first. For example, on the JSONL backend:
+
+  ```text
+  WARNING rootsign.sdk: rootsign ingest failed for tool lookup: [Errno 13] Permission denied: '<data_dir>/sessions/<session_id>.jsonl'
+  ```
+- Records lost entirely with `ROOTSIGN_ON_RECORD_LOSS=warn`, logged at `CRITICAL`, with a chain gap that verify reports.
+- A decision that could not be recorded. The action is still recorded, without a `decision_id`.
+
+To see them, configure logging in your application, for example `logging.basicConfig(level=logging.WARNING)`.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Require human approval" icon="user-check" href="/guides/human-approval">
+    Hold a tool call until a person decides, and handle the outcome.
+  </Card>
+  <Card title="Configuration" icon="settings" href="/reference/configuration">
+    Every environment variable, including `ROOTSIGN_ON_RECORD_LOSS`.
+  </Card>
+</Columns>
