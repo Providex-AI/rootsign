@@ -240,6 +240,26 @@ def stop_db(
         subprocess.run([docker, "rm", _DB_CONTAINER], check=True)
 
 
+@contextlib.contextmanager
+def _database_errors() -> "Iterator[None]":
+    """Turn a database these commands cannot use into one line and exit 1.
+
+    Same message as the `rootsign` commands (`rootsign._cli_db`), naming
+    `DATABASE_URL_SYNC`, which is the URL `init` and `status` connect with.
+    Anything else, including a declined `--reset` prompt, passes through.
+    """
+    from rootsign._cli_db import database_problem
+
+    try:
+        yield
+    except Exception as exc:
+        message = database_problem(exc, settings.DATABASE_URL_SYNC, setting="DATABASE_URL_SYNC")
+        if message is None:
+            raise
+        typer.echo(f"Error: {message}", err=True)
+        raise typer.Exit(code=1) from None
+
+
 @app.command()
 def init(
     reset: bool = typer.Option(
@@ -268,9 +288,11 @@ def init(
                 abort=True,
             )
         typer.echo("Dropping public schema...")
-        _drop_public_schema()
+        with _database_errors():
+            _drop_public_schema()
     typer.echo("Running alembic upgrade head...")
-    alembic_command.upgrade(_alembic_config(), "head")
+    with _database_errors():
+        alembic_command.upgrade(_alembic_config(), "head")
     elapsed = time.perf_counter() - start
     typer.echo(f"Done in {elapsed:.2f}s")
 
@@ -533,7 +555,8 @@ def status() -> None:
     """Print row counts for every RootSign table."""
     psycopg2 = _require("psycopg2")
     dsn = _strip_driver(settings.DATABASE_URL_SYNC)
-    conn = psycopg2.connect(dsn)
+    with _database_errors():
+        conn = psycopg2.connect(dsn)
     try:
         with conn.cursor() as cur:
             tables = [
