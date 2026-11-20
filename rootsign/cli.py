@@ -80,6 +80,10 @@ def _require(module: str) -> Any:
 # freely between `rootsign-admin start-db` and `docker-compose up -d db`.
 _DB_CONTAINER = "rootsign-timescaledb"
 _DB_IMAGE = "timescale/timescaledb:latest-pg16"
+# Named, so the data outlives the container. The image declares a VOLUME, and
+# without `-v` Docker gave every new container a fresh anonymous one: after
+# `stop-db --remove`, the next `start-db` came back with an empty database.
+_DB_VOLUME = "rootsign_pgdata"
 
 
 def _strip_driver(sqla_url: str) -> str:
@@ -204,6 +208,8 @@ def start_db(
                 "POSTGRES_DB=rootsign_dev",
                 "-p",
                 f"{port}:5432",
+                "-v",
+                f"{_DB_VOLUME}:/var/lib/postgresql/data",
                 _DB_IMAGE,
             ],
             check=True,
@@ -226,7 +232,11 @@ def start_db(
 @app.command("stop-db")
 def stop_db(
     remove: bool = typer.Option(
-        False, "--remove", "-r", help="Also remove the container (data volume is preserved)."
+        False,
+        "--remove",
+        "-r",
+        help=f"Also remove the container. The data stays in the {_DB_VOLUME} volume, "
+        "and the next start-db reuses it.",
     ),
 ) -> None:
     """Stop the local TimescaleDB container."""
