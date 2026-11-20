@@ -203,6 +203,23 @@ def get_init_config() -> _InitConfig | None:
     return _init_config
 
 
+def _active_settings() -> SDKSettings:
+    """The SDK settings in force: the ones `init()` read, else freshly read.
+
+    Every setting is read at the same moment. With `init()`, that is when it
+    ran; without it (the explicit `SessionContext` + client API), it is when
+    the setting is used, as `get_ingest_client()` does. Decision capture used
+    to read a snapshot taken when `rootsign` was imported, so setting
+    `ROOTSIGN_CAPTURE_DECISIONS` in code after the import was silently
+    ignored while `ROOTSIGN_DATA_DIR` beside it was honoured.
+    """
+    if _init_config is not None:
+        return _init_config.settings
+    from rootsign.sdk.config import SDKSettings
+
+    return SDKSettings()
+
+
 def _reset_init_config() -> None:
     """Test-only: forget the singleton so the next `init()` starts clean."""
     global _init_config

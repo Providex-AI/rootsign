@@ -119,11 +119,15 @@ class SDKSettings(BaseSettings):
     @classmethod
     def _normalize_backend(cls, v: str) -> str:
         # 'local' → 'postgres' (deprecated alias, ADR-011 Decision 1).
+        # FutureWarning, not DeprecationWarning: Python's default filters hide
+        # DeprecationWarning outside __main__, so nobody using the alias saw
+        # it. FutureWarning is the category meant for end users, and the
+        # default filter shows it once per call site.
         if v == "local":
             warnings.warn(
                 "ROOTSIGN_BACKEND=local is deprecated; use 'postgres'. "
                 "'local' will be removed in a future release.",
-                DeprecationWarning,
+                FutureWarning,
                 stacklevel=2,
             )
             return "postgres"
@@ -163,4 +167,7 @@ class SDKSettings(BaseSettings):
     RETRY_MAX_DELAY: float = 5.0
 
 
+#: A snapshot taken at import, kept for code that imports it. RootSign itself
+#: reads settings when `init()` runs (`rootsign.sdk.facade._active_settings`),
+#: so environment changes made after `import rootsign` are honoured.
 sdk_settings = SDKSettings()
