@@ -26,7 +26,7 @@ from uuid import uuid4
 
 import pytest
 
-from rootsign.errors import HiTLRejectedError, HiTLTimeoutError
+from rootsign.errors import HiTLPersistenceError, HiTLRejectedError, HiTLTimeoutError
 from rootsign.ingest.schemas import IngestResponse
 from rootsign.sdk.context import SessionContext
 from rootsign.sdk.decorator import trace
@@ -203,8 +203,9 @@ class TestPendingInsert:
 
         # The failure-isolation rule swallows the RuntimeError inside
         # _try_ingest → returns None → HiTL wrapper detects missing
-        # action_id and raises a clear error.
-        with pytest.raises(RuntimeError, match="HiTL gate cannot proceed"):
+        # action_id and raises HiTLPersistenceError, a RootSignError, so
+        # `except RootSignError` catches it on every backend.
+        with pytest.raises(HiTLPersistenceError, match="The gated action was not executed"):
             await my_tool(7)
 
 
