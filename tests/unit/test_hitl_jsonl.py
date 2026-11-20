@@ -9,6 +9,7 @@ asyncio.to_thread(input, ...)); `sys.stdin.isatty` is patched for the TTY tests.
 from __future__ import annotations
 
 import json
+import os
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -148,6 +149,10 @@ async def test_answering_yes_records_no_stray_note(tmp_path):
     assert approval["payload"]["decision_reason"] is None
 
 
+@pytest.mark.skipif(
+    hasattr(os, "geteuid") and os.geteuid() == 0,
+    reason="root writes to read-only files, so the disk failure cannot be simulated",
+)
 class TestApprovalRecordsFailClosed:
     """An approval record is the authorization control, not telemetry: if it
     cannot be stored, the held tool must not run (the rule HiTLPersistenceError
