@@ -140,7 +140,9 @@ def init(
     (build `SessionContext` / clients directly), not a mutable global's.
 
     Raises:
-        ValueError: on an invalid enum value, or on a conflicting re-init.
+        ValueError: on an invalid enum value, a value outside the agent
+            registry's limits (agent and owner 2-200 characters, description
+            up to 2,000, model_version up to 100), or a conflicting re-init.
     """
     global _init_config
 
@@ -155,9 +157,23 @@ def init(
     except ValueError as exc:
         raise ValueError(f"rootsign.init(): {exc}") from exc
 
+    agent = agent or _default_agent_name()
+    owner = owner or _default_owner()
+    _validate_agent_fields(
+        agent=agent,
+        owner=owner,
+        environment=env,
+        risk_tier=tier,
+        framework=fw,
+        description=description,
+        model_version=model_version,
+        permitted_tools=list(permitted_tools or ()),
+        regulatory_categories=list(regulatory_categories or ()),
+    )
+
     config = _InitConfig(
-        agent=agent or _default_agent_name(),
-        owner=owner or _default_owner(),
+        agent=agent,
+        owner=owner,
         environment=env,
         risk_tier=tier,
         framework=fw,
@@ -178,6 +194,33 @@ def init(
             "(SessionContext + get_ingest_client)."
         )
     _init_config = config
+
+
+#: `AgentCreate` field name -> the `init()` argument a user passed it as.
+_INIT_ARGUMENT = {"name": "agent"}
+
+
+def _validate_agent_fields(*, agent: str, **fields: Any) -> None:
+    """Check the agent fields against the registry schema, on every backend.
+
+    `init()` used to check only the enums. Anything else was stored as given:
+    on JSONL `init(agent="a")` worked, while on PostgreSQL the same call
+    succeeded and the first `session()` failed with a pydantic ValidationError
+    for `AgentCreate`. Validating here, with the schema PostgreSQL uses, makes
+    a bad value fail the same way everywhere, at `init()`, as a ValueError.
+    """
+    from pydantic import ValidationError
+
+    from rootsign.schemas.agent import AgentCreate
+
+    try:
+        AgentCreate(name=agent, **fields)
+    except ValidationError as exc:
+        problems = "; ".join(
+            f"{_INIT_ARGUMENT.get(str(error['loc'][0]), error['loc'][0])}: {error['msg']}"
+            for error in exc.errors()
+        )
+        raise ValueError(f"rootsign.init(): {problems}") from None
 
 
 def _same_config(a: _InitConfig, b: _InitConfig) -> bool:
