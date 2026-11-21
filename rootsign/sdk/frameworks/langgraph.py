@@ -21,6 +21,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from rootsign.sdk._async_bridge import _run_sync
+from rootsign.sdk.frameworks import _not_a_tool
 
 if TYPE_CHECKING:
     from rootsign.sdk.client import IngestClient
@@ -46,6 +47,17 @@ _emitting: contextvars.ContextVar[bool] = contextvars.ContextVar(
 )
 
 
+def _require_langchain_tool(tool: Any) -> None:
+    """Duck-typed: the attributes `wrap_tool` uses. No langchain import."""
+    if (
+        isinstance(getattr(tool, "name", None), str)
+        and callable(getattr(tool, "invoke", None))
+        and callable(getattr(tool, "ainvoke", None))
+    ):
+        return
+    raise _not_a_tool("rootsign.wrap_tools()", "LangChain", ".name, .invoke and .ainvoke", tool)
+
+
 class LangGraphTracer:
     """Wrap LangChain BaseTool callables so each invocation emits ACTION_RECORD."""
 
@@ -69,6 +81,7 @@ class LangGraphTracer:
         commonly happens at import time, before any session exists. Explicit
         arguments always win.
         """
+        _require_langchain_tool(tool)
         # Import inside the function so the SDK installs cleanly without the
         # langgraph extra. ADR-004 keeps third-party deps lazy.
         from rootsign.sdk.decorator import _emit_action_record
@@ -163,7 +176,13 @@ class LangGraphTracer:
         Already-wrapped tools (those with `_rootsign_instrumented` truthy) are
         returned unchanged so a `@rootsign.trace`-decorated tool subsequently
         passed through `wrap_tools` is not double-instrumented.
+
+        Every item is checked before any is wrapped, so a list with one wrong
+        item raises TypeError and leaves the others untouched.
         """
+        for t in tools:
+            if not getattr(t, "_rootsign_instrumented", False):
+                _require_langchain_tool(t)
         return [
             t
             if getattr(t, "_rootsign_instrumented", False)
