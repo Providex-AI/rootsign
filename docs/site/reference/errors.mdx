@@ -5,9 +5,10 @@ description: "Every exception RootSign can raise into your code, when each one h
 keywords: ["errors", "exceptions", "RootSignError", "HiTLRejectedError", "HiTLTimeoutError", "RootSignNotInitializedError", "RecordPersistenceError"]
 ---
 
-RootSign is built so that recording never breaks the agent it records. When a record cannot be written, RootSign logs a `WARNING` on the `rootsign` logger and your tool returns its real result. Exceptions reach your code in three cases only:
+RootSign is built so that recording never breaks the agent it records. When a record cannot be written, RootSign logs a `WARNING` on the `rootsign` logger and your tool returns its real result. Exceptions reach your code in four cases only:
 
 - **An approval decides against a tool call.** A person rejects it, nobody answers in time, or the approval itself cannot be stored. The tool does not run.
+- **A session cannot be opened.** `rootsign.session()` raises before its body runs, so the agent does no work that would leave no record at all.
 - **You asked for failures to stop the agent**, with `ROOTSIGN_ON_RECORD_LOSS=fail`.
 - **RootSign is set up wrongly**: no session is open, or an extra is missing.
 
@@ -103,6 +104,18 @@ record for session <session_id> could not be persisted (PermissionError: [Errno 
 ```
 
 With the default, `warn`, nothing is raised. RootSign logs the loss at `CRITICAL`, the agent keeps running, and the gap in the chain makes the session verify as INCOMPLETE. See [`ROOTSIGN_ON_RECORD_LOSS`](/reference/configuration#cloud-transport-and-spool).
+
+`rootsign.session()` also raises it, on every backend and whatever `ROOTSIGN_ON_RECORD_LOSS` says, when it cannot open the session: the agent cannot be registered, or the session's first record cannot be written, for example because the data folder is not writable or the database is down. Nothing in the `async with` block runs. A record lost later leaves a gap that verify reports, but a session that never opened leaves no file to show that anything was missed.
+
+```text
+session could not be opened (PermissionError: [Errno 13] Permission denied: '<data_dir>/agents.jsonl'). Nothing was recorded, and the session body did not run.
+```
+
+The original error is its `__cause__`.
+
+<Info>
+  Before the release after RootSign 0.3.1, a session that could not be opened raised the underlying `PermissionError` or `OSError` instead.
+</Info>
 
 ## Setup
 
