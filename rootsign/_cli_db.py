@@ -39,7 +39,7 @@ def database_problem(exc: BaseException, url: Any, *, setting: str = "DATABASE_U
     `url` is a string or a SQLAlchemy URL; the password is hidden in the
     message. `setting` names the environment variable that points at it.
     """
-    if not _is_database_error(exc):
+    if not is_database_error(exc):
         return None
     where = _masked(url)
     if _sqlstate(exc) == _UNDEFINED_TABLE:
@@ -50,7 +50,10 @@ def database_problem(exc: BaseException, url: Any, *, setting: str = "DATABASE_U
     )
 
 
-def _is_database_error(exc: BaseException) -> bool:
+def is_database_error(exc: BaseException) -> bool:
+    """True when `exc` means the storage could not be used: an OS error, or an
+    asyncpg / psycopg2 error or SQLAlchemy's wrapper for one. Also used by
+    `rootsign.session()` to tell a storage failure from a setup mistake."""
     # OSError covers a refused connection, an unknown host and a timeout:
     # asyncpg raises them unwrapped while connecting.
     if isinstance(exc, OSError):
