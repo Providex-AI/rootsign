@@ -26,6 +26,35 @@ from rootsign.sdk.context import SessionContext
 
 logger = logging.getLogger("rootsign.sdk.session")
 
+
+def _raise_if_storage_failure(exc: Exception) -> None:
+    """Fail closed, as a RootSignError, when the session cannot be opened.
+
+    This used to raise whatever the storage layer raised (`PermissionError`
+    from an unwritable data folder, `OSError` from a database that is down),
+    which `except RootSignError` did not catch. Failing open is not safe here:
+    a record lost mid-session leaves a gap `verify` reports as INCOMPLETE, but a
+    session that never opened leaves no file and no evidence anything was
+    missed. Setup mistakes (no `init()`, a missing extra) keep their own errors.
+    """
+    from rootsign._cli_db import is_database_error
+    from rootsign.errors import RecordPersistenceError
+
+    if is_database_error(exc):
+        raise RecordPersistenceError(
+            f"session could not be opened ({type(exc).__name__}: {exc}). "
+            "Nothing was recorded, and the session body did not run."
+        ) from exc
+
+
+async def _close_quietly(facade: Any, client: IngestClient) -> None:
+    """Close a client `session()` built itself; never mask the original error."""
+    try:
+        await facade._maybe_close(client)
+    except Exception as close_err:  # noqa: BLE001
+        logger.warning("rootsign: closing the session's client failed: %s", close_err)
+
+
 # SCHEMA_VERSION comes from rootsign.ingest.schemas (imported above) — one
 # definition of the wire version, next to the schema it versions.
 
@@ -91,39 +120,49 @@ async def session(
     Raises:
         RootSignNotInitializedError: neither `rootsign.init()` was called nor
             both `agent_id=` and `client=` were passed.
+        RecordPersistenceError: the session could not be opened, because the
+            agent could not be registered or its SESSION_OPEN could not be
+            written (a data folder that is not writable, a database that is
+            down). Raised before the body runs, chained from the storage error.
     """
     from rootsign.sdk import facade
 
     owns_client = False
-    if agent_id is None or client is None:
-        config = facade.get_init_config()
-        if config is None:
-            from rootsign.errors import RootSignNotInitializedError
+    try:
+        if agent_id is None or client is None:
+            config = facade.get_init_config()
+            if config is None:
+                from rootsign.errors import RootSignNotInitializedError
 
-            raise RootSignNotInitializedError("rootsign.session()")
-        if agent_id is None:
-            agent_id = await facade._resolve_agent_id(config)
-        if client is None:
-            client = facade._build_client(config)
-            owns_client = True
+                raise RootSignNotInitializedError("rootsign.session()")
+            if agent_id is None:
+                agent_id = await facade._resolve_agent_id(config)
+            if client is None:
+                client = facade._build_client(config)
+                owns_client = True
 
-    ctx = SessionContext(agent_id=agent_id)
-    base = _envelope_base(agent_id=agent_id, session_id=ctx.session_id)
+        ctx = SessionContext(agent_id=agent_id)
+        base = _envelope_base(agent_id=agent_id, session_id=ctx.session_id)
 
-    should_open = await ctx.mark_session_open()
-    if should_open:
-        await client.handle(
-            {
-                **base,
-                "event_type": EventType.SESSION_OPEN.value,
-                "event_id": str(uuid4()),
-                "emitted_at": datetime.now(timezone.utc).isoformat(),
-                "payload": {
-                    "objective": objective,
-                    "user_id": user_id,
-                },
-            }
-        )
+        should_open = await ctx.mark_session_open()
+        if should_open:
+            await client.handle(
+                {
+                    **base,
+                    "event_type": EventType.SESSION_OPEN.value,
+                    "event_id": str(uuid4()),
+                    "emitted_at": datetime.now(timezone.utc).isoformat(),
+                    "payload": {
+                        "objective": objective,
+                        "user_id": user_id,
+                    },
+                }
+            )
+    except Exception as exc:
+        if owns_client:
+            await _close_quietly(facade, client)
+        _raise_if_storage_failure(exc)
+        raise
 
     close_status = "completed"
     # Publish (ctx, client) for implicit resolution by the tracers (ADR-012

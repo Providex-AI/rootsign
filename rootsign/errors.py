@@ -183,7 +183,11 @@ class RecordPersistenceError(RootSignError):
     telemetry path into raising it instead — for deployments whose auditor
     prefers a halted agent to an incomplete record.
 
-    Its HiTL subclass is *always* raised, regardless of that setting.
+    Its HiTL subclass is *always* raised, regardless of that setting. So is
+    this class when `rootsign.session()` cannot open a session at all (the
+    agent cannot be registered or SESSION_OPEN cannot be written): a session
+    that never opened leaves no evidence of what was missed, so it fails
+    closed before the body runs.
     """
 
 

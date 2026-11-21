@@ -69,21 +69,21 @@ def test_init_zero_arg_defaults_to_script_name_development_medium():
 
 
 def test_init_is_idempotent_for_identical_args():
-    rootsign.init(agent="a", risk_tier="low")
+    rootsign.init(agent="agent-a", risk_tier="low")
     first = facade.get_init_config()
-    rootsign.init(agent="a", risk_tier="low")
+    rootsign.init(agent="agent-a", risk_tier="low")
     assert facade.get_init_config() == first
 
 
 def test_init_with_different_args_raises():
-    rootsign.init(agent="a")
+    rootsign.init(agent="agent-a")
     with pytest.raises(ValueError, match="already called with different arguments"):
-        rootsign.init(agent="b")
+        rootsign.init(agent="agent-b")
 
 
 def test_init_rejects_invalid_enum_value():
     with pytest.raises(ValueError, match="rootsign.init"):
-        rootsign.init(agent="a", risk_tier="catastrophic")
+        rootsign.init(agent="agent-a", risk_tier="catastrophic")
 
 
 def test_init_does_no_io(tmp_path):
@@ -363,3 +363,43 @@ async def test_parallel_tool_calls_in_one_session_keep_monotonic_sequences(tmp_p
     result = rootsign.verify_session_local(str(_session_file(tmp_path, ctx.session_id)))
     assert result.valid is True
     assert result.record_count == 8
+
+
+class TestInitValidatesAgentFields:
+    """`init()` validates the agent fields with the same schema the PostgreSQL
+    registry uses, on every backend, and raises ValueError there.
+
+    It used to check only the enum fields. Anything else was stored as given:
+    on JSONL `init(agent="a")` worked, while on PostgreSQL the same call
+    succeeded and the first `session()` failed with a pydantic ValidationError
+    for `AgentCreate`. A script that ran locally broke on the production
+    backend.
+    """
+
+    @pytest.mark.parametrize(
+        ("kwargs", "named"),
+        [
+            ({"agent": "a"}, "agent"),
+            ({"agent": "x" * 201}, "agent"),
+            ({"agent": "ok-agent", "owner": "z"}, "owner"),
+            ({"agent": "ok-agent", "description": "d" * 2001}, "description"),
+            ({"agent": "ok-agent", "model_version": "m" * 101}, "model_version"),
+        ],
+    )
+    def test_out_of_range_values_raise_value_error_at_init(self, kwargs, named):
+        with pytest.raises(ValueError, match=rf"^rootsign\.init\(\): {named}: ") as raised:
+            rootsign.init(**kwargs)
+
+        assert raised.value.__cause__ is None
+        assert facade.get_init_config() is None
+
+    def test_the_message_names_the_argument_not_the_schema_field(self):
+        with pytest.raises(ValueError) as raised:
+            rootsign.init(agent="a")
+
+        assert "AgentCreate" not in str(raised.value)
+        assert "name" not in str(raised.value).split(":")[1]
+
+    def test_boundary_values_are_accepted(self):
+        rootsign.init(agent="ab", owner="cd", description="d" * 2000, model_version="m" * 100)
+        assert facade.get_init_config().agent == "ab"

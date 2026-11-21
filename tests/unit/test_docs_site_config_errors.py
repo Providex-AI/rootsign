@@ -532,8 +532,8 @@ def test_the_ingest_error_table():
 def test_reinit_value_error_message(tmp_path):
     source = """
         import rootsign
-        rootsign.init(agent="a")
-        rootsign.init(agent="b")
+        rootsign.init(agent="invoice-agent")
+        rootsign.init(agent="billing-agent")
     """
     result = _python(source, tmp_path)
     expected = output_after(ERRORS, "\nFor example:")
