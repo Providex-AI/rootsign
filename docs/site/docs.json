@@ -42,7 +42,7 @@
         "groups": [
           {
             "group": "SDK",
-            "pages": ["reference/configuration", "reference/errors"]
+            "pages": ["reference/python-api", "reference/configuration", "reference/errors"]
           },
           {
             "group": "CLI",

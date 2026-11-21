@@ -1,0 +1,381 @@
+---
+title: "Python API reference: init, session, trace and verify"
+sidebarTitle: "Python API"
+description: "The core RootSign calls: init(), session(), @trace(), wrap_tools() and the two verify functions, with every parameter, default, return value and error."
+keywords: ["python api", "rootsign.init", "rootsign.session", "rootsign.trace", "wrap_tools", "verify_session_local", "SessionContext"]
+---
+
+Five calls are the stable core of RootSign: `init()`, `session()`, `@trace()`, `wrap_tools()` and verification. The planned TypeScript SDK mirrors this surface. Everything else that `rootsign` exports is lower-level and listed [at the end](#beyond-the-core-calls).
+
+```python core.py
+import asyncio
+import os
+
+import rootsign
+
+rootsign.init(agent="invoice-agent", risk_tier="high")
+
+
+@rootsign.trace()
+async def send_invoice(customer: str, amount: float) -> str:
+    return f"invoice for {amount:.2f} sent to {customer}"
+
+
+async def main() -> None:
+    async with rootsign.session(objective="bill ACME for October") as ctx:
+        print(await send_invoice("acme-corp", 1500.0))
+
+    data_dir = os.path.expanduser(os.environ.get("ROOTSIGN_DATA_DIR", "~/.rootsign"))
+    result = rootsign.verify_session_local(f"{data_dir}/sessions/{ctx.session_id}.jsonl")
+    print(result.summary)
+
+
+asyncio.run(main())
+```
+
+```text
+invoice for 1500.00 sent to acme-corp
+VALID — 1 records, chain intact
+```
+
+## rootsign.init()
+
+```python
+rootsign.init(
+    *,
+    agent=None,
+    owner=None,
+    environment=None,
+    risk_tier=None,
+    framework=None,
+    description=None,
+    model_version=None,
+    permitted_tools=None,
+    regulatory_categories=None,
+) -> None
+```
+
+Configures RootSign once, at startup: which agent is recording, and the settings in force. Every argument is keyword-only and optional, so `rootsign.init()` alone is enough to record.
+
+<ResponseField name="agent" type="str" default="the script's file name">
+  The agent's name, 2 to 200 characters. Together with `environment` it identifies the agent. Without it, the name of the running script is used, or `rootsign-agent` in a notebook or REPL.
+</ResponseField>
+
+<ResponseField name="owner" type="str" default="your operating-system user name">
+  The team or person accountable for the agent, 2 to 200 characters. Falls back to `unknown` when the user name is shorter.
+</ResponseField>
+
+<ResponseField name="environment" type="development | staging | production" default="development">
+  Where the agent runs. The same agent name can exist separately in each environment.
+</ResponseField>
+
+<ResponseField name="risk_tier" type="low | medium | high | critical" default="medium">
+  How much harm the agent's actions can do, recorded on the agent for reviewers.
+</ResponseField>
+
+<ResponseField name="framework" type="langgraph | crewai | autogen | custom | unknown" default="unknown">
+  The agent framework, recorded on the agent. It does not change how tools are wrapped.
+</ResponseField>
+
+<ResponseField name="description" type="str">
+  Up to 2,000 characters.
+</ResponseField>
+
+<ResponseField name="model_version" type="str">
+  The model the agent uses, up to 100 characters.
+</ResponseField>
+
+<ResponseField name="permitted_tools" type="list[str]">
+  Tool names the agent is meant to use, recorded on the agent.
+</ResponseField>
+
+<ResponseField name="regulatory_categories" type="list[str]">
+  Labels for the rules the agent falls under, recorded on the agent.
+</ResponseField>
+
+**Returns** `None`.
+
+**Raises** `ValueError` for a value outside the allowed list or the length limits above, or when `init()` is called again in the same process with different arguments:
+
+```text
+rootsign.init(): agent: String should have at least 2 characters
+```
+
+**Notes**
+
+- `init()` does no I/O. The agent is registered, in `agents.jsonl` or the PostgreSQL `agents` table, when the first session opens. Problems that need I/O, such as a missing extra or an unwritable data folder, also surface then.
+- Calling `init()` again with the same arguments does nothing.
+- The `ROOTSIGN_` settings are read here and stay fixed for the process. [Configuration](/reference/configuration#how-settings-are-read) explains when each setting is read.
+- An agent's attributes are stored when it is first registered. If a later run passes different values for the same agent and environment, RootSign keeps the stored ones and logs a warning naming the difference.
+
+<Info>
+  The length limits apply on every backend since the release after RootSign 0.3.1. Before, the JSONL backend accepted any length, and PostgreSQL rejected the value only when the first session opened.
+</Info>
+
+## rootsign.session()
+
+```python
+async with rootsign.session(
+    *,
+    objective=None,
+    user_id=None,
+    agent_id=None,
+    client=None,
+) as ctx:
+    ...
+```
+
+Opens a session, the unit that RootSign chains and verifies. Every traced call inside the block is recorded into it, in order. The session's open and close are recorded too.
+
+<ResponseField name="objective" type="str">
+  What the agent is being asked to do. Recorded on the session.
+</ResponseField>
+
+<ResponseField name="user_id" type="str">
+  The end user the agent is acting for, if your application has one.
+</ResponseField>
+
+<ResponseField name="agent_id" type="UUID">
+  An agent ID from `rootsign.register_agent()`. Omit it to use the agent from `init()`.
+</ResponseField>
+
+<ResponseField name="client" type="IngestClient">
+  Where records are written. Omit it to use the backend from `init()`. A client that `session()` builds itself is closed when the session ends; one you pass in is left open.
+</ResponseField>
+
+**Yields** a `SessionContext`:
+
+| Attribute | Meaning |
+| --- | --- |
+| `session_id` | The session's UUID. With the JSONL backend, the session file is `sessions/<session_id>.jsonl` in the data folder. |
+| `agent_id` | The agent's UUID |
+| `current_sequence` | The sequence number of the last action issued, `0` before the first |
+| `record_decision(...)` | Records a decision before the next action. See [below](#ctx-record-decision). |
+
+**Raises**
+
+| Exception | When |
+| --- | --- |
+| `RootSignNotInitializedError` | `init()` was not called and `agent_id` and `client` were not both passed |
+| `RecordPersistenceError` | The session could not be opened: the agent could not be registered, or the session's first record could not be written, because the data folder is not writable or the database is down. Nothing in the block runs. |
+| `RootSignPostgresExtraRequired` | `ROOTSIGN_BACKEND=postgres` without `rootsign[postgres]` installed |
+| `ValueError` | `ROOTSIGN_BACKEND=cloud` with `init()`. The cloud transport is used through an explicit `HttpIngestClient` while it is in preview. |
+
+**Notes**
+
+- If the block raises, the session is recorded as `failed` and the exception propagates. Otherwise it is recorded as `completed`.
+- Traced calls find the session through a context variable, so concurrent sessions in different asyncio tasks stay separate.
+- Calling a traced function after the block has ended raises `RootSignNotInitializedError`.
+
+<Info>
+  `RecordPersistenceError` here was added after RootSign 0.3.1. In 0.3.1 and earlier, a session that could not be opened raised the underlying `PermissionError` or `OSError`.
+</Info>
+
+### ctx.record_decision()
+
+```python
+await ctx.record_decision(
+    *,
+    selected_action,
+    reasoning_summary=None,
+    confidence=None,
+    alternatives_considered=None,
+) -> UUID | None
+```
+
+Records what the agent decided, and why, and links it to the next action recorded in the session. It does nothing and returns `None` unless `ROOTSIGN_CAPTURE_DECISIONS=true`. `ROOTSIGN_REASONING_DEPTH` sets how much of the reasoning is kept; [Configuration](/reference/configuration#decision-capture) has the limits.
+
+## @rootsign.trace()
+
+```python
+@rootsign.trace(
+    *,
+    tool_name=None,
+    redaction_config=None,
+    require_approval=False,
+    approval_context_builder=None,
+    poll_interval_seconds=2.0,
+    timeout_seconds=300.0,
+    session_context=None,
+    ingest_client=None,
+)
+```
+
+Records every call of the decorated function as an action in the current session: the arguments and the result, each with its hash, and the hash that chains the action to the one before it.
+
+<ResponseField name="tool_name" type="str" default="the function's __name__">
+  The name recorded for each call.
+</ResponseField>
+
+<ResponseField name="redaction_config" type="RedactionConfig">
+  Rules applied to the arguments and the result before they are hashed and stored. [Redact PII](/guides/redaction) covers the built-in configs.
+</ResponseField>
+
+<ResponseField name="require_approval" type="bool" default="False">
+  Hold each call until a person approves it. Only for plain functions. [Require human approval](/guides/human-approval) walks through it.
+</ResponseField>
+
+<ResponseField name="approval_context_builder" type="Callable[[str, dict], dict]">
+  Builds what the approver is shown, from the tool name and the redacted input. By default: the tool name and the first 500 characters of the redacted input.
+</ResponseField>
+
+<ResponseField name="poll_interval_seconds" type="float" default="2.0">
+  How often a held call checks for a decision, on PostgreSQL.
+</ResponseField>
+
+<ResponseField name="timeout_seconds" type="float" default="300.0">
+  How long a held call waits, on PostgreSQL, before it is refused as timed out.
+</ResponseField>
+
+<ResponseField name="session_context" type="SessionContext">
+  Record into this session instead of the current one. Pass it together with `ingest_client`.
+</ResponseField>
+
+<ResponseField name="ingest_client" type="IngestClient">
+  Write through this client instead of the current session's.
+</ResponseField>
+
+**Returns** an async function. A decorated function is always async, even when the original is not, so call it with `await`.
+
+**Raises**, when the decorated function is called:
+
+| Exception | When |
+| --- | --- |
+| `RootSignNotInitializedError` | No session is open and no `session_context` was passed |
+| `HiTLRejectedError`, `HiTLTimeoutError`, `HiTLUnsupportedBackendError`, `HiTLPersistenceError` | With `require_approval=True`. See [Errors](/reference/errors#approval). |
+| Whatever the function raises | Unchanged. The call is still recorded, with no result. |
+
+When decorating, `NotImplementedError` is raised for `require_approval=True` on a LangChain or CrewAI tool object.
+
+**Notes**
+
+- Decorating a LangChain `BaseTool` or a CrewAI tool wraps it the same way as `wrap_tools()`.
+- A call that cannot be recorded does not fail: RootSign logs a `WARNING` and returns the function's result. The exceptions are held calls, which never run without a record, and the cloud transport with `ROOTSIGN_ON_RECORD_LOSS=fail`, which raises `RecordPersistenceError`.
+
+## rootsign.wrap_tools()
+
+```python
+rootsign.wrap_tools(tools, *, ctx=None, client=None, redaction_config=None) -> list
+rootsign.wrap_crewai_tools(tools, *, ctx=None, client=None, redaction_config=None) -> list
+```
+
+Instruments framework tools so every call is recorded, the same way as `@trace()`. `wrap_tools()` takes LangChain tools, the kind LangGraph's `ToolNode` uses, and needs `pip install 'rootsign[langgraph]'`. `wrap_crewai_tools()` takes CrewAI tools and needs `pip install 'rootsign[crewai]'`.
+
+<ResponseField name="tools" type="list" required>
+  The tools to instrument.
+</ResponseField>
+
+<ResponseField name="ctx" type="SessionContext">
+  Record into this session instead of the current one. Pass it together with `client`.
+</ResponseField>
+
+<ResponseField name="client" type="IngestClient">
+  Write through this client instead of the current session's.
+</ResponseField>
+
+<ResponseField name="redaction_config" type="RedactionConfig">
+  As for `@trace()`.
+</ResponseField>
+
+```python langchain_tools.py
+import asyncio
+
+from langchain_core.tools import tool
+
+import rootsign
+
+rootsign.init(agent="support-agent")
+
+
+@tool
+def lookup_customer(customer_id: str) -> str:
+    """Look up a customer record."""
+    return f"record for {customer_id}"
+
+
+tools = rootsign.wrap_tools([lookup_customer])
+
+
+async def main() -> None:
+    async with rootsign.session(objective="answer a billing question"):
+        print(await tools[0].ainvoke({"customer_id": "acme-corp"}))
+
+
+asyncio.run(main())
+```
+
+```text
+record for acme-corp
+```
+
+**Returns** a list of the same tool objects, instrumented in place, so the originals are wrapped too. Tools that are already instrumented are left as they are, so wrapping twice is harmless.
+
+**Raises** `TypeError` when an item is not a tool of that framework. Nothing in the list is wrapped then:
+
+```text
+rootsign.wrap_tools() takes LangChain tools (objects with .name, .invoke and .ainvoke); got function 'lookup'. For a plain function, decorate it with @rootsign.trace() instead.
+```
+
+**Notes**
+
+- Wrap tools wherever you build them, inside or outside a session. Each call looks up the session it runs in, and a call outside any session raises `RootSignNotInitializedError`.
+- `require_approval` is not available for framework tools. Put `@rootsign.trace(require_approval=True)` on the plain function the tool calls.
+- The [LangGraph](/integrations/langgraph) and [CrewAI](/integrations/crewai) pages show complete agents.
+
+## Verify a session
+
+```python
+rootsign.verify_session_local(jsonl_path) -> VerifyResult
+await rootsign.verify_session(session_id, db) -> VerifyResult
+```
+
+Recompute every hash in a session and return the verdict. Neither function prints anything or exits.
+
+<ResponseField name="jsonl_path" type="str | Path" required>
+  A JSONL session file or spool file. `verify_session_local()` only.
+</ResponseField>
+
+<ResponseField name="session_id" type="UUID" required>
+  A session in the PostgreSQL store. `verify_session()` only.
+</ResponseField>
+
+<ResponseField name="db" type="AsyncSession" required>
+  An open SQLAlchemy async session, for example from `rootsign.database.AsyncSessionLocal()`. `verify_session()` only.
+</ResponseField>
+
+**Returns** a `VerifyResult`: `verdict` (`VALID`, `TAMPERED` or `INCOMPLETE`), `valid`, `record_count`, `first_invalid_sequence`, `missing_ranges`, `error` and `summary`. [Verify a session](/guides/verify#verify-from-python) describes each field.
+
+**Raises** `FileNotFoundError` from `verify_session_local()` when the file does not exist.
+
+<Warning>
+  Neither function reports "nothing to verify" separately. An empty file returns TAMPERED, and an unknown session ID returns VALID with 0 records. Check that the session exists before you rely on the result, or use [`rootsign verify`](/reference/cli-rootsign#rootsign-verify), which exits `3` in these cases.
+</Warning>
+
+## Beyond the core calls
+
+`rootsign` also exports the pieces the core calls are built from. They are importable and documented in their docstrings, but they are not part of the stable core, and they can change between releases:
+
+| Name | What it is |
+| --- | --- |
+| `SessionContext` | The object `session()` yields, for building a session yourself |
+| `register_agent()` | Registers an agent on PostgreSQL and returns its ID, for `session(agent_id=...)` |
+| `get_ingest_client()` | Builds the client for the configured backend |
+| `IngestClient` | The base class every client implements, for `session(client=...)` |
+| `JsonlIngestClient`, `LocalIngestClient`, `ManagedLocalIngestClient`, `HttpIngestClient`, `BufferedIngestClient` | The clients behind each backend |
+| `LangGraphTracer`, `CrewAITracer` | The classes behind `wrap_tools()` and `wrap_crewai_tools()` |
+| `RedactionConfig`, `StandardPIIConfig`, `FinancialPIIConfig`, `HealthcarePIIConfig` | Redaction rules. See [Redact PII](/guides/redaction). |
+| `VerifyResult` | What the verify functions return |
+| `AgentEnvironment`, `AgentRiskTier`, `AgentFramework` | The allowed values for `init()`, as enums |
+
+The exceptions are listed in [Errors](/reference/errors).
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Configuration" icon="settings" href="/reference/configuration">
+    Every environment variable, and when each is read.
+  </Card>
+  <Card title="Any Python function" icon="code" href="/integrations/python">
+    A walkthrough of @rootsign.trace() on plain functions.
+  </Card>
+</Columns>
