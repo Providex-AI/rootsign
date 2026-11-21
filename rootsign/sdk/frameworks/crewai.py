@@ -25,6 +25,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from rootsign.sdk._async_bridge import _run_sync
+from rootsign.sdk.frameworks import _not_a_tool
 
 if TYPE_CHECKING:
     from rootsign.sdk.client import IngestClient
@@ -80,6 +81,8 @@ class CrewAITracer:
         arguments always win; if neither is available at call time,
         `RootSignNotInitializedError` is raised.
         """
+        if not getattr(tool, "_rootsign_instrumented", False) and not _is_crewai_tool(tool):
+            raise _not_a_tool("rootsign.wrap_crewai_tools()", "CrewAI", ".name and ._run", tool)
         # Imported here so the SDK is loadable without crewai installed.
         from rootsign.sdk.decorator import _emit_action_record
         from rootsign.sdk.facade import _resolve_ctx_client
@@ -151,7 +154,13 @@ class CrewAITracer:
 
         `ctx`/`client` may be omitted — see `wrap_tool` for the ADR-012
         implicit-resolution contract.
+
+        Every item is checked before any is wrapped, so a list with one wrong
+        item raises TypeError and leaves the others untouched.
         """
+        for t in tools:
+            if not getattr(t, "_rootsign_instrumented", False) and not _is_crewai_tool(t):
+                raise _not_a_tool("rootsign.wrap_crewai_tools()", "CrewAI", ".name and ._run", t)
         return [
             t
             if getattr(t, "_rootsign_instrumented", False)
