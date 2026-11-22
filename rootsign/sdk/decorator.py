@@ -563,6 +563,14 @@ async def _emit_hitl_action(
             _input_payload_override=_input_payload_override,
         )
 
+    # The cloud transport has no approval flow until the hosted backend is
+    # live. Refuse before sending the pending action: the PostgreSQL poll loop
+    # below would otherwise poll a local database nobody configured.
+    if _is_cloud_backend(client):
+        from rootsign.errors import HiTLUnsupportedBackendError
+
+        raise HiTLUnsupportedBackendError(tool_name, backend="cloud")
+
     # Lazy imports — HiTL is a Sprint 4 surface and pulling these at
     # module load would pessimize cold start for non-HiTL users.
     with postgres_extra_required():
@@ -663,6 +671,14 @@ def _is_jsonl_backend(client: IngestClient) -> bool:
 
     inner = getattr(client, "_inner", None)
     return isinstance(client, JsonlIngestClient) or isinstance(inner, JsonlIngestClient)
+
+
+def _is_cloud_backend(client: IngestClient) -> bool:
+    """True if *client* is (or wraps) the cloud transport, `HttpIngestClient`."""
+    from rootsign.sdk.client import HttpIngestClient
+
+    inner = getattr(client, "_inner", None)
+    return isinstance(client, HttpIngestClient) or isinstance(inner, HttpIngestClient)
 
 
 #: First words the inline approval prompt accepts as "approve". Anything else,

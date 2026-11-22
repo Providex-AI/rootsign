@@ -308,6 +308,11 @@ class HiTLUnsupportedBackendError(RootSignError):
     cross-process `rootsign approve` CLI. So a headless run (no TTY) with
     `require_approval=True` on the JSONL backend raises this on the tool's first
     invocation, before any work runs — with the fix in the message.
+
+    The cloud transport raises it too (`backend="cloud"`): its approvals will
+    come from the hosted backend, which is not live yet, and the PostgreSQL
+    poll loop it used to fall through to polled a local database a cloud user
+    never configured.
     """
 
     FIX_HINT = (
@@ -316,9 +321,17 @@ class HiTLUnsupportedBackendError(RootSignError):
         "ROOTSIGN_BACKEND=postgres for the async poll-loop / `rootsign approve` flow."
     )
 
-    def __init__(self, tool_name: str | None = None):
-        prefix = f"HiTL not available for tool {tool_name!r} on this backend. " if tool_name else ""
-        super().__init__(prefix + self.FIX_HINT)
+    CLOUD_HINT = (
+        "Approvals on the cloud transport will come from the hosted backend, which is "
+        "not live yet. Set ROOTSIGN_BACKEND=postgres to approve with `rootsign approve`, "
+        "or use the JSONL backend in an interactive terminal."
+    )
+
+    def __init__(self, tool_name: str | None = None, *, backend: str | None = None):
+        cloud = backend == "cloud"
+        where = "on the cloud transport" if cloud else "on this backend"
+        prefix = f"HiTL not available for tool {tool_name!r} {where}. " if tool_name else ""
+        super().__init__(prefix + (self.CLOUD_HINT if cloud else self.FIX_HINT))
         self.tool_name = tool_name
 
 

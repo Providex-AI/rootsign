@@ -441,7 +441,7 @@ Safe to re-run: idempotency is server-side by `event_id`, so a partially uploade
 
 That closes the gap the three verdicts could not: `INCOMPLETE` means a record is *missing*, `TAMPERED` means one was *altered* — neither can say a record was **observed and refused**. Without a receipt, that outcome lived only in terminal scrollback, and a reviewer reading the spool file later could not tell "never uploaded" from "uploaded and rejected". `rootsign export` carries the receipt into the evidence bundle, hashed in `manifest.json` like every other file.
 
-**The chain spans the outage.** Records written to the spool continue the sequence the wire path started, because the chain is sealed before the SDK chooses a destination — so after sync the store holds one unbroken session, not two fragments. If the disk *also* fails, telemetry drops with accounting (one CRITICAL, a loss ledger, and a chain gap that makes the loss provable as `INCOMPLETE`) while anything gated by a human approval fails closed and the tool never runs. See [ADR-013](docs/adr/ADR-013-http-ingest-client-spool.md).
+**The chain spans the outage.** Records written to the spool continue the sequence the wire path started, because the chain is sealed before the SDK chooses a destination — so after sync the store holds one unbroken session, not two fragments. If the disk *also* fails, telemetry drops with accounting (one CRITICAL, a loss ledger, and a chain gap that makes the loss provable as `INCOMPLETE`) while a call held for human approval never runs: `require_approval=True` raises `HiTLUnsupportedBackendError` on the cloud transport until the hosted backend can collect approvals. See [ADR-013](docs/adr/ADR-013-http-ingest-client-spool.md).
 
 ## Micro-batching (opt-in)
 
