@@ -43,6 +43,8 @@ if TYPE_CHECKING:
     # type hint here; imported for real inside LocalIngestClient.__init__.
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from rootsign.sdk.config import SDKSettings
+
 
 class IngestClient(ABC):
     """Abstract transport for ingest envelopes. See ADR-002."""
@@ -783,17 +785,23 @@ class HttpIngestClient(IngestClient):
             self._http = None
 
 
-def get_ingest_client(db: AsyncSession | None = None) -> IngestClient:
+def get_ingest_client(
+    db: AsyncSession | None = None, *, settings: SDKSettings | None = None
+) -> IngestClient:
     """Factory — picks an implementation based on ROOTSIGN_BACKEND.
 
     `db` is required for the local backend (it's how IngestHandler reaches
     the storage layer). It is ignored for the cloud backend.
+
+    `settings` is the snapshot to build from. `rootsign.session()` passes the
+    one `init()` read, so the client and the agent registry agree on the
+    backend and the data folder. Omitted, settings are read now.
     """
-    # Read settings fresh so monkeypatched env vars in tests take effect
-    # without needing to reload the module.
     from rootsign.sdk.config import SDKSettings
 
-    s = SDKSettings()
+    # Read fresh when not given, so monkeypatched env vars in tests take
+    # effect without needing to reload the module.
+    s = settings if settings is not None else SDKSettings()
     if s.BACKEND == "jsonl":
         # ADR-011 default: zero-dependency append-only local backend. Needs no db.
         from rootsign.sdk.jsonl_client import JsonlIngestClient
