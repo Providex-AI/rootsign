@@ -1,0 +1,46 @@
+---
+title: "Framework support and tested versions"
+sidebarTitle: "Framework support"
+description: "The agent frameworks and Python versions RootSign is tested against in CI, what is planned, and the calls every RootSign SDK keeps stable across releases."
+keywords: ["framework support", "langgraph", "crewai", "mcp", "autogen", "python versions", "compatibility"]
+---
+
+RootSign records tool calls from LangGraph and LangChain tools, CrewAI, any MCP server, and any Python function. Every line in the table below is installed and tested by a CI job on each change, so a version listed here is one RootSign has actually run on, not one it is expected to work with.
+
+## Frameworks
+
+| Framework | Status | Tested in CI | Install | Guide |
+| --- | --- | --- | --- | --- |
+| LangGraph and LangChain tools | Supported | LangGraph 0.2.x, 0.6.x, 1.x | `pip install 'rootsign[langgraph]'` | [LangGraph](/integrations/langgraph) |
+| CrewAI | Supported | CrewAI 0.95.x, 0.203.x, 1.x | `pip install 'rootsign[crewai]'` | [CrewAI](/integrations/crewai) |
+| MCP | Supported | `mcp` 1.x, the newest 1.x release on each run | `pip install 'rootsign[mcp]'` | [MCP](/integrations/mcp) |
+| Any Python function | Supported | Every run | `pip install rootsign` | [Any Python function](/integrations/python) |
+| AutoGen | Planned for RootSign v1.0 | | | |
+
+AutoGen support is planned for RootSign v1.0, together with the TypeScript SDK and the hosted backend. Until then, a tool from another framework can be recorded with [`@rootsign.trace()`](/integrations/python) on the function it calls.
+
+## Python versions
+
+RootSign needs Python 3.11 or later, and CI tests 3.11 and 3.12, so those are the supported versions. The core package installs and runs on 3.13 and 3.14, but they are not in CI yet, and the `crewai` extra may not install on them.
+
+## What stays stable
+
+Five calls are the public contract that every RootSign SDK, in any language, keeps the same. Changing their shape needs a new design record.
+
+| Call | What it does |
+| --- | --- |
+| `rootsign.init()` | Configures RootSign once, at startup |
+| `rootsign.session()` | Bounds a run, and makes it available to your tools |
+| `rootsign.wrap_tools()` | Instruments a framework's list of tools |
+| `rootsign.trace()` | Instruments a single function |
+| `rootsign verify` and `verify_session()` | Check a session's hash chain |
+
+Everything else, such as `SessionContext`, the ingest clients and `register_agent()`, is public and supported in Python, but may differ in other languages. Three rules hold across all of them:
+
+- **Explicit arguments win.** A `ctx=` or `client=` you pass is always used instead of the ambient session.
+- **The hash formula has one implementation per language.** Every backend and every SDK must produce the same hashes, checked against shared test vectors ([ADR-001](https://github.com/Providex-AI/rootsign/blob/main/docs/adr/ADR-001-hash-canonical-spec.md)).
+- **The wire format is the specification.** Every SDK sends records that follow the [ingest specification](/reference/ingest-spec-v1), not a copy of the Python types.
+
+## Ask for a framework
+
+Open a [framework integration request](https://github.com/Providex-AI/rootsign/issues/new?template=framework_integration.yml) on GitHub describing the framework's tool and agent shapes. A new integration ships with contract tests on at least two of the framework's releases, as the ones above do ([ADR-003](https://github.com/Providex-AI/rootsign/blob/main/docs/adr/ADR-003-framework-contract-tests.md)).
