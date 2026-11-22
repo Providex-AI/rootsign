@@ -18,6 +18,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import uuid4
 
+import pytest
+
 from rootsign.crud import decision as decision_crud
 from rootsign.sdk.client import LocalIngestClient
 from tests.conftest import make_envelope
@@ -59,3 +61,31 @@ class TestDecisionRecordIngest:
         assert decisions[0].decision_id == resp.entity_id
         assert decisions[0].selected_action == "test_tool"
         assert decisions[0].reasoning_summary == "Test reasoning."
+
+    @pytest.mark.parametrize("depth", ["minimal", "summary", "full"])
+    async def test_the_reasoning_depth_is_stored(self, clean_db, seeded_agent, depth):
+        """ADR-008 keeps the depth so a reader can tell a summary dropped by
+        `minimal` from one the developer never supplied. PostgreSQL used to
+        discard it; only the JSONL backend kept it."""
+        client = LocalIngestClient(db=clean_db)
+        session_id = uuid4()
+        await client.handle(make_envelope("SESSION_OPEN", seeded_agent.agent_id, session_id, {}))
+
+        await client.handle(
+            make_envelope(
+                "DECISION_RECORD",
+                seeded_agent.agent_id,
+                session_id,
+                {
+                    "selected_action": "test_tool",
+                    "reasoning_summary": None,
+                    "alternatives_considered": [],
+                    "reasoning_depth": depth,
+                    "reasoning_captured": False,
+                },
+            )
+        )
+        await clean_db.commit()
+
+        (decision,) = await decision_crud.get_by_session(clean_db, session_id=session_id)
+        assert decision.reasoning_depth == depth
