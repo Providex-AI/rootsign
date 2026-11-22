@@ -1,4 +1,4 @@
-"""A mock ingest backend that implements `docs/ingest-spec-v1.md`.
+"""A mock ingest backend that implements `docs/site/reference/ingest-spec-v1.mdx`.
 
 Shared by the cloud contract suite (T2.6) and the kill-network integration
 test (T2.7), because two mock stores would drift and the whole value of this

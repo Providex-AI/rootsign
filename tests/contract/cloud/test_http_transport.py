@@ -1,4 +1,4 @@
-"""Wire contract for the cloud transport (Sprint B T2.6, `docs/ingest-spec-v1.md`).
+"""Wire contract for the cloud transport (Sprint B T2.6, `docs/site/reference/ingest-spec-v1.mdx`).
 
 `tests/unit/test_http_ingest_client.py` tests the client's own moving parts
 against a scripted responder. This suite tests the **contract between the

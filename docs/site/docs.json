@@ -47,6 +47,10 @@
           {
             "group": "CLI",
             "pages": ["reference/cli-rootsign", "reference/cli-rootsign-admin"]
+          },
+          {
+            "group": "Formats",
+            "pages": ["reference/evidence-bundle", "reference/ingest-spec-v1"]
           }
         ]
       }
