@@ -480,6 +480,8 @@ class HttpIngestClient(IngestClient):
             return []
 
         self._seal(envelopes)
+        if not self._spooling and self._spool_enabled and not self._api_key.strip():
+            self._spool_without_key()
         if self._spooling:
             # One-way: this client already gave up on the network (ADR-013
             # Decision 4). Sealing still happened above, so the spooled record
@@ -533,6 +535,27 @@ class HttpIngestClient(IngestClient):
             record_count,
             self.spool_dir,
             self.endpoint,
+            SYNC_BREADCRUMB,
+        )
+
+    def _spool_without_key(self) -> None:
+        """Spool from the first record when there is no API key to send with.
+
+        No request can succeed without one: an empty bearer token is not even
+        a valid header, so httpx refuses to send it. That used to cost the
+        full retry budget and a WARNING saying the endpoint was unreachable.
+        The spool keeps the records as it does in an outage (ADR-013 Decision
+        4); the one WARNING names the actual cause. `VALIDATION_ERROR` is the
+        code a 401 or 403 maps to, as there is no auth code in the v1 registry.
+        """
+        self._spooling = True
+        self._spool_reason = ErrorCode.VALIDATION_ERROR
+        logger.warning(
+            "rootsign: ROOTSIGN_API_KEY is not set, so nothing can be sent to %s. Records "
+            "are spooling to %s instead. They stay tamper-evident and verify offline "
+            "(`rootsign verify --local`); set ROOTSIGN_API_KEY, then upload them with:  %s",
+            self.endpoint,
+            self.spool_dir,
             SYNC_BREADCRUMB,
         )
 
