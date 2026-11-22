@@ -1,0 +1,299 @@
+---
+title: "Evidence bundle format reference"
+sidebarTitle: "Evidence bundle"
+description: "Every file in an evidence bundle and every field in its JSON documents: the manifest and its hashes, verification, timeline, redaction and sync receipts."
+keywords: ["evidence bundle", "manifest.json", "verification.json", "timeline.json", "redaction.json", "sync receipt", "bundle format"]
+---
+
+`rootsign export` writes one session as a folder of files: JSON documents a program can check, and reports a person can read. This page describes each file and field, for anyone building tooling that reads bundles. [Export an evidence bundle](/guides/evidence-bundles) covers making and checking one.
+
+<Tree>
+  <Tree.Folder name="evidence-<session_id>" defaultOpen>
+    <Tree.File name="manifest.json" />
+    <Tree.File name="verification.json" />
+    <Tree.File name="timeline.json" />
+    <Tree.File name="redaction.json" />
+    <Tree.File name="sync-receipt.json" />
+    <Tree.File name="report.md" />
+    <Tree.File name="report.html" />
+  </Tree.Folder>
+</Tree>
+
+| File | Present | Holds |
+| --- | --- | --- |
+| [`manifest.json`](#manifest-json) | Always | Bundle version, the session, the agent, the source, the verdict, and a SHA-256 of every other file |
+| [`verification.json`](#verification-json) | Always | The verdict and each record's place in the hash chain |
+| [`timeline.json`](#timeline-json) | Always | The session in order: open, decisions, actions, approvals, losses, close |
+| [`redaction.json`](#redaction-json) | Always | Where the stored payloads carry the redaction marker |
+| [`sync-receipt.json`](#sync-receipt-json) | When the session was synced from the spool | Every upload attempt and what the endpoint did with each record |
+| `report.md`, `report.html` | Unless `--format` leaves them out | The same facts for a person to read, verdict first |
+
+All JSON files are UTF-8, indented with two spaces, and end with a newline.
+
+## How a bundle is anchored
+
+`manifest.json` holds the SHA-256 of every other file in the bundle, computed over the file's exact bytes. The manifest cannot list its own hash, so `rootsign export` prints it instead, and you record it somewhere outside the bundle. To check a bundle you received:
+
+1. Run `rootsign export --check <folder>`. It re-hashes every file against `manifest.json` and prints the manifest's own SHA-256.
+2. Compare that SHA-256 with the one recorded at export. If they differ, the bundle is not the one that was exported, whatever the file checks say: someone who edits a file and also updates its hash in the manifest passes the file checks.
+
+Each export has its own manifest hash, because the manifest records when it was generated.
+
+## manifest.json
+
+```json
+{
+  "bundle_version": "1.0",
+  "generator": "<generator>",
+  "generated_at": "<generated_at>",
+  "session_id": "22222222-2222-4222-8222-222222222222",
+  "agent": {
+    "agent_id": "11111111-1111-4111-8111-111111111111"
+  },
+  "source": {
+    "backend": "jsonl",
+    "location": "<location>"
+  },
+  "verdict": "VALID",
+  "files": {
+    "redaction.json": "d1ba7b041838a3e45d3a10512f5dd962533432ca734057699aa5cdd94dfe2d3b",
+    "timeline.json": "4428f0ed48979e74438cb34486942a5d3039d5b1eb8ce2a05b1a52a334df09a2",
+    "verification.json": "1e6f930ca44f9c8d069c55a3079d0c8081a6cd06bd505785a38d2cd2588776a7"
+  },
+  "compliance": {}
+}
+```
+
+<ResponseField name="bundle_version" type="string">
+  The format version, `1.0`. See [Versioning](#versioning).
+</ResponseField>
+
+<ResponseField name="generator" type="string">
+  The RootSign that wrote the bundle, such as `rootsign 0.3.1`.
+</ResponseField>
+
+<ResponseField name="generated_at" type="string">
+  When the bundle was written, ISO 8601 with a timezone.
+</ResponseField>
+
+<ResponseField name="session_id" type="string">
+  The session's UUID. The folder is named `evidence-<session_id>`.
+</ResponseField>
+
+<ResponseField name="agent" type="object">
+  The agent that recorded the session. From a JSONL file it holds only `agent_id`. From PostgreSQL it also holds `name`, `owner`, `environment`, `risk_tier`, `framework`, `model_version` and `regulatory_categories`. When the source records no agent, it holds a `detail` string saying so.
+</ResponseField>
+
+<ResponseField name="source" type="object">
+  Where the session was read from: `backend` (`jsonl` or `postgres`) and `location`, the session file's path, or `database` for PostgreSQL.
+</ResponseField>
+
+<ResponseField name="verdict" type="VALID | TAMPERED | INCOMPLETE">
+  The same verdict as `verification.json`, so a reader sees it without opening another file.
+</ResponseField>
+
+<ResponseField name="files" type="object">
+  Every other file in the bundle, mapped to the SHA-256 of its bytes, as lowercase hex, sorted by name.
+</ResponseField>
+
+<ResponseField name="compliance" type="object">
+  Reserved, and empty. It exists so that a later mapping of sessions to regulations can be added without a new bundle version.
+</ResponseField>
+
+## verification.json
+
+The result of verifying the session's hash chain, with one entry per action record.
+
+<ResponseField name="verdict" type="VALID | TAMPERED | INCOMPLETE">
+  **VALID**: every record is present and every hash matches. **TAMPERED**: a record was altered. **INCOMPLETE**: the records present are intact, but some are missing.
+</ResponseField>
+
+<ResponseField name="valid" type="boolean">
+  `true` only for VALID.
+</ResponseField>
+
+<ResponseField name="summary" type="string">
+  One line, as `rootsign verify` prints it.
+</ResponseField>
+
+<ResponseField name="record_count" type="integer">
+  The number of action records checked.
+</ResponseField>
+
+<ResponseField name="first_invalid_sequence" type="integer | null">
+  The sequence number of the first altered or missing record.
+</ResponseField>
+
+<ResponseField name="missing_ranges" type="array">
+  Missing sequence numbers, as inclusive `[start, end]` pairs.
+</ResponseField>
+
+<ResponseField name="error" type="string | null">
+  Why the chain failed.
+</ResponseField>
+
+<ResponseField name="hash" type="object">
+  How the chain was checked: `algorithm` (`sha256`), `canonical_spec` (`ADR-001`, the [design record](https://github.com/Providex-AI/rootsign/blob/main/docs/adr/ADR-001-hash-canonical-spec.md) that fixes what each hash covers) and a one-sentence `note`.
+</ResponseField>
+
+<ResponseField name="records" type="array">
+  One entry per action record, in sequence order:
+
+  | Field | Meaning |
+  | --- | --- |
+  | `sequence_number` | The record's position in the chain, from 1 |
+  | `action_id` | The action's UUID |
+  | `timestamp` | When the action ran |
+  | `tool_name` | The tool that was called |
+  | `prev_action_hash` | The `self_hash` of the record before it, `null` for the first |
+  | `self_hash` | The record's own hash |
+  | `chain_status` | `verified` when the record checks out, `failed` for the first broken record, and `unverified` for the records after it |
+</ResponseField>
+
+<ResponseField name="replay" type="object">
+  Present only when the bundle carries a sync receipt. A summary of the latest upload attempt; the full history is in `sync-receipt.json`. Holds `attempts`, `latest_attempt_id`, `latest_disposition`, `finished_at`, `endpoint`, `spool_file_sha256`, `record_count`, `halted_at_sequence`, `observed_and_rejected` and `not_attempted`.
+</ResponseField>
+
+## timeline.json
+
+The session as it happened, in three parts: `session`, `previews` and `events`.
+
+<ResponseField name="session" type="object">
+  `session_id`, `agent_id`, `objective`, `user_id`, `status` (`running`, `completed` or `failed`), `start_time`, `end_time`, and the counts `action_count`, `decision_count` and `approval_count`.
+</ResponseField>
+
+<ResponseField name="previews" type="object">
+  Whether stored content is included:
+
+  | Field | Meaning |
+  | --- | --- |
+  | `included` | `false` when the bundle was exported with `--redact-previews` |
+  | `note` | Why content is missing, or `null` |
+  | `withheld_fields` | The content fields that were left out, by name |
+  | `withheld_from_events` | How many events had content left out |
+</ResponseField>
+
+<ResponseField name="events" type="array">
+  Every event in time order, with the session's opening first and its close last. Each has a `type` and a `timestamp`.
+</ResponseField>
+
+| `type` | Further fields |
+| --- | --- |
+| `SESSION_OPEN` | `objective`, `user_id` |
+| `DECISION` | `decision_id`, `selected_action`, `confidence`, `alternatives_considered`, `reasoning_summary`, `inputs_summary` |
+| `ACTION` | `sequence_number`, `action_id`, `tool_name`, `authorization_status`, `duration_ms`, `decision_id`, `input_hash`, `output_hash`, `input_preview`, `output_preview` |
+| `APPROVAL` | `approval_id`, `action_id`, `approver_id`, `approver_type`, `decision`, `decision_reason`, `response_latency_ms`, `context_presented` |
+| `RECORD_LOSS` | `lost_count`, `first_sequence`, `last_sequence`, `reasons`: records the cloud transport could neither send nor spool |
+| `SESSION_CLOSE` | `status` |
+
+An action that a person rejected:
+
+```json
+{
+  "type": "ACTION",
+  "timestamp": "2026-08-21T09:00:00+00:00",
+  "sequence_number": 2,
+  "action_id": "00000003-0000-4000-8000-000000000000",
+  "tool_name": "wire_transfer",
+  "authorization_status": "human_rejected",
+  "duration_ms": null,
+  "decision_id": null,
+  "input_hash": "fc2917086d6fe1c2331777cf9aaf35e79b1f176a5fa92c6bd43847669658e574",
+  "output_hash": null,
+  "input_preview": {
+    "account": "[REDACTED]",
+    "amount": 250000,
+    "currency": "GBP"
+  },
+  "output_preview": null
+}
+```
+
+With `--redact-previews`, five fields are removed from every event: `input_preview`, `output_preview`, `context_presented`, `reasoning_summary` and `inputs_summary`. Hashes, IDs, timings and statuses stay.
+
+## redaction.json
+
+Where redaction happened in the stored payloads.
+
+```json
+{
+  "sentinel": "[REDACTED]",
+  "rule_set": {
+    "name": null,
+    "provenance": "RootSign does not record which redaction rule set was active when a session ran, and it is not derivable from stored records. The paths below are the fields that carry the redaction sentinel in the stored payloads — evidence that redaction happened, not evidence of which rule caused it."
+  },
+  "totals": {
+    "actions_with_redactions": 1,
+    "redacted_fields": 2
+  },
+  "records": [
+    {
+      "sequence_number": 1,
+      "action_id": "2e5de9af-601b-41de-9afd-af0f7e16df70",
+      "input_paths": [
+        "args[0]",
+        "kwargs.phone"
+      ],
+      "output_paths": []
+    }
+  ]
+}
+```
+
+<ResponseField name="sentinel" type="string">
+  The value that replaces redacted data, `[REDACTED]`.
+</ResponseField>
+
+<ResponseField name="rule_set" type="object">
+  `name` is always `null`: RootSign does not record which redaction rules were active, so the bundle does not guess. `provenance` says so.
+</ResponseField>
+
+<ResponseField name="totals" type="object">
+  `actions_with_redactions` and `redacted_fields`, across the session.
+</ResponseField>
+
+<ResponseField name="records" type="array">
+  One entry per action that has at least one redacted value: `sequence_number`, `action_id`, `input_paths` and `output_paths`. A path names one field, with dots for keys and brackets for list positions: `args[0]` is the first positional argument, `kwargs.phone` the `phone` keyword argument, `result.contact.email` a field inside the returned value.
+</ResponseField>
+
+## sync-receipt.json
+
+Present when the session was recorded to the spool and uploaded with `rootsign-admin sync`. It is the receipt `sync` writes, copied unchanged: `session_id`, and `attempts`, one entry per upload attempt, oldest first.
+
+| Field | Meaning |
+| --- | --- |
+| `schema_version` | The receipt format, `receipt/1.1` |
+| `attempt_id`, `started_at`, `finished_at` | The attempt and when it ran |
+| `endpoint`, `sdk_version`, `operator` | Where the records were sent, by which RootSign, run by which operating-system user |
+| `spool_file_sha256` | The SHA-256 of the spool file as it was uploaded |
+| `record_count` | Records in the spool file |
+| `outcomes` | What happened to each record: `accepted`, `duplicate`, `rejected` (with the error code and whether it is worth retrying) and `not_attempted` |
+| `halted_at_sequence` | Where a refusal stopped the upload, or `null` |
+| `disposition` | `fully_accepted`, `partial` (the endpoint refused a record) or `transport_failed` (the endpoint could not be reached) |
+
+The receipt's design is in [ADR-015](https://github.com/Providex-AI/rootsign/blob/main/docs/adr/ADR-015-sync-receipts.md).
+
+## report.md and report.html
+
+The same facts as the JSON documents, written for a person: the verdict first, then the session, the chain verification, the timeline, the redaction summary and the list of files, ending with how to check the bundle. `report.html` is a single file with its styles inline and no scripts, so it opens the same from an email attachment, a file share or an offline machine. Programs should read the JSON documents instead.
+
+## Versioning
+
+`bundle_version` is `1.0`. The fields on this page are fixed for that version.
+
+- **Adding** a file or an optional field keeps `1.0`. `sync-receipt.json` and the `replay` block were added this way: a bundle without a sync receipt is byte-for-byte what it was before they existed.
+- **Renaming or removing** a field changes `bundle_version`.
+- `compliance` is reserved, so filling it later is not a format change.
+
+Tools that read bundles should ignore fields they do not know.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Export an evidence bundle" icon="folder-archive" href="/guides/evidence-bundles">
+    Make a bundle, record its hash, and check one you receive.
+  </Card>
+  <Card title="rootsign export" icon="terminal" href="/reference/cli-rootsign#rootsign-export">
+    Every option and error of the export command.
+  </Card>
+</Columns>

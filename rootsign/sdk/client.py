@@ -8,7 +8,7 @@ implementations live here:
     so the decorator never has to know about it.
 
   - HttpIngestClient — the hosted-backend transport (ADR-013). Batches
-    envelopes onto `POST {CLOUD_URL}/ingest` per docs/ingest-spec-v1.md,
+    envelopes onto `POST {CLOUD_URL}/ingest` per docs/site/reference/ingest-spec-v1.mdx,
     owns its own retry, and keeps `httpx` behind the optional `cloud` extra
     via lazy imports so a bare install still imports this module.
 
@@ -174,7 +174,7 @@ class ManagedLocalIngestClient(IngestClient):
 
 
 # ---------------------------------------------------------------------------
-# Cloud transport (ADR-013) — wire contract in docs/ingest-spec-v1.md
+# Cloud transport (ADR-013) — wire contract in docs/site/reference/ingest-spec-v1.mdx
 # ---------------------------------------------------------------------------
 
 #: Exponential backoff base: attempt *n* waits a jittered `0.5 * 2**n` seconds.
@@ -288,7 +288,7 @@ def _parse_retry_after(http_response: Any) -> float | None:
 class HttpIngestClient(IngestClient):
     """HTTP transport for the hosted backend (ADR-013).
 
-    The wire contract is `docs/ingest-spec-v1.md`. One endpoint takes a JSON
+    The wire contract is `docs/site/reference/ingest-spec-v1.mdx`. One endpoint takes a JSON
     array of 1..N envelopes and returns an index-aligned array of responses,
     so `handle()` is a 1-element batch and `handle_batch()` is what
     `BufferedIngestClient` flushes into. Same shape either way, no special

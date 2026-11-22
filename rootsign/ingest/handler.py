@@ -191,7 +191,7 @@ class IngestHandler:
             raise IngestValidationError(
                 "client-sealed ACTION_RECORD (action_id / sequence_number / "
                 "self_hash) is cloud-mode only; the Postgres store assigns chain "
-                "identity under a row lock. See docs/ingest-spec-v1.md §8.2."
+                "identity under a row lock. See the ingest specification §8.2: https://docs.getprovidex.com/reference/ingest-spec-v1"
             )
 
         session = await self._require_running_session(env.session_id)

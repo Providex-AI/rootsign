@@ -7,7 +7,7 @@ mock-server matrix — every rejection code, `rootsign-admin sync`
 end-to-end, the wrapped ADR-009 suite — lands in
 `tests/contract/cloud/` with T2.6.
 
-Every behavior asserted here traces to a line in `docs/ingest-spec-v1.md`;
+Every behavior asserted here traces to a line in `docs/site/reference/ingest-spec-v1.mdx`;
 the section references in the test names are the citation.
 """
 

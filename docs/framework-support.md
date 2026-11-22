@@ -42,7 +42,7 @@ Three rules hold across every language binding:
    per language, and cross-backend/cross-language vectors must agree
    ([ADR-001](adr/ADR-001-hash-canonical-spec.md)).
 3. **The wire format is the spec, not the Python types.** Every binding emits
-   envelopes conforming to [the ingest specification](ingest-spec-v1.md) —
+   envelopes conforming to [the ingest specification](https://docs.getprovidex.com/reference/ingest-spec-v1) —
    envelope fields, the five event types, the error-code registry,
    idempotency by `event_id`, batch semantics, and the client-side hashing
    contract. `IngestEnvelope` / `IngestResponse` are Python's *rendering* of
@@ -50,7 +50,7 @@ Three rules hold across every language binding:
    the spec, never a port of the Pydantic models.
 
 The frozen surface therefore has two halves: the five calls above are the
-**API** contract, changed only by a new ADR; [ingest-spec-v1.md](ingest-spec-v1.md)
+**API** contract, changed only by a new ADR; [the ingest specification](https://docs.getprovidex.com/reference/ingest-spec-v1)
 is the **wire** contract, and its §9 governs how *that* half may change —
 additive fields are a minor `schema_version` bump, anything breaking is a major
 bump plus `SCHEMA_VERSION_MISMATCH`, and the canonical hash formula is frozen
