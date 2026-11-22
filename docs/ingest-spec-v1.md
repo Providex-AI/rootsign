@@ -1,4 +1,4 @@
-# RootSign Ingest Specification — v1
+# RootSign Ingest Specification v1
 
 This specification moved to the docs site:
 

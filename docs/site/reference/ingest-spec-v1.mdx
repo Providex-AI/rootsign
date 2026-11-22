@@ -15,9 +15,9 @@ keywords: ["ingest specification", "wire format", "envelope", "IngestEnvelope", 
   right and this document is a bug.
 
 The key words **MUST**, **MUST NOT**, **SHOULD**, and **MAY** are used in
-their RFC 2119 sense. "Store" means whatever accepts envelopes — the
+their RFC 2119 sense. "Store" means whatever accepts envelopes: the
 in-process Postgres handler, the JSONL writer, or the hosted backend.
-"Client" means whatever emits them — today the Python SDK.
+"Client" means whatever emits them, today the Python SDK.
 
 ---
 
@@ -31,33 +31,33 @@ differ only in *how* the envelope travels and *who* computes the hash chain:
 |---|---|---|---|
 | In-process, Postgres | `LocalIngestClient` / `ManagedLocalIngestClient` | Store, under `SELECT … FOR UPDATE` on the session row | No |
 | In-process, JSONL file | `JsonlIngestClient` | Client, in memory (ADR-011 Decision 3) | No |
-| HTTP, hosted backend | `HttpIngestClient` | **Client**, and verified by the server (ADR-013 Decision 1) | Yes — §7 |
+| HTTP, hosted backend | `HttpIngestClient` | **Client**, and verified by the server (ADR-013 Decision 1) | Yes, §7 |
 
-Everything in §2–§6 applies to all three bindings. §7 (batch) and §8
+Everything in §2 to §6 applies to all three bindings. §7 (batch) and §8
 (client-side hashing) are normative for the HTTP binding specifically.
 
 The seam is `IngestClient.handle(envelope) -> IngestResponse` (ADR-002).
 Its failure-isolation rule binds every binding: **an ingest failure MUST
 NOT propagate into the instrumented tool call.** Failures log at WARNING
 and the tool returns normally. The single exception is the HiTL control
-path — see ADR-013 Decision 4a.
+path (ADR-013 Decision 4a).
 
 ---
 
 ## 2. The envelope
 
-`IngestEnvelope` — `rootsign/ingest/schemas.py`. `extra="forbid"`: an
+`IngestEnvelope`, in `rootsign/ingest/schemas.py`. `extra="forbid"`: an
 unknown top-level key is a `VALIDATION_ERROR`, not a warning.
 
 | Field | Type | Constraint | Meaning |
 |---|---|---|---|
 | `schema_version` | string | matches `^\d+\.\d+$` | Wire-format version of this envelope. Emitted as `"1.1"` by the current SDK (`rootsign.ingest.schemas.SCHEMA_VERSION`); `1.0` differs only in lacking the optional fields of §8.2. |
-| `sdk_version` | string | 1–64 chars | Emitting SDK's version, from package metadata. Diagnostic only; the store MUST NOT branch on it. |
+| `sdk_version` | string | 1 to 64 chars | Emitting SDK's version, from package metadata. Diagnostic only; the store MUST NOT branch on it. |
 | `event_type` | enum | one of the five in §3 | Selects the payload schema. |
-| `event_id` | UUID | — | Idempotency key. Unique per emitted event; a retry of the *same* event reuses it (§6). |
-| `emitted_at` | datetime | ISO 8601, timezone-aware | When the client built the envelope. Client-supplied and therefore untrusted — see §6 on TTL clamping. |
-| `agent_id` | UUID | — | Registered agent. Unknown → `UNKNOWN_AGENT`. |
-| `session_id` | UUID | — | The session this event belongs to. |
+| `event_id` | UUID | none | Idempotency key. Unique per emitted event; a retry of the *same* event reuses it (§6). |
+| `emitted_at` | datetime | ISO 8601, timezone-aware | When the client built the envelope. Client-supplied and therefore untrusted; see §6 on TTL clamping. |
+| `agent_id` | UUID | none | Registered agent. Unknown → `UNKNOWN_AGENT`. |
+| `session_id` | UUID | none | The session this event belongs to. |
 | `payload` | object | per §3 | Event-type-specific body. |
 
 Validation order in the store (`IngestHandler.handle`), which is also the
@@ -68,7 +68,7 @@ order a conforming server MUST follow:
    raw body, otherwise the all-zero UUID.
 2. **Version check.** MAJOR component only. `SUPPORTED_SCHEMA_MAJOR` is
    `"1"`; anything else → `SCHEMA_VERSION_MISMATCH`, non-retryable. A store
-   supporting major `1` MUST accept `1.0`, `1.1`, `1.99` alike — minor
+   supporting major `1` MUST accept `1.0`, `1.1`, `1.99` alike. Minor
    versions are never rejected on version grounds.
 3. **Idempotency check** (§6). A hit short-circuits: no side effects.
 4. **Payload validation** against the schema for `event_type` →
@@ -81,7 +81,7 @@ order a conforming server MUST follow:
 
 ## 3. Event types and payloads
 
-Five event types. `EventType` is a closed enum — a sixth value is a major
+Five event types. `EventType` is a closed enum: a sixth value is a major
 version event.
 
 ### 3.1 `SESSION_OPEN`
@@ -92,7 +92,7 @@ Opens a session. Emitted once, on entry to `rootsign.session(...)`.
 |---|---|---|
 | `objective` | string \| null | ≤ 2000 chars |
 | `user_id` | string \| null | ≤ 200 chars |
-| `metadata` | object \| null | — |
+| `metadata` | object \| null | none |
 
 `extra="allow"`. Store semantics: the agent MUST exist (`UNKNOWN_AGENT`
 otherwise); the session MUST NOT already exist
@@ -105,7 +105,7 @@ One instrumented tool call. The only event type in the hash chain.
 
 | Field | Type | Constraint |
 |---|---|---|
-| `tool_name` | string | 1–200 chars |
+| `tool_name` | string | 1 to 200 chars |
 | `input_hash` | string | 64 lowercase hex chars |
 | `output_hash` | string \| null | 64 lowercase hex chars |
 | `input_redacted` | object \| null | post-redaction payload (ADR-006) |
@@ -113,10 +113,10 @@ One instrumented tool call. The only event type in the hash chain.
 | `timestamp` | datetime | defaults to now(UTC) |
 | `duration_ms` | int \| null | ≥ 0 |
 | `decision_id` | UUID \| null | links to a preceding `DECISION_RECORD` (ADR-008) |
-| `policy_id` | UUID \| null | — |
+| `policy_id` | UUID \| null | none |
 | `authorization_status` | string | default `"auto_authorized"`; `"pending"` for a HiTL submission |
 
-`extra="forbid"` — this payload feeds the hash chain and MUST be exact.
+`extra="forbid"`: this payload feeds the hash chain and MUST be exact.
 
 `input_hash` / `output_hash` are `compute_payload_hash` over the
 **redacted** payload (`rootsign/sdk/hashing.py`): `json.dumps(payload,
@@ -124,14 +124,14 @@ sort_keys=True, ensure_ascii=True, default=str)`, SHA-256, lowercase hex;
 a `null` payload hashes the empty string. When a record carries
 `input_redacted` / `output_redacted`, verification re-derives the hash and
 a mismatch is tamper (ADR-006 payload↔hash binding). Omitting the redacted
-payloads is legal — hash-only sessions verify, they just cannot be read.
+payloads is legal: hash-only sessions verify, they just cannot be read.
 
 Store semantics: the session MUST exist and be `running`
 (`SESSION_NOT_FOUND` / `SESSION_CLOSED`). On success the response carries
 `entity_id` (the `action_id`), `sequence_number`, and `self_hash`.
 
 For the cloud binding this payload additionally carries the client-computed
-chain fields — see §8.
+chain fields described in §8.
 
 ### 3.3 `DECISION_RECORD`
 
@@ -140,30 +140,30 @@ only when `ROOTSIGN_CAPTURE_DECISIONS=true`.
 
 | Field | Type | Constraint |
 |---|---|---|
-| `selected_action` | string | 1–200 chars |
+| `selected_action` | string | 1 to 200 chars |
 | `inputs_summary` | string \| null | ≤ 5000 chars |
 | `reasoning_summary` | string \| null | ≤ 10000 chars |
 | `confidence` | float \| null | 0.0 ≤ x ≤ 1.0 |
-| `alternatives_considered` | list[string] \| null | — |
+| `alternatives_considered` | list[string] \| null | none |
 | `timestamp` | datetime | defaults to now(UTC) |
 | `reasoning_depth` | string | `minimal` \| `summary` \| `full`; default `summary` |
 | `reasoning_captured` | bool \| null | derived from `reasoning_summary is not None` when omitted |
 
 `extra="forbid"`. Store semantics: session MUST be `running`; the session's
 `decision_count` increments in the same transaction as the insert. The
-response MUST return `entity_id` (the `decision_id`) — the SDK stashes it
+response MUST return `entity_id` (the `decision_id`). The SDK stashes it
 as the pending decision for the next `ACTION_RECORD`, so this event can
 never be batched (ADR-009 Decision 2).
 
 ### 3.4 `APPROVAL_RECORD`
 
 A human (or timeout) decision on a HiTL-gated action (ADR-007).
-**Not part of the hash chain** — a separate entity queried independently.
+**Not part of the hash chain**: a separate entity queried independently.
 
 | Field | Type | Constraint |
 |---|---|---|
 | `action_id` | UUID | the gated action |
-| `approver_id` | string | 1–200 chars |
+| `approver_id` | string | 1 to 200 chars |
 | `approver_type` | string | e.g. `human`, `timeout_auto_rejected` |
 | `context_presented` | object | what the approver was shown |
 | `decision` | string | `approved` \| `rejected` \| `escalated` |
@@ -207,7 +207,7 @@ Terminal record for a session.
 `extra="allow"`. Store semantics: session MUST be `running`; status and
 `end_time` are set. If `metadata.total_actions` is present and disagrees
 with the store's own `action_count`, the store MUST log a warning and
-still accept — the count is a reconciliation signal, not an assertion.
+still accept. The count is a reconciliation signal, not an assertion.
 
 ### 3.6 Why two payloads allow extras and three forbid them
 
@@ -230,12 +230,12 @@ The versioning policy that governs this lives in §9.
 
 ## 4. Responses
 
-`IngestResponse` — one shape for accept and reject, `extra="forbid"`.
+`IngestResponse`: one shape for accept and reject, `extra="forbid"`.
 
 | Field | Type | Present when |
 |---|---|---|
 | `status` | `"accepted"` \| `"rejected"` | always |
-| `event_id` | UUID | always — echoes the request |
+| `event_id` | UUID | always; echoes the request |
 | `entity_id` | UUID \| null | accepted; the created row's id (session / action / decision / approval) |
 | `sequence_number` | int \| null | accepted `ACTION_RECORD` |
 | `self_hash` | string \| null | accepted `ACTION_RECORD` |
@@ -250,7 +250,7 @@ Rules:
 - `error_message` is diagnostic text, not a machine surface. Clients MUST
   branch on `error_code` only, and MUST treat `error_message` as untrusted
   remote input when logging it (route it through the SDK's log-safety
-  guard — a remote endpoint is exactly the injection source that exists
+  guard, since a remote endpoint is exactly the injection source it exists
   for).
 - An accepted `ACTION_RECORD` MUST return `sequence_number` and
   `self_hash`. In the cloud binding these echo the values the client sent
@@ -262,7 +262,7 @@ Rules:
 
 The complete `ErrorCode` enum. The split is not advisory: it is the
 retry rule. Clients MUST retry the retryable class and MUST NOT retry the
-non-retryable class — retrying a deterministic rejection is how a client
+non-retryable class: retrying a deterministic rejection is how a client
 builds a denial-of-service attack against its own backend.
 
 ### Non-retryable
@@ -291,7 +291,7 @@ builds a denial-of-service attack against its own backend.
 | `INTERNAL_ERROR` | Unclassified server-side failure | retry with backoff |
 
 This registry is closed for v1. A new failure mode maps onto an existing
-code or waits for the next version — "no new error vocabulary" is a
+code or waits for the next version; "no new error vocabulary" is a
 standing constraint on the Phase 2 server (ADR-013 Decision 2). §9.3 gives
 the rule for growing it if that ever changes, and the client-side rule
 (honor the wire `retryable` flag over an unrecognized code) that makes
@@ -309,7 +309,7 @@ code to name.
 |---|---|---|
 | `200` | Batch processed; per-element outcomes in the body | per-element `error_code` |
 | `400` | Request body was not a valid batch (not a JSON array, empty, unparseable) | `VALIDATION_ERROR`, non-retryable |
-| `401` / `403` | Missing, malformed, or rejected API key | `VALIDATION_ERROR`, non-retryable — the v1 registry has no auth-specific code and adding one is a version event (§9.3). The client MUST NOT retry and MUST NOT log the key |
+| `401` / `403` | Missing, malformed, or rejected API key | `VALIDATION_ERROR`, non-retryable. The v1 registry has no auth-specific code and adding one is a version event (§9.3). The client MUST NOT retry and MUST NOT log the key |
 | `413` | Batch exceeds the server's element or byte limit | `VALIDATION_ERROR`, non-retryable; client splits and resends |
 | `429` | Throttled | `RATE_LIMITED`, retryable |
 | `5xx` | Server fault | `STORE_UNAVAILABLE` (502/503/504) or `INTERNAL_ERROR` (500), retryable |
@@ -323,7 +323,7 @@ every element was rejected is still `200`. Clients MUST read per-element
 ## 6. Idempotency
 
 **The idempotency key is `event_id`, and nothing else.** It is minted once
-per logical event and reused across every retry of that event — that is
+per logical event and reused across every retry of that event. That is
 what makes retry, reconnect, and spool replay safe by construction.
 
 Rules:
@@ -335,7 +335,7 @@ Rules:
 3. A store MUST NOT cache retryable failures. `STORE_UNAVAILABLE` and
    friends must actually re-hit the store on retry, or a transient blip
    becomes permanent.
-4. A store SHOULD cache non-retryable rejections. They are deterministic —
+4. A store SHOULD cache non-retryable rejections. They are deterministic:
    re-running them wastes work and, for a spool replay, re-walks a failure
    the operator already saw.
 5. `emitted_at` is client-supplied. A store using it to compute expiry MUST
@@ -348,7 +348,7 @@ Rules:
 
 The two in-repo stores answer differently, and both are conforming:
 
-- The Postgres handler **replays the cached response verbatim** — a
+- The Postgres handler **replays the cached response verbatim**: a
   duplicate of an accepted event returns `accepted` again, with the
   original `entity_id`, `sequence_number`, and `self_hash`.
 - The JSONL client **rejects with `DUPLICATE_EVENT`** (non-retryable, no
@@ -356,7 +356,7 @@ The two in-repo stores answer differently, and both are conforming:
 
 So the normative client rule is: **a client MUST treat both a replayed
 `accepted` and a `DUPLICATE_EVENT` rejection as success.** `rootsign-admin
-sync` depends on exactly this — it is what makes re-running a partially
+sync` depends on exactly this: it is what makes re-running a partially
 completed sync a no-op rather than a duplication. A server SHOULD replay
 the original response when it still holds it, and fall back to
 `DUPLICATE_EVENT` when the response body is no longer retained.
@@ -380,8 +380,8 @@ Content-Type: application/json
 [ {envelope}, {envelope}, ... ]      # 1..N, N ≥ 1
 ```
 
-`ROOTSIGN_CLOUD_URL` defaults to `https://ingest.getprovidex.com/v1` —
-**the default already ends in `/v1`**, so the path is `{CLOUD_URL}/ingest`.
+`ROOTSIGN_CLOUD_URL` defaults to `https://ingest.getprovidex.com/v1`.
+**The default already ends in `/v1`**, so the path is `{CLOUD_URL}/ingest`.
 `{CLOUD_URL}/v1/ingest` doubles the prefix, and does so silently.
 
 The response is a JSON array of `IngestResponse` objects:
@@ -407,28 +407,28 @@ Normative rules:
    For chain records this rule and §7.2 only coexist because of §8.3:
    element *k+1* names *k*'s `self_hash` as its parent, so a server that
    rejected it for pointing at a record it does not (yet) have would abort
-   the rest of the batch by the back door — and a transient failure on one
+   the rest of the batch by the back door, and a transient failure on one
    element would permanently refuse every action behind it, since
    `HASH_CHAIN_BROKEN` is not retryable. **A dangling `prev_action_hash` is
    never an ingest rejection** (§8.3). The retry of element *k* closes the
    link; until it does, the discontinuity is data, not an error.
 4. **Single events are 1-element batches.** There is no separate
    single-envelope endpoint. Everything ADR-009 passes through
-   synchronously — `SESSION_OPEN`/`SESSION_CLOSE`, `DECISION_RECORD`,
-   `APPROVAL_RECORD`, and HiTL (`pending`) `ACTION_RECORD`s — is a batch of
-   one. One shape, no special cases.
+   synchronously is a batch of one: `SESSION_OPEN`/`SESSION_CLOSE`,
+   `DECISION_RECORD`, `APPROVAL_RECORD`, and HiTL (`pending`)
+   `ACTION_RECORD`s. One shape, no special cases.
 5. **Batch size.** A server MUST accept batches of at least 500 elements
    (the SDK's default forced-flush threshold is 100). Over its limit, the
    server returns `413` and the client MUST split rather than retry
    unchanged.
 6. **Exactly one layer retries.** The transport owns retry: bounded
    exponential backoff `0.5s · 2^n` with full jitter, capped at
-   `ROOTSIGN_HTTP_MAX_RETRIES` — which counts **total attempts**, not retries
+   `ROOTSIGN_HTTP_MAX_RETRIES`, which counts **total attempts**, not retries
    after the first, so the default of 3 means one send plus at most two
    retries. Retry applies to the retryable class of §5 plus transport-level
    connect/read timeouts. A server-supplied `Retry-After` (seconds form)
    raises the floor of the next delay. A buffering layer wrapped
-   around a retrying transport MUST NOT stack its own retry on top —
+   around a retrying transport MUST NOT stack its own retry on top:
    3 × 3 attempts per flush is a self-inflicted outage.
 7. **Partial-failure retry is per element.** When a batch comes back with a
    mix of accepted and retryably-rejected elements, the client resends only
@@ -447,14 +447,14 @@ trust the values it receives without recomputation.**
 
 This is the product's central claim made structural: the record is sealed
 on the machine where the action happened, before it crosses a network, so
-no intermediary — including RootSign's own backend — can alter a record
+no intermediary, including RootSign's own backend, can alter a record
 without verification failing.
 
 ### 8.1 The canonical hash
 
 Frozen by ADR-001 and implemented once, in
-`rootsign.hashing.compute_action_self_hash`. Every implementation — Python,
-TypeScript, server-side verifier — MUST reproduce it byte for byte and MUST
+`rootsign.hashing.compute_action_self_hash`. Every implementation (Python,
+TypeScript, server-side verifier) MUST reproduce it byte for byte and MUST
 NOT re-derive it from this prose:
 
 ```
@@ -500,7 +500,7 @@ carries the four chain fields the client computed:
 | `self_hash` | string | 64 lowercase hex chars |
 
 These fields are **optional** in the schema, which is what makes their
-addition an additive, minor-version change (§9) — and one that lands under
+addition an additive, minor-version change (§9), and one that lands under
 the `extra="forbid"` caveat of §3.6, so a store predating them rejects a
 cloud envelope with `VALIDATION_ERROR` rather than ignoring the extras.
 
@@ -508,7 +508,7 @@ The other two bindings handle a sealed record differently, and both
 behaviors are deliberate:
 
 - **Postgres rejects it** with `VALIDATION_ERROR`. That store assigns chain
-  identity itself, under a row lock, so it cannot honor a seal — and
+  identity itself, under a row lock, so it cannot honor a seal, and
   accepting one while quietly recomputing would fork the chain, leaving the
   client holding a `self_hash` the store never stored. A loud rejection is
   the only honest answer.
@@ -527,7 +527,7 @@ On each `ACTION_RECORD` the server:
 
 1. Recomputes `self_hash` from the canonical fields as received.
 2. Rejects with `HASH_CHAIN_BROKEN` (non-retryable) on mismatch.
-3. Stores the record with the client's values — it never substitutes its
+3. Stores the record with the client's values. It never substitutes its
    own `action_id`, `sequence_number`, or hashes.
 4. Echoes `sequence_number` and `self_hash` in the accepted response, so a
    client can detect divergence.
@@ -538,7 +538,7 @@ interaction between Decision 1 and Decision 4a of ADR-013, and getting it
 backwards destroys evidence: when a client's spool write fails, the chain
 state keeps advancing so the loss is cryptographically evident. The records
 that follow *legitimately* reference an unwritten predecessor. Their job is
-to make the gap provable at verification time — a session with a gap
+to make the gap provable at verification time: a session with a gap
 verifies as `INCOMPLETE`, never as `VALID` and never as absent. A server
 that rejected them would erase the only evidence that anything was lost.
 Discontinuity is data. Only a *self*-hash that fails recomputation is a
@@ -577,16 +577,16 @@ NOT be used for compatibility branching.
 - **Breaking change → MAJOR bump**, and a store that does not support the
   incoming MAJOR MUST reject with `SCHEMA_VERSION_MISMATCH`
   (non-retryable), naming the MAJOR it does support in `error_message`.
-  Clients MUST NOT retry that rejection — no amount of backoff turns a
-  version mismatch into an accept — and SHOULD surface it as an upgrade
+  Clients MUST NOT retry that rejection (no amount of backoff turns a
+  version mismatch into an accept), and SHOULD surface it as an upgrade
   instruction rather than an ingest failure.
 
-| Additive — MINOR | Breaking — MAJOR |
+| Additive (MINOR) | Breaking (MAJOR) |
 |---|---|
 | New **optional** payload field with a default | New **required** field anywhere |
 | New optional envelope field | Removing or renaming any field |
 | Widening a constraint (raising a `max_length`, relaxing a pattern) | Tightening a constraint, or changing a field's type |
-| New session-level key on the `extra="allow"` payloads (§3.6) | New `EventType` value — the enum is closed |
+| New session-level key on the `extra="allow"` payloads (§3.6) | New `EventType` value (the enum is closed) |
 | New `ErrorCode`, under the rule in §9.3 | New value in a closed value set (`SESSION_CLOSE.status`, `decision`) |
 | New optional field in `IngestResponse` | Changing batch index-alignment, ordering, or atomicity (§7) |
 | | Changing the idempotency key away from `event_id` (§6) |
@@ -608,11 +608,11 @@ Rules that follow:
 
 1. A MINOR field addition to a forbidding payload MUST be deployed
    store-first. For the hosted backend that ordering is RootSign's to
-   guarantee — the server ships the field before any SDK release emits it.
+   guarantee: the server ships the field before any SDK release emits it.
 2. A client MUST NOT depend on a store ignoring fields it does not know.
 3. Session-level forward compatibility goes through `SESSION_OPEN` /
    `SESSION_CLOSE`, which allow extras precisely so that a rejected session
-   envelope — which would break an entire run — is not the cost of an SDK
+   envelope, which would break an entire run, is not the cost of an SDK
    running ahead of its store.
 
 ### 9.3 Growing the error registry
@@ -628,7 +628,7 @@ nevertheless exists, and it exists because of one client rule:
 
 Given that, adding a code is a MINOR change plus a spec revision. Removing
 one, or reclassifying an existing code between the retryable and
-non-retryable classes, is MAJOR — clients have retry behavior compiled
+non-retryable classes, is MAJOR, because clients have retry behavior compiled
 around the current split.
 
 ### 9.4 The canonical hash formula is frozen under this same policy
@@ -647,7 +647,7 @@ binding, which promotes it from an implementation detail to a published wire
 contract with three independent implementations (Python SDK, server verifier,
 TypeScript SDK) that must agree byte for byte. And because records are
 verified against the formula that sealed them, a formula change does not
-migrate — both formulas must coexist, selected by the record's
+migrate: both formulas must coexist, selected by the record's
 `schema_version` MAJOR, for as long as any record hashed under the old one
 must remain verifiable. Which is forever, for an evidence product.
 
@@ -661,14 +661,14 @@ were written, possibly months before they are replayed.
 
 - `rootsign-admin sync` MUST replay envelopes byte-for-byte as spooled. It
   MUST NOT rewrite `schema_version` (or any other field) to match the
-  server's current version — the envelope records what the client actually
+  server's current version. The envelope records what the client actually
   emitted, and rewriting it misrepresents provenance for a record whose
   entire purpose is provenance.
 - A store SHOULD therefore continue accepting the previous MAJOR for as long
   as clients may plausibly hold spooled records under it, and MUST announce
   a cutoff before enforcing one.
 - If a store does drop a MAJOR, the spooled files remain **locally**
-  verifiable forever — they are ordinary session files, and
+  verifiable forever: they are ordinary session files, and
   `rootsign verify --local` needs no server. Evidence is never stranded by a
   version policy; only its upload is.
 
@@ -680,7 +680,7 @@ A hosted backend conforms to ingest spec v1 when:
 
 - [ ] It accepts `POST {base}/ingest` with a JSON array of 1..N envelopes and
       bearer auth, returning an index-aligned array of the same length (§7.1).
-- [ ] It processes elements in order, without cross-element atomicity (§7.2–7.3).
+- [ ] It processes elements in order, without cross-element atomicity (§7.2 and §7.3).
 - [ ] It validates envelope → version → idempotency → payload → dispatch, in
       that order, with the codes of §5 (§2).
 - [ ] It rejects unknown top-level envelope keys and unknown keys in the three
@@ -701,13 +701,13 @@ A hosted backend conforms to ingest spec v1 when:
       `prev_action_hash` / `self_hash` unmodified (§8.3).
 - [ ] It accepts records with sequence gaps and dangling `prev_action_hash`,
       surfacing them as `INCOMPLETE` at verification rather than rejecting
-      them at ingest (§8.3–8.4).
+      them at ingest (§8.3 and §8.4).
 - [ ] It returns `429` with `RATE_LIMITED` and `5xx` with
       `STORE_UNAVAILABLE`/`INTERNAL_ERROR` rather than inventing codes (§5).
 
 ---
 
-## Appendix A — decisions this spec makes that the code does not yet pin
+## Appendix A: decisions this spec makes that the code does not yet pin
 
 The mock server in `tests/contract/cloud/` is a *rendering* of this
 document, never its source. Where the current code did not already answer a
@@ -723,13 +723,13 @@ answers, listed for review:
    "all accepted".
 3. **Minimum batch size of 500 elements** (§7.5), against the SDK's default
    flush threshold of 100.
-4. **No cross-element atomicity** (§7.3) — stated explicitly because the
+4. **No cross-element atomicity** (§7.3), stated explicitly because the
    opposite (transactional batch) is the more common default elsewhere.
 5. **Servers must not reject gaps or dangling `prev_action_hash`** (§8.3).
    The consequence of ADR-013 Decision 4a that is easiest to implement
    backwards, and the most destructive to get wrong.
 6. **Cloud-mode chain fields are optional additive payload fields** (§8.2),
-   not a new event type or a separate header — with the `extra="forbid"`
+   not a new event type or a separate header, with the `extra="forbid"`
    forward-compatibility caveat stated in §3.6.
 7. **Store-first upgrade ordering** for any minor addition to a forbidding
    payload (§9.2). Follows from §3.6, but it is a release-process
@@ -738,11 +738,11 @@ answers, listed for review:
    (§9.3), which is what lets the registry grow on a minor bump.
 9. **`sync` never rewrites `schema_version`**, and a store SHOULD keep
    accepting the previous major while clients may still hold spool under it
-   (§9.5). No cutoff duration is fixed here — only the requirement to
+   (§9.5). No cutoff duration is fixed here, only the requirement to
    announce one before enforcing it.
 10. **Sync receipts are client-side artifacts and change nothing on the
     wire** (ADR-015). A receipt records what a store answered; it is written,
     hashed, and exported entirely by the client. A conformant store neither
     emits nor consumes one, and needs no awareness that they exist. The one
     thing the spec does owe them is a stable `error_code` vocabulary, which
-    §5 already fixes — a receipt quotes the registry verbatim.
+    §5 already fixes: a receipt quotes the registry verbatim.
