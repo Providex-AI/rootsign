@@ -93,6 +93,7 @@ The chain protects the eight fields above and, through the payload hashes, the s
 - **Records deleted from the end of a session.** A chain cannot tell how long it was meant to be, so removing the last tool calls leaves a shorter chain that still verifies as `VALID`. `SESSION_CLOSE` records a `total_actions` count, but `SESSION_CLOSE` is not hashed and `verify` does not compare against it.
 - **Session events.** `SESSION_OPEN` and `SESSION_CLOSE`, including the session's `objective`, are not part of the chain.
 - **Fields that change after the call.** `authorization_status` is excluded because it legitimately changes when a human approves or rejects a pending action. `duration_ms` is excluded too. Approval decisions are stored as separate approval records, not in the chain.
+- **Captured decisions.** [Decision records](/guides/decision-capture) and an action's `decision_id` are outside the chain, so an edited reasoning summary, or an action pointed at a different decision, still verifies as `VALID`.
 
 <Warning>
   If you need to prove that a session was not cut short, keep the record count somewhere outside the session file. For example, record the `manifest.json` hash that `rootsign export` prints in a ticket or a chain-of-custody log.
@@ -107,8 +108,8 @@ If RootSign fails to write a record, for example because the database is unreach
 | Backend | When to use it | Install |
 | --- | --- | --- |
 | JSONL (default) | One process writing locally. No dependencies. | `pip install rootsign` |
-| PostgreSQL with TimescaleDB | Several writer processes, or approvals from another terminal | `pip install 'rootsign[postgres]'` |
-| Cloud (preview) | Uploading to the hosted Providex service, which is not live yet | `pip install 'rootsign[cloud]'` |
+| [PostgreSQL with TimescaleDB](/guides/postgres) | Several writer processes, or approvals from another terminal | `pip install 'rootsign[postgres]'` |
+| [Cloud (preview)](/guides/cloud-and-sync) | Uploading to the hosted Providex service, which is not live yet | `pip install 'rootsign[cloud]'` |
 
 You choose the backend with the `ROOTSIGN_BACKEND` environment variable. The instrumentation code is the same for all three, and all three use the same hash formula.
 

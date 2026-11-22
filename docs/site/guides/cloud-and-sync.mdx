@@ -1,0 +1,188 @@
+---
+title: "Record to the cloud with an offline spool and sync"
+sidebarTitle: "Cloud and sync"
+tag: "Preview"
+description: "Preview: send records over the cloud transport, keep them in a local spool while the endpoint is unreachable, verify them offline, then upload with sync."
+keywords: ["cloud", "ROOTSIGN_BACKEND=cloud", "spool", "offline", "rootsign-admin sync", "sync receipt", "HttpIngestClient", "ROOTSIGN_API_KEY"]
+---
+
+The cloud transport sends each record to the hosted Providex ingest endpoint. When the endpoint cannot be reached, RootSign writes the records to a local spool instead, and your tool calls keep returning their results. Spooled sessions are ordinary session files: you can verify and export them offline, and `rootsign-admin sync` uploads them later, leaving a sync receipt for every attempt.
+
+<Warning>
+  **Preview.** The hosted ingest endpoint is not live yet, so there is nowhere to upload to. What works today: recording to the spool, verifying and exporting spooled sessions, and `rootsign-admin sync --dry-run`.
+</Warning>
+
+## Record a session
+
+<Steps>
+  <Step title="Install the cloud extra">
+    ```bash
+    pip install 'rootsign[cloud]'
+    ```
+  </Step>
+  <Step title="Choose the cloud backend">
+    ```bash
+    export ROOTSIGN_BACKEND=cloud
+    export ROOTSIGN_API_KEY=<your API key>
+    ```
+
+    | Setting | Default | Meaning |
+    | --- | --- | --- |
+    | `ROOTSIGN_CLOUD_URL` | `https://ingest.getprovidex.com/v1` | The endpoint. Records are posted to `<ROOTSIGN_CLOUD_URL>/ingest`. |
+    | `ROOTSIGN_SPOOL_DIR` | `$ROOTSIGN_DATA_DIR/spool` | Where records go while the endpoint is unreachable |
+
+    [Configuration](/reference/configuration#cloud-transport-and-spool) has the timeout, retry and record-loss settings.
+  </Step>
+  <Step title="Pass the agent's ID">
+    The hosted backend issues agent IDs, so RootSign cannot register the agent itself. Pass the ID to `rootsign.session()`:
+
+    ```python agent.py
+    import asyncio
+    from uuid import UUID
+
+    import rootsign
+
+    rootsign.init(agent="invoice-agent", risk_tier="high")
+
+    # The agent's ID from the hosted backend. While it is in preview, any UUID works.
+    AGENT_ID = UUID("6f1c2d4e-8a9b-4c3d-9e2f-1a2b3c4d5e6f")
+
+
+    @rootsign.trace()
+    async def send_invoice(customer_id: str, amount: float) -> str:
+        return "sent"
+
+
+    @rootsign.trace()
+    async def log_payment(customer_id: str, amount: float) -> str:
+        return "logged"
+
+
+    async def main():
+        async with rootsign.session(agent_id=AGENT_ID, objective="invoice ACME") as ctx:
+            await send_invoice("acme-corp", 1500.00)
+            await log_payment("acme-corp", 1500.00)
+        print(ctx.session_id)
+
+
+    asyncio.run(main())
+    ```
+
+    Without `agent_id`, the session does not open:
+
+    ```text
+    ValueError: ROOTSIGN_BACKEND=cloud: RootSign cannot register this agent, because the hosted backend issues agent IDs. Pass its ID with rootsign.session(agent_id=...).
+    ```
+  </Step>
+  <Step title="Run it">
+    ```bash
+    python agent.py
+    ```
+
+    ```text
+    404612c7-0a59-4797-b312-71b5fab47de3
+    ```
+
+    While the endpoint is not live, the default URL has no ingest endpoint behind it, so the first record fails over to the spool and the rest of the run follows it. RootSign logs one warning for the run, not one per record:
+
+    ```text
+    rootsign: cloud ingest unreachable after 3 attempt(s) (STORE_UNAVAILABLE: no ingest endpoint at this URL (HTTP 404)) — 1 record(s) and everything after them are spooling to <spool_dir> instead of <endpoint>. They stay tamper-evident and verify offline (`rootsign verify --local`); upload them when connectivity returns with:  rootsign-admin sync
+    ```
+  </Step>
+</Steps>
+
+<Info>
+  Several cloud behaviours changed after RootSign 0.3.1. In 0.3.1 and earlier, a URL that answered 404, including the default one, lost every record instead of spooling it; a missing `ROOTSIGN_API_KEY` was reported as an unreachable endpoint; and a session without `agent_id` failed with a message saying `init()` does not support the cloud backend.
+</Info>
+
+## Verify a spooled session offline
+
+A spooled session verifies like any other session file:
+
+```bash
+rootsign verify --local ~/.rootsign/spool/sessions/404612c7-0a59-4797-b312-71b5fab47de3.jsonl
+```
+
+```text
+VALID ✓  —  2 records, chain intact
+  Session:  404612c7-0a59-4797-b312-71b5fab47de3
+
+This is a spooled session — recorded locally because the cloud endpoint was unreachable.
+Upload it (and everything else waiting) with:
+
+    rootsign-admin sync
+```
+
+`rootsign export --local` builds an [evidence bundle](/guides/evidence-bundles) from it the same way.
+
+If the endpoint went down part-way through a session, the records sent before the outage are not in the spool file, so the file verifies as `INCOMPLETE`:
+
+```text
+INCOMPLETE ⚠  —  2 records present and intact, but the chain is missing records
+  Detail:   2 record(s) missing at sequence 1-2
+```
+
+That is the honest answer for one file read offline. Once the session is synced, the store holds the whole chain.
+
+## Upload with sync
+
+`--dry-run` lists what is waiting without contacting anything, and works today:
+
+```bash
+rootsign-admin sync --dry-run
+```
+
+```text
+1 spooled session(s), 4 record(s) under <data_dir>/spool
+  would upload  404612c7-0a59-4797-b312-71b5fab47de3  4 record(s), actions 1-2
+Dry run — nothing was uploaded.
+```
+
+Once the endpoint is reachable, `sync` uploads every spooled session. Against an endpoint that implements the [ingest specification](/reference/ingest-spec-v1):
+
+```bash
+rootsign-admin sync
+```
+
+```text
+1 spooled session(s), 4 record(s) under <data_dir>/spool
+Uploading to <endpoint>
+  synced    404612c7-0a59-4797-b312-71b5fab47de3  4 accepted, 0 already present -> synced/
+            receipt <data_dir>/spool/synced/receipts/404612c7-0a59-4797-b312-71b5fab47de3.sync.json
+            receipt SHA-256 3c80e188e481c94beca64f9ce9a1706dfd4f91111d5c9b2d6671ac724baef835
+All spooled sessions uploaded.
+```
+
+A fully uploaded file moves to `spool/synced/` with its receipt. Running `sync` again is safe: records the endpoint already has count as delivered, and with nothing left it prints `Nothing to sync — no spooled sessions under <spool>.` The [`rootsign-admin` reference](/reference/cli-rootsign-admin#rootsign-admin-sync) lists the `REJECTED` and `FAILED` lines and the exit codes.
+
+## Sync receipts
+
+Every `sync` attempt adds an entry to the session's receipt, `spool/receipts/<session_id>.sync.json`: what the endpoint accepted, what it already had, what it refused and why, and what was never attempted, with a SHA-256 of the spool file as it was uploaded. A second attempt is appended, never overwrites the first. `rootsign export` puts the receipt in the session's evidence bundle as `sync-receipt.json`; its fields are in the [evidence bundle reference](/reference/evidence-bundle#sync-receipt-json).
+
+A receipt records the one outcome the three verdicts cannot: a record that was seen and refused. `INCOMPLETE` says a record is missing and `TAMPERED` says one was altered; the receipt says what happened when the evidence was handed over.
+
+## How the spool keeps the chain
+
+- **One chain across the outage.** RootSign seals each record before it picks a destination, so records written to the spool continue the sequence the endpoint had. After `sync`, the store holds one session, not two pieces.
+- **Once a run spools, it stays spooled.** After the first failover, the rest of the run goes to the spool, even if the endpoint comes back. `sync` uploads it afterwards.
+- **If the spool cannot be written either**, `ROOTSIGN_ON_RECORD_LOSS` decides: log and continue with a gap that verifies as `INCOMPLETE` (the default), or raise `RecordPersistenceError`. See [Configuration](/reference/configuration#cloud-transport-and-spool).
+
+## Not available in the preview
+
+- **Uploading.** The hosted endpoint is not live, so `sync` has nowhere to send records yet.
+- **Registering agents.** Pass `agent_id` to `rootsign.session()`.
+- **Human approval.** `require_approval=True` raises [`HiTLUnsupportedBackendError`](/reference/errors#hitlunsupportedbackenderror) before the tool runs, because approvals will come from the hosted backend. Use the [PostgreSQL backend](/guides/postgres) for approvals.
+- **Exporting by session ID.** `rootsign export <session_id>` reads PostgreSQL. Export a cloud session from its spool file with `--local`.
+
+Without `ROOTSIGN_API_KEY`, nothing can be sent, so RootSign records to the spool from the first record and logs one warning that names the missing key.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="rootsign-admin sync" icon="terminal" href="/reference/cli-rootsign-admin#rootsign-admin-sync">
+    Every line `sync` prints, and its exit codes.
+  </Card>
+  <Card title="Ingest specification" icon="file-code" href="/reference/ingest-spec-v1">
+    The wire format the cloud transport sends.
+  </Card>
+</Columns>

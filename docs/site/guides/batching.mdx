@@ -1,0 +1,121 @@
+---
+title: "Batch tool call records so calls return sooner"
+sidebarTitle: "Batch writes"
+description: "Turn on ROOTSIGN_BUFFERED so traced tool calls return without waiting for each write, and learn which records are never held and what a crash can lose."
+keywords: ["batching", "ROOTSIGN_BUFFERED", "BufferedIngestClient", "micro-batching", "latency", "ROOTSIGN_BUFFER_INTERVAL"]
+---
+
+By default, a traced tool call waits until its record is stored before it returns: a file append on JSONL, a database round trip on PostgreSQL. With batching on, RootSign keeps ordinary tool call records in memory and writes them in the background, so the call returns at once. Records that a person or the order of the chain depends on are never held. Batching is off by default.
+
+## Turn batching on
+
+```bash
+export ROOTSIGN_BUFFERED=true
+```
+
+Set it before `rootsign.init()` runs; your code does not change. Two settings tune it:
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `ROOTSIGN_BUFFER_INTERVAL` | `0.5` | Seconds between background writes |
+| `ROOTSIGN_BUFFER_MAX_SIZE` | `100` | Records held before a write is forced |
+
+[Configuration](/reference/configuration#batching) lists them with the other settings.
+
+<Info>
+  A fix after RootSign 0.3.1 makes batching safe on PostgreSQL. In 0.3.1 and earlier, with `ROOTSIGN_BUFFERED=true` on PostgreSQL, the last tool calls of a session could be lost without any error, and the session still verified as `VALID`. Upgrade before you turn batching on with PostgreSQL.
+</Info>
+
+## What it changes
+
+Batching moves the write off the tool call; it does not make the write itself faster. It helps when your agent does other work between tool calls, such as waiting for a model, because the background write runs during that time. For example, on a laptop with a local PostgreSQL database, 200 tool calls with 10 ms of other work between them took a median of 10.7 ms each without batching and 0.10 ms with it.
+
+In a tight loop with nothing between the calls, batching saves nothing: the call that fills the buffer waits for the whole batch to be written.
+
+## What is never held
+
+These records are written straight away, as they are without batching:
+
+- The session's opening and closing records.
+- Decision records, because `record_decision()` returns the new decision's ID.
+- A call held for approval, and the approval record, because the approval check waits on the stored record.
+
+Before writing any of them, RootSign writes every tool call record it is holding, so the chain stays in the order the calls ran.
+
+## When held records are written
+
+- Every `ROOTSIGN_BUFFER_INTERVAL` seconds, in the background.
+- As soon as `ROOTSIGN_BUFFER_MAX_SIZE` records are waiting. The tool call that fills the buffer waits for that write.
+- Before any record from the list above, including the session's closing record. When `async with rootsign.session()` exits, every held record is written first.
+
+## What it does not do
+
+- **It cannot save records from a crash.** Records still in memory when the process dies are lost: every tool call since the last completed write. Because the lost calls are the last ones, the session still verifies as `VALID`. [How it works](/how-it-works#what-verify-does-not-check) explains why a chain cannot tell it was cut short.
+- **It cannot stop a call whose record is lost.** The tool call has already returned when its record is written, so `ROOTSIGN_ON_RECORD_LOSS=fail` cannot raise into it.
+- **It reports a failed write late.** A record that cannot be written is tried again at the next write, and each failure is logged as an error. Records still not written when the session's client closes are lost:
+
+  ```text
+  rootsign: buffered flush failed after 3 attempt(s): [Errno 13] Permission denied: '<data_dir>/sessions/<session_id>.jsonl'
+  ```
+
+  A record the store refuses outright, for example because its session is already closed, is logged at `WARNING` and not tried again.
+
+## Batch with your own client
+
+When you build the client yourself, wrap it in `BufferedIngestClient` and pass it to the session. Leaving the `async with` block writes anything still held and closes the client:
+
+```python batched.py
+import asyncio
+
+import rootsign
+from rootsign import BufferedIngestClient, JsonlIngestClient
+
+rootsign.init(agent="nightly-batch")
+
+
+@rootsign.trace()
+async def reconcile(account: str) -> str:
+    return f"reconciled {account}"
+
+
+async def main() -> None:
+    inner = JsonlIngestClient(data_dir="audit")
+    async with BufferedIngestClient(inner, flush_interval_seconds=2.0) as client:
+        async with rootsign.session(client=client, objective="nightly reconciliation") as ctx:
+            for account in ("acme-corp", "globex", "initech"):
+                await reconcile(account)
+    print(ctx.session_id)
+
+
+asyncio.run(main())
+```
+
+```bash
+python batched.py
+rootsign verify --local audit/sessions/<session_id>.jsonl
+```
+
+```text
+VALID ✓  —  3 records, chain intact
+  Session:  3486665c-477d-4d12-a8c5-ec1cec1b28ac
+```
+
+| Parameter | Default | Meaning |
+| --- | --- | --- |
+| `inner` | required | The client that does the writing |
+| `flush_interval_seconds` | `0.5` | Seconds between background writes |
+| `max_buffer_size` | `100` | Records held before a write is forced |
+| `max_retries` | `3` | Attempts per record on each write. The cloud transport retries on its own, so the wrapper then tries once. |
+
+With the cloud transport as the inner client, each write sends the held records as one request.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Configuration" icon="settings" href="/reference/configuration#batching">
+    The batching settings with the others.
+  </Card>
+  <Card title="Run on PostgreSQL" icon="database" href="/guides/postgres">
+    The backend where batching saves the most per call.
+  </Card>
+</Columns>
