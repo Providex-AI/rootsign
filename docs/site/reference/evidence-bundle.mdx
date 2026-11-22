@@ -209,7 +209,11 @@ An action that a person rejected:
 }
 ```
 
-With `--redact-previews`, five fields are removed from every event: `input_preview`, `output_preview`, `context_presented`, `reasoning_summary` and `inputs_summary`. Hashes, IDs, timings and statuses stay.
+With `--redact-previews`, six fields are removed from every event: `input_preview`, `output_preview`, `context_presented`, `reasoning_summary`, `inputs_summary` and `alternatives_considered`. Hashes, IDs, timings and statuses stay.
+
+<Info>
+  `alternatives_considered` was added to the withheld fields after RootSign 0.3.1. In 0.3.1 and earlier, `--redact-previews` kept it.
+</Info>
 
 ## redaction.json
 

@@ -398,7 +398,7 @@ $ rootsign export --check ./bundles/evidence-<session_id>
 
 Re-hashing files against the manifest proves the bundle is internally consistent — nothing more. Someone who edits a file *and* updates the manifest passes that check trivially. The out-of-band manifest hash is the only anchor they cannot forge, which is why `--check` prints it whether or not anything is wrong.
 
-For bundles leaving the building, `--redact-previews` withholds every field that carries stored content — payload previews, the context a human was shown at a checkpoint, and captured decision summaries — and names what it withheld, so the recipient knows what to ask for rather than guessing whether a field was stripped or never existed. Hashes, identities and timings are unaffected: the chain still verifies.
+For bundles leaving the building, `--redact-previews` withholds every field that carries stored content — payload previews, the context a human was shown at a checkpoint, and captured decision summaries with the alternatives they considered — and names what it withheld, so the recipient knows what to ask for rather than guessing whether a field was stripped or never existed. Hashes, identities and timings are unaffected: the chain still verifies.
 
 `--format json|md|html` narrows the renderings; it never drops the machine truth. `rootsign export <session_id>` reads a Postgres-backed session (agent name, owner and risk tier come along, since those live in the registration row). See [ADR-014](docs/adr/ADR-014-export-evidence-bundle.md).
 
