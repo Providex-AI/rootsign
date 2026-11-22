@@ -95,6 +95,26 @@ def _log_safe(value: Any, *, limit: int = _LOG_FIELD_LIMIT) -> str:
     return "".join(c if c.isprintable() else f"\\x{ord(c):02x}" for c in text)
 
 
+def _warn_if_refused(response: Any, record: str) -> None:
+    """WARN when the store refused a record, which was then stored nowhere.
+
+    An exception from the client is logged at WARNING; a refusal (a response
+    with status "rejected") used to reach only DEBUG, so an agent whose records
+    were all refused, by a URL with no ingest endpoint behind it or an agent
+    ID the store does not know, ran with nothing recorded and nothing said.
+    `record` names the record, for example "ACTION_RECORD for tool 'pay'".
+    """
+    if getattr(response, "status", None) != "rejected":
+        return
+    code = getattr(response, "error_code", None)
+    logger.warning(
+        "rootsign: the store refused the %s (%s: %s); it was not recorded",
+        _log_safe(record),
+        _log_safe(getattr(code, "value", code)),
+        _log_safe(getattr(response, "error_message", "")),
+    )
+
+
 def _to_json_safe(value: Any) -> Any:
     """Coerce a value into a JSON-serializable shape for storage + hashing.
 
@@ -463,6 +483,7 @@ async def _try_ingest(
             },
         }
         response = await client.handle(envelope)
+        _warn_if_refused(response, f"ACTION_RECORD for tool {tool_name!r}")
         # audit #9: advance the SDK counter ONLY when the store accepted the
         # ACTION_RECORD, so SESSION_CLOSE's total_actions (ctx.current_sequence)
         # matches the store's action_count and the AC-3.11 reconciliation
@@ -842,6 +863,8 @@ async def _emit_approval_record(
             },
         }
         response = await client.handle(envelope)
+        if not required:
+            _warn_if_refused(response, f"APPROVAL_RECORD for tool {tool_name!r}")
         if required and getattr(response, "status", None) != "accepted":
             raise HiTLPersistenceError(
                 "the approval record was refused "
