@@ -20,6 +20,7 @@ import re
 import textwrap
 from pathlib import Path
 from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 from typer.testing import CliRunner
@@ -344,3 +345,51 @@ def test_the_old_path_points_at_the_new_one():
     pointer = (REPO / "docs/ingest-spec-v1.md").read_text()
     assert "site/reference/ingest-spec-v1.mdx" in pointer
     assert (REPO / "docs/site" / Path(SPEC)).is_file()
+
+
+@pytest.mark.parametrize(
+    ("row_status", "statuses"),
+    [
+        ("400", [400]),
+        ("401", [401, 403]),
+        ("404", [404]),
+        ("413", [413]),
+        ("429", [429]),
+        ("5xx", [500, 502, 503, 504]),
+    ],
+)
+async def test_the_http_status_table_is_what_the_client_does(row_status, statuses, tmp_path):
+    """Every row of the spec's HTTP mapping table, against the real client."""
+    import httpx
+
+    from rootsign.ingest.schemas import ErrorCode
+    from rootsign.sdk.client import HttpIngestClient
+
+    section = _section(SPEC, "### HTTP status mapping (cloud binding)")
+    (row,) = [r for r in section.splitlines() if r.startswith(f"| `{row_status}`")]
+    maps_to = row.split(" | ")[-1]
+    retryable = "non-retryable" not in maps_to
+    named = {c for c in re.findall(r"`([A-Z_]+)`", maps_to) if c in ErrorCode.__members__}
+
+    for status in statuses:
+        client = HttpIngestClient(
+            "https://ingest.example.test/v1",
+            "key",
+            max_retries=1,
+            transport=httpx.MockTransport(lambda request, s=status: httpx.Response(s)),
+            spool_dir=str(tmp_path / str(status)),
+        )
+        envelope = {
+            "schema_version": "1.0",
+            "sdk_version": "0.3.1",
+            "event_type": "SESSION_OPEN",
+            "event_id": str(uuid4()),
+            "emitted_at": "2026-11-22T12:00:00+00:00",
+            "agent_id": str(uuid4()),
+            "session_id": str(uuid4()),
+            "payload": {},
+        }
+        response = await client.handle(envelope)
+        code = client.spool_reason if client.is_spooling else response.error_code
+        assert code.value in named, (status, code, row)
+        assert client.is_spooling is retryable, (status, row)

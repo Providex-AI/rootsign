@@ -386,6 +386,7 @@ async def test_the_chain_registry_is_shareable() -> None:
         (401, ErrorCode.VALIDATION_ERROR, False),
         (403, ErrorCode.VALIDATION_ERROR, False),
         (413, ErrorCode.VALIDATION_ERROR, False),
+        (404, ErrorCode.STORE_UNAVAILABLE, True),
         (429, ErrorCode.RATE_LIMITED, True),
         (500, ErrorCode.INTERNAL_ERROR, True),
         (502, ErrorCode.STORE_UNAVAILABLE, True),
@@ -409,6 +410,48 @@ async def test_http_status_maps_to_registry_code(
         assert response.error_code is code
         assert response.retryable is False
         assert client.is_spooling is False
+
+
+async def test_a_404_with_no_ingest_endpoint_behind_it_spools(
+    fast_backoff: None, tmp_path, caplog
+) -> None:
+    """The default ROOTSIGN_CLOUD_URL host answers 404 from a hosting
+    platform while the endpoint is not deployed. That is not a decision about
+    the record; nothing at that URL speaks the protocol. It used to map to a
+    non-retryable VALIDATION_ERROR, which is never spooled, so every record
+    was lost."""
+    envelope = _envelope()
+    recorder = _Recorder(
+        lambda request, n: httpx.Response(
+            404, text="The deployment could not be found on Vercel.\n\nDEPLOYMENT_NOT_FOUND\n"
+        )
+    )
+    client = _client(recorder, max_retries=2, spool_dir=str(tmp_path))
+
+    with caplog.at_level("WARNING", logger="rootsign.sdk.client"):
+        response = await client.handle(envelope)
+
+    assert response.status == "accepted"  # durable in the spool
+    assert client.spool_reason is ErrorCode.STORE_UNAVAILABLE
+    assert len(_spool_records(tmp_path, envelope["session_id"])) == 1
+    (warning,) = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert "no ingest endpoint at this URL (HTTP 404)" in warning
+
+
+async def test_a_404_with_a_protocol_body_keeps_the_servers_codes() -> None:
+    """A server that does speak the protocol may answer 404 with per-element
+    outcomes; those stay the server's decision."""
+    envelope = _envelope()
+    recorder = _Recorder(
+        lambda request, n: httpx.Response(
+            404, json=[_rejected(envelope, ErrorCode.SESSION_NOT_FOUND, False)]
+        )
+    )
+
+    response = await _client(recorder).handle(envelope)
+
+    assert response.error_code is ErrorCode.SESSION_NOT_FOUND
+    assert len(recorder.requests) == 1
 
 
 async def test_error_body_on_a_4xx_passes_the_server_code_through() -> None:
