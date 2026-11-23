@@ -378,7 +378,10 @@ def _build_client(config: _InitConfig) -> IngestClient:
     else:
         from rootsign.sdk.client import get_ingest_client
 
-        client = get_ingest_client()
+        # The settings init() read, not a fresh read: a data folder changed
+        # after init() used to send the session file to one folder while the
+        # agent was registered in another.
+        client = get_ingest_client(settings=config.settings)
 
     return client
 
