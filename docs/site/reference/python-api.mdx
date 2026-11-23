@@ -358,7 +358,7 @@ Recompute every hash in a session and return the verdict. Neither function print
 | Name | What it is |
 | --- | --- |
 | `SessionContext` | The object `session()` yields, for building a session yourself |
-| `register_agent()` | Registers an agent on PostgreSQL and returns its ID, for `session(agent_id=...)` |
+| `register_agent()` | Registers an agent on PostgreSQL, once, and returns it, for `session(agent_id=...)`. Registering the same name and environment again raises an error that names the existing ID. |
 | `get_ingest_client()` | Builds the client for the configured backend |
 | `IngestClient` | The base class every client implements, for `session(client=...)` |
 | `JsonlIngestClient`, `LocalIngestClient`, `ManagedLocalIngestClient`, `HttpIngestClient`, `BufferedIngestClient` | The clients behind each backend |
