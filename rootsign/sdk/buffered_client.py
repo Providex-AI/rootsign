@@ -45,7 +45,7 @@ from collections import deque
 from typing import Any
 
 from rootsign.ingest.schemas import EventType
-from rootsign.sdk.client import IngestClient
+from rootsign.sdk.client import IngestClient, _log_safe
 
 logger = logging.getLogger("rootsign.sdk.buffered_client")
 
@@ -95,6 +95,24 @@ def _needs_retry(response: Any) -> bool:
     )
 
 
+def _log_refusal(envelope: dict[str, Any], response: Any) -> None:
+    """WARN for a record the store refused for good.
+
+    It is not re-sent (the refusal is deterministic), so this line is the only
+    trace it leaves: an ingest failure is never swallowed silently.
+    """
+    if getattr(response, "status", None) != "rejected":
+        return
+    code = getattr(response, "error_code", None)
+    logger.warning(
+        "rootsign: the store refused a buffered action record for session %s "
+        "(%s: %s); it was not recorded",
+        _log_safe(envelope.get("session_id")),
+        _log_safe(getattr(code, "value", code)),
+        _log_safe(getattr(response, "error_message", "")),
+    )
+
+
 class BufferedIngestClient(IngestClient):
     """Micro-batching wrapper around any `IngestClient`. See ADR-009."""
 
@@ -112,6 +130,11 @@ class BufferedIngestClient(IngestClient):
         self._max_retries = max_retries
         self._buffer: deque[dict[str, Any]] = deque()
         self._lock = asyncio.Lock()
+        # Held for a whole drain-and-send, not just the drain. Without it a
+        # flush that found the buffer empty returned while another flush was
+        # still sending the batch it had taken, so SESSION_CLOSE overtook that
+        # batch and the store refused the rest of it.
+        self._flush_lock = asyncio.Lock()
         self._flush_task: asyncio.Task[None] | None = None
         self._closed = False
 
@@ -149,12 +172,26 @@ class BufferedIngestClient(IngestClient):
             return _BufferedResponse()
 
         # Passthrough: drain buffered actions ahead of this envelope so the
-        # store inserts them in order, then forward synchronously.
-        await self.flush()
-        return await self._inner.handle(envelope)
+        # store inserts them in order, then forward synchronously. The flush
+        # lock stays held for the forward too, so no background flush can
+        # slip a later batch in between.
+        async with self._flush_lock:
+            await self._drain_and_send()
+            return await self._inner.handle(envelope)
 
     async def flush(self) -> None:
-        """Drain the buffer and forward every record to the inner client."""
+        """Forward every buffered record to the inner client.
+
+        Returns only once every record buffered before the call has been
+        sent, including a batch another flush (the background loop) was
+        already sending. `session()` relies on this to store every action
+        before SESSION_CLOSE.
+        """
+        async with self._flush_lock:
+            await self._drain_and_send()
+
+    async def _drain_and_send(self) -> None:
+        """Take the buffer and send it. The caller holds `_flush_lock`."""
         async with self._lock:
             if not self._buffer:
                 return
@@ -204,7 +241,12 @@ class BufferedIngestClient(IngestClient):
             except Exception as e:  # noqa: BLE001 — see failure-isolation rule
                 logger.warning("rootsign: buffered batch flush raised: %s", e)
                 responses = []
-            failed = [env for env, resp in zip(pending, responses) if _needs_retry(resp)]
+            failed = []
+            for env, resp in zip(pending, responses):
+                if _needs_retry(resp):
+                    failed.append(env)
+                else:
+                    _log_refusal(env, resp)
             # A short response array is a protocol violation (spec §7.1); treat
             # the unanswered tail as unsent rather than silently dropping it.
             failed.extend(pending[len(responses) :])
@@ -224,25 +266,34 @@ class BufferedIngestClient(IngestClient):
     async def _send_with_retry(self, envelope: dict[str, Any]) -> bool:
         """Forward one envelope with bounded exponential backoff.
 
-        Returns True on success, False after the attempt budget is spent.
-        Never raises — the never-crash-the-agent contract (ADR-002).
+        Returns True when the record needs no resend: it was stored, or the
+        store refused it for good (logged). False after the attempt budget is
+        spent on exceptions or retryable refusals. Never raises — the
+        never-crash-the-agent contract (ADR-002).
         """
         attempts = self._attempts()
         delay = 0.1
         for attempt in range(attempts):
             try:
-                await self._inner.handle(envelope)
-                return True
+                response = await self._inner.handle(envelope)
             except Exception as e:  # noqa: BLE001 — see failure-isolation rule
-                if attempt < attempts - 1:
-                    await asyncio.sleep(delay)
-                    delay *= 2
-                else:
-                    logger.error(
-                        "rootsign: buffered flush failed after %d attempt(s): %s",
-                        attempts,
-                        e,
-                    )
+                failure: Any = e
+            else:
+                if not _needs_retry(response):
+                    _log_refusal(envelope, response)
+                    return True
+                # The store did not take it and said to try again: a retryable
+                # refusal counted as delivered was a lost record.
+                failure = getattr(response, "error_code", "retryable rejection")
+            if attempt < attempts - 1:
+                await asyncio.sleep(delay)
+                delay *= 2
+            else:
+                logger.error(
+                    "rootsign: buffered flush failed after %d attempt(s): %s",
+                    attempts,
+                    _log_safe(getattr(failure, "value", failure)),
+                )
         return False
 
     async def _flush_loop(self) -> None:
@@ -254,7 +305,7 @@ class BufferedIngestClient(IngestClient):
                 logger.warning("rootsign: background flush error: %s", e)
 
     async def close(self) -> None:
-        """Cancel the background task, flush, then close the inner client.
+        """Stop the background task, flush, then close the inner client.
 
         The inner close is duck-typed and best-effort. Only the cloud
         transport currently owns closable resources (an `httpx.AsyncClient`
@@ -263,7 +314,10 @@ class BufferedIngestClient(IngestClient):
         """
         self._closed = True
         if self._flush_task is not None:
-            self._flush_task.cancel()
+            # Cancel only between sends. Cancelling mid-send dropped the
+            # unsent rest of that batch, which lived only inside the flush.
+            async with self._flush_lock:
+                self._flush_task.cancel()
             try:
                 await self._flush_task
             except asyncio.CancelledError:
