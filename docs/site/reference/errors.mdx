@@ -69,20 +69,30 @@ HiTL approval timed out after 300s for action b5e0e3d3-fa5e-4cb4-9462-b1048fd54c
 
 ### HiTLUnsupportedBackendError
 
-`require_approval=True` was used on the JSONL backend with no terminal to prompt in, such as a background job or CI. Raised on the tool's first call, before it runs. Run it in a terminal, or use the PostgreSQL backend and `rootsign approve`.
+`require_approval=True` was used where nobody can be asked: on the JSONL backend with no terminal to prompt in, such as a background job or CI, or on the cloud transport, whose approvals will come from the hosted backend once it is live. Raised on the tool's first call, before it runs and before anything is recorded. Run it in a terminal, or use the PostgreSQL backend and `rootsign approve`.
 
 ```text
 HiTL not available for tool 'wire_transfer' on this backend. Human-in-the-loop with require_approval=True needs either an interactive terminal (JSONL backend prompts inline) or the shared store: set ROOTSIGN_BACKEND=postgres for the async poll-loop / `rootsign approve` flow.
 ```
 
+On the cloud transport:
+
+```text
+HiTL not available for tool 'wire_transfer' on the cloud transport. Approvals on the cloud transport will come from the hosted backend, which is not live yet. Set ROOTSIGN_BACKEND=postgres to approve with `rootsign approve`, or use the JSONL backend in an interactive terminal.
+```
+
+<Info>
+  The cloud case was added after RootSign 0.3.1. In 0.3.1 and earlier, a held call on the cloud transport tried to reach a local PostgreSQL database and failed with `OSError`, or with `ActionNotFoundError` if one was running. The tool did not run.
+</Info>
+
 <ResponseField name="tool_name" type="str | None">The tool that was called.</ResponseField>
 
 ### HiTLPersistenceError
 
-The record of a held call, or of the decision on it, could not be stored: the session file could not be written, the database refused it, or, on the cloud transport, the endpoint was unreachable and the spool could not be written either. Raised before the tool runs, on every backend and whatever `ROOTSIGN_ON_RECORD_LOSS` says: a decision that cannot be recorded is not acted on.
+The record of a held call, or of the decision on it, could not be stored: the session file could not be written, or the database refused it. Raised before the tool runs, whatever `ROOTSIGN_ON_RECORD_LOSS` says: a decision that cannot be recorded is not acted on. For example, on the JSONL backend with a session file that cannot be written:
 
 ```text
-HiTL record for tool 'pay' could not be persisted: spool write to <spool_dir> failed (PermissionError: [Errno 13] Permission denied: '<spool_dir>/sessions'). The gated action was not executed.
+HiTL record for tool 'pay' could not be persisted: the pending action record was not stored (the cause is logged above at WARNING). The gated action was not executed.
 ```
 
 <ResponseField name="tool_name" type="str | None">The held tool.</ResponseField>
@@ -176,7 +186,7 @@ Some mistakes raise standard Python exceptions rather than `RootSignError`:
 
 | Exception | When |
 | --- | --- |
-| `ValueError` | `rootsign.init()` gets an invalid value, such as `risk_tier="extreme"` or a one-character `agent`, or is called a second time with different arguments. A session opened after `init()` with `ROOTSIGN_BACKEND=cloud`. |
+| `ValueError` | `rootsign.init()` gets an invalid value, such as `risk_tier="extreme"` or a one-character `agent`, or is called a second time with different arguments. A session opened with `ROOTSIGN_BACKEND=cloud` and no `agent_id`. |
 | `pydantic.ValidationError` | A `ROOTSIGN_` environment variable has a value outside its allowed list, which stops `import rootsign`. `ENVIRONMENT=production` with the default database URLs. See [Configuration](/reference/configuration#how-settings-are-read). |
 | `NotImplementedError` | `require_approval=True` on a LangChain `BaseTool` or a CrewAI tool. Put it on the plain function the tool calls. |
 | `FileNotFoundError` | `verify_session_local()` is given a path that does not exist. |

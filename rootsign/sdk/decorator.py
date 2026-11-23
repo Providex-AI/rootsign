@@ -32,7 +32,14 @@ from rootsign.errors import (
     RecordPersistenceError,
     postgres_extra_required,
 )
-from rootsign.ingest.schemas import SCHEMA_VERSION, EventType, IngestResponse
+from pydantic import ValidationError
+
+from rootsign.ingest.schemas import (
+    SCHEMA_VERSION,
+    DecisionRecordPayload,
+    EventType,
+    IngestResponse,
+)
 from rootsign.sdk.client import IngestClient
 from rootsign.sdk.context import SessionContext
 from rootsign.sdk.hashing import compute_payload_hash
@@ -584,6 +591,14 @@ async def _emit_hitl_action(
             _input_payload_override=_input_payload_override,
         )
 
+    # The cloud transport has no approval flow until the hosted backend is
+    # live. Refuse before sending the pending action: the PostgreSQL poll loop
+    # below would otherwise poll a local database nobody configured.
+    if _is_cloud_backend(client):
+        from rootsign.errors import HiTLUnsupportedBackendError
+
+        raise HiTLUnsupportedBackendError(tool_name, backend="cloud")
+
     # Lazy imports — HiTL is a Sprint 4 surface and pulling these at
     # module load would pessimize cold start for non-HiTL users.
     with postgres_extra_required():
@@ -684,6 +699,14 @@ def _is_jsonl_backend(client: IngestClient) -> bool:
 
     inner = getattr(client, "_inner", None)
     return isinstance(client, JsonlIngestClient) or isinstance(inner, JsonlIngestClient)
+
+
+def _is_cloud_backend(client: IngestClient) -> bool:
+    """True if *client* is (or wraps) the cloud transport, `HttpIngestClient`."""
+    from rootsign.sdk.client import HttpIngestClient
+
+    inner = getattr(client, "_inner", None)
+    return isinstance(client, HttpIngestClient) or isinstance(inner, HttpIngestClient)
 
 
 #: First words the inline approval prompt accepts as "approve". Anything else,
@@ -899,6 +922,24 @@ async def _emit_approval_record(
         )
 
 
+def _decision_problem(payload: dict[str, Any]) -> str | None:
+    """Why a store would refuse this decision payload, or None if it is valid.
+
+    Checked in the SDK with the schema PostgreSQL validates against, so a bad
+    value is refused the same way on every backend. The JSONL backend used to
+    store whatever it was given: `confidence=1.5` was recorded there and
+    refused by PostgreSQL.
+    """
+    try:
+        DecisionRecordPayload.model_validate(payload)
+    except ValidationError as exc:
+        return "; ".join(
+            f"{'.'.join(str(part) for part in error['loc'])}: {error['msg']}"
+            for error in exc.errors()
+        )
+    return None
+
+
 async def _emit_decision_record(
     *,
     client: IngestClient,
@@ -967,6 +1008,13 @@ async def _emit_decision_record(
                 "reasoning_captured": summary is not None,
             },
         }
+        problem = _decision_problem(envelope["payload"])
+        if problem is not None:
+            logger.warning(
+                "rootsign: decision not recorded (%s); the next action is not linked to one",
+                _log_safe(problem),
+            )
+            return None
         response = await client.handle(envelope)
         if response is None or response.entity_id is None:
             logger.warning(

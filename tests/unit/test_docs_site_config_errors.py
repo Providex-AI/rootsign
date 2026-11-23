@@ -398,6 +398,11 @@ def test_message_formats(exception, message):
     assert output_after(ERRORS, f"### {exception}\n") == [message]
 
 
+def test_the_cloud_approval_message():
+    cloud = str(errors.HiTLUnsupportedBackendError("wire_transfer", backend="cloud"))
+    assert output_after(ERRORS, "On the cloud transport:") == [cloud]
+
+
 def test_not_initialised_is_raised_with_the_documented_message(tmp_path):
     source = """
         import asyncio, rootsign
@@ -503,10 +508,39 @@ class TestPersistence:
         (line,) = [x for x in out.splitlines() if x.startswith("RecordPersistenceError: ")]
         assert self._pattern("RecordPersistenceError").fullmatch(line.split(": ", 1)[1]), line
 
+    # A held call on the cloud transport now stops at HiTLUnsupportedBackendError
+    # before any record is written, so the page shows this error on JSONL: the
+    # session file becomes unwritable before the held call, a terminal is
+    # present (patched), and the pending record cannot be stored.
+    HELD = """
+        import asyncio, os
+        from unittest.mock import patch
+        import rootsign
+        rootsign.init(agent="loss-check")
+
+        @rootsign.trace(require_approval=True)
+        async def pay(amount: int) -> str:
+            print("TOOL RAN")
+            return "paid"
+
+        async def main():
+            async with rootsign.session(objective="x") as ctx:
+                path = os.path.join(os.environ["ROOTSIGN_DATA_DIR"], "sessions", f"{ctx.session_id}.jsonl")
+                os.chmod(path, 0o400)
+                try:
+                    with patch("sys.stdin.isatty", return_value=True):
+                        await pay(amount=1)
+                except rootsign.RootSignError as error:
+                    print(f"{type(error).__name__}: {error}")
+                os.chmod(path, 0o600)
+
+        asyncio.run(main())
+    """
+
     def test_hitl_persistence_error_stops_the_tool(self, tmp_path):
-        out = self._run(tmp_path, "hitl", "warn")
-        assert "TOOL RAN" not in out
-        (line,) = [x for x in out.splitlines() if x.startswith("HiTLPersistenceError: ")]
+        result = _python(self.HELD, tmp_path)
+        assert "TOOL RAN" not in result.stdout
+        (line,) = [x for x in result.stdout.splitlines() if x.startswith("HiTLPersistenceError: ")]
         assert self._pattern("HiTLPersistenceError").fullmatch(line.split(": ", 1)[1]), line
 
 

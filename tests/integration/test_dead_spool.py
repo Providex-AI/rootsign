@@ -31,7 +31,11 @@ import httpx
 import pytest
 
 import rootsign
-from rootsign.errors import HiTLPersistenceError, RecordPersistenceError
+from rootsign.errors import (
+    HiTLPersistenceError,
+    HiTLUnsupportedBackendError,
+    RecordPersistenceError,
+)
 from rootsign.sdk.chain import verify_session_local
 from rootsign.sdk.client import HttpIngestClient
 from rootsign.sdk.loss_ledger import LOSS_RECORD_EVENT_TYPE
@@ -187,14 +191,52 @@ class TestTelemetryDropsWithAccounting:
 
 
 class TestControlsFailClosed:
-    async def test_a_gated_tool_never_runs_when_its_control_cannot_be_persisted(self, dead_spool):
+    async def test_a_control_record_the_spool_cannot_take_is_refused(self, dead_spool):
         """The asymmetry that makes the ladder defensible.
 
         An approval is not a record *of* the action — it is the control *on*
         it. If the pending ACTION_RECORD cannot be written, there is nothing
         for a human to approve against, so the only safe answer is to refuse
-        to run the tool. Telemetry drops; controls stop the world.
+        it. Telemetry drops; controls stop the world.
+
+        The decorator no longer sends a held call over the cloud transport:
+        approvals there need the hosted backend, so `require_approval=True`
+        raises `HiTLUnsupportedBackendError` before anything is sent (see
+        `test_a_held_call_on_cloud_never_reaches_the_transport` below). The
+        transport's own rule is exercised directly, against the real read-only
+        directory, for any caller that does hand it a control record.
         """
+        client = _offline_client(dead_spool)
+        session_id = str(uuid4())
+        pending = {
+            "schema_version": "1.0",
+            "sdk_version": "0.3.1",
+            "event_type": "ACTION_RECORD",
+            "event_id": str(uuid4()),
+            "emitted_at": "2026-11-22T12:00:00+00:00",
+            "agent_id": str(uuid4()),
+            "session_id": session_id,
+            "payload": {
+                "tool_name": "wire_transfer",
+                "input_hash": "a" * 64,
+                "output_hash": None,
+                "timestamp": "2026-11-22T12:00:00+00:00",
+                "authorization_status": "pending",
+            },
+        }
+
+        with pytest.raises(HiTLPersistenceError) as excinfo:
+            await client.handle(pending)
+        await client.close()
+
+        assert "wire_transfer" in str(excinfo.value)
+        assert "was not executed" in str(excinfo.value)
+        assert "PermissionError" in str(excinfo.value)  # the real disk refused it
+        # Nothing to account for: the caller is learning the action did not
+        # happen, so there is no lost record to tally.
+        assert client.loss_ledger(session_id) is None
+
+    async def test_a_held_call_on_cloud_never_reaches_the_transport(self, dead_spool):
         client = _offline_client(dead_spool)
         executed: list[str] = []
 
@@ -205,21 +247,17 @@ class TestControlsFailClosed:
                 executed.append("ran")
                 return f"wired {amount}"
 
-            with pytest.raises(HiTLPersistenceError) as excinfo:
+            with pytest.raises(HiTLUnsupportedBackendError):
                 await wire_transfer(50_000)
 
         await client.close()
 
-        assert executed == [], "the gated tool ran without a persisted control record"
-        assert "wire_transfer" in str(excinfo.value)
-        assert "was not executed" in str(excinfo.value)
-        # Nothing to account for: the caller is learning the action did not
-        # happen, so there is no lost record to tally. The ledger holds only the
-        # session envelopes (OPEN, and the CLOSE the raise triggers) — neither
-        # of which carries a sequence number.
+        assert executed == [], "the gated tool ran without an approval"
+        # Only the session envelopes were attempted (and lost): the held call
+        # sent nothing.
         ledger = client.loss_ledger(str(ctx.session_id))
         assert ledger.count == 2
-        assert ledger.first_sequence is None, "the control record was ledgered as a loss"
+        assert ledger.first_sequence is None
 
 
 class TestOnRecordLossFail:

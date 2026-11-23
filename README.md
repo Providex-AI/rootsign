@@ -398,13 +398,22 @@ $ rootsign export --check ./bundles/evidence-<session_id>
 
 Re-hashing files against the manifest proves the bundle is internally consistent — nothing more. Someone who edits a file *and* updates the manifest passes that check trivially. The out-of-band manifest hash is the only anchor they cannot forge, which is why `--check` prints it whether or not anything is wrong.
 
-For bundles leaving the building, `--redact-previews` withholds every field that carries stored content — payload previews, the context a human was shown at a checkpoint, and captured decision summaries — and names what it withheld, so the recipient knows what to ask for rather than guessing whether a field was stripped or never existed. Hashes, identities and timings are unaffected: the chain still verifies.
+For bundles leaving the building, `--redact-previews` withholds every field that carries stored content — payload previews, the context a human was shown at a checkpoint, and captured decision summaries with the alternatives they considered — and names what it withheld, so the recipient knows what to ask for rather than guessing whether a field was stripped or never existed. Hashes, identities and timings are unaffected: the chain still verifies.
 
 `--format json|md|html` narrows the renderings; it never drops the machine truth. `rootsign export <session_id>` reads a Postgres-backed session (agent name, owner and risk tier come along, since those live in the registration row). See [ADR-014](docs/adr/ADR-014-export-evidence-bundle.md).
 
 ## Offline & sync (cloud mode)
 
-Set `ROOTSIGN_BACKEND=cloud` and records go to the hosted ingest endpoint (`pip install 'rootsign[cloud]'`). The interesting part is what happens when that endpoint is not there.
+Set `ROOTSIGN_BACKEND=cloud` and records go to the hosted ingest endpoint (`pip install 'rootsign[cloud]'`). The hosted backend issues agent IDs, so RootSign cannot register the agent itself: pass its ID to the session.
+
+```python
+rootsign.init(agent="invoice-agent")
+
+async with rootsign.session(agent_id=AGENT_ID, objective="invoice ACME"):
+    ...
+```
+
+The interesting part is what happens when that endpoint is not there.
 
 **Nothing is lost, and the agent never notices.** When retries are exhausted, the SDK fails over to the same append-only writer the local backend uses, rooted at `$ROOTSIGN_DATA_DIR/spool/`. One WARNING is logged — not one per record — and your tool calls keep returning their real results, because an audit layer that halts the business it observes has inverted its own value.
 
@@ -441,7 +450,7 @@ Safe to re-run: idempotency is server-side by `event_id`, so a partially uploade
 
 That closes the gap the three verdicts could not: `INCOMPLETE` means a record is *missing*, `TAMPERED` means one was *altered* — neither can say a record was **observed and refused**. Without a receipt, that outcome lived only in terminal scrollback, and a reviewer reading the spool file later could not tell "never uploaded" from "uploaded and rejected". `rootsign export` carries the receipt into the evidence bundle, hashed in `manifest.json` like every other file.
 
-**The chain spans the outage.** Records written to the spool continue the sequence the wire path started, because the chain is sealed before the SDK chooses a destination — so after sync the store holds one unbroken session, not two fragments. If the disk *also* fails, telemetry drops with accounting (one CRITICAL, a loss ledger, and a chain gap that makes the loss provable as `INCOMPLETE`) while anything gated by a human approval fails closed and the tool never runs. See [ADR-013](docs/adr/ADR-013-http-ingest-client-spool.md).
+**The chain spans the outage.** Records written to the spool continue the sequence the wire path started, because the chain is sealed before the SDK chooses a destination — so after sync the store holds one unbroken session, not two fragments. If the disk *also* fails, telemetry drops with accounting (one CRITICAL, a loss ledger, and a chain gap that makes the loss provable as `INCOMPLETE`) while a call held for human approval never runs: `require_approval=True` raises `HiTLUnsupportedBackendError` on the cloud transport until the hosted backend can collect approvals. See [ADR-013](docs/adr/ADR-013-http-ingest-client-spool.md).
 
 ## Micro-batching (opt-in)
 

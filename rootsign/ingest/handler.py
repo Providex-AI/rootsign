@@ -242,6 +242,7 @@ class IngestHandler:
                 alternatives_considered=payload.alternatives_considered,
                 timestamp=payload.timestamp,
                 reasoning_captured=reasoning_captured,
+                reasoning_depth=payload.reasoning_depth,
             ),
         )
         # AC-3.6: increment session.decision_count atomically with the insert.
