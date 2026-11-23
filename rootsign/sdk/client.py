@@ -528,12 +528,13 @@ class HttpIngestClient(IngestClient):
         self._spooling = True
         self._spool_reason = cause.error_code
         logger.warning(
-            "rootsign: cloud ingest unreachable after %d attempt(s) (%s) — %d record(s) and "
-            "everything after them are spooling to %s instead of %s. They stay tamper-evident "
-            "and verify offline (`rootsign verify --local`); upload them when connectivity "
-            "returns with:  %s",
+            "rootsign: cloud ingest unreachable after %d attempt(s) (%s: %s) — %d record(s) "
+            "and everything after them are spooling to %s instead of %s. They stay "
+            "tamper-evident and verify offline (`rootsign verify --local`); upload them when "
+            "connectivity returns with:  %s",
             self._max_retries,
-            _log_safe(cause.error_code),
+            _log_safe(getattr(cause.error_code, "value", cause.error_code)),
+            _log_safe(cause.error_message),
             record_count,
             self.spool_dir,
             self.endpoint,
@@ -751,6 +752,17 @@ class HttpIngestClient(IngestClient):
                 ErrorCode.VALIDATION_ERROR,
                 False,
                 f"authentication rejected (HTTP {status}) — check ROOTSIGN_API_KEY",
+            )
+        elif status == 404:
+            # No protocol body: nothing at this URL speaks the ingest
+            # protocol, such as a hosting platform's "not deployed" page. That
+            # is not a decision about the record, so it is treated like an
+            # outage and the record is spooled. As a refusal it was never
+            # spooled, and every record was lost.
+            code, retryable, message = (
+                ErrorCode.STORE_UNAVAILABLE,
+                True,
+                "no ingest endpoint at this URL (HTTP 404)",
             )
         elif status == 429:
             code, retryable, message = (ErrorCode.RATE_LIMITED, True, "rate limited (HTTP 429)")

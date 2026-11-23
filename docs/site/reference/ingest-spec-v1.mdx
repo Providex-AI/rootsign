@@ -310,6 +310,7 @@ code to name.
 | `200` | Batch processed; per-element outcomes in the body | per-element `error_code` |
 | `400` | Request body was not a valid batch (not a JSON array, empty, unparseable) | `VALIDATION_ERROR`, non-retryable |
 | `401` / `403` | Missing, malformed, or rejected API key | `VALIDATION_ERROR`, non-retryable. The v1 registry has no auth-specific code and adding one is a version event (§9.3). The client MUST NOT retry and MUST NOT log the key |
+| `404` without a batch response | No ingest endpoint at this URL: a wrong `ROOTSIGN_CLOUD_URL`, or nothing deployed there | `STORE_UNAVAILABLE`, retryable. It is not a decision about the records, so the client treats it as an outage and spools them. A `404` whose body is a batch response keeps its per-element codes |
 | `413` | Batch exceeds the server's element or byte limit | `VALIDATION_ERROR`, non-retryable; client splits and resends |
 | `429` | Throttled | `RATE_LIMITED`, retryable |
 | `5xx` | Server fault | `STORE_UNAVAILABLE` (502/503/504) or `INTERNAL_ERROR` (500), retryable |
