@@ -57,11 +57,12 @@ def mock_ingest() -> Iterator[tuple[str, MockIngestStore]]:
             body = self.rfile.read(int(self.headers.get("content-length", 0)))
             if self.path in ("/_sever", "/_restore"):
                 state["down"] = self.path == "/_sever"
-                return self._reply(200, b"{}")
-            if state["down"]:
-                return self._reply(503, b"{}")
-            response = store(httpx.Request("POST", f"http://mock{self.path}", content=body))
-            self._reply(response.status_code, response.content)
+                self._reply(200, b"{}")
+            elif state["down"]:
+                self._reply(503, b"{}")
+            else:
+                response = store(httpx.Request("POST", f"http://mock{self.path}", content=body))
+                self._reply(response.status_code, response.content)
 
     with _serve(Handler) as base:
         yield f"{base}/v1", store
