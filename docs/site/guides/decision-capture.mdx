@@ -1,0 +1,151 @@
+---
+title: "Record why an agent chose each action"
+sidebarTitle: "Capture decisions"
+description: "Use ctx.record_decision() to store the action an agent chose, its reasoning and confidence, linked to the next tool call, and set how much reasoning is kept."
+keywords: ["decision capture", "record_decision", "ROOTSIGN_CAPTURE_DECISIONS", "ROOTSIGN_REASONING_DEPTH", "reasoning", "confidence"]
+---
+
+A tool call record says what the agent did. A decision record says why: the action it chose, a summary of its reasoning, how confident it was, and the alternatives it weighed. RootSign links each decision to the next tool call in the session, so a reviewer reads the two together. Decision capture is off by default, because reasoning text is where personal data tends to collect and RootSign does not redact it.
+
+## Record a decision
+
+<Steps>
+  <Step title="Turn capture on">
+    ```bash
+    export ROOTSIGN_CAPTURE_DECISIONS=true
+    ```
+
+    You can also set it in code, before `rootsign.init()` runs. Settings are read when `init()` runs, as [Configuration](/reference/configuration#how-settings-are-read) explains.
+  </Step>
+  <Step title="Record the decision before the tool call">
+    Call `ctx.record_decision()` just before the tool call it explains:
+
+    ```python refund.py
+    import asyncio
+
+    import rootsign
+
+    rootsign.init(agent="refund-agent", risk_tier="high")
+
+
+    @rootsign.trace()
+    async def issue_refund(order_id: str, amount: float) -> str:
+        return f"refunded {amount:.2f} on {order_id}"
+
+
+    async def main() -> None:
+        async with rootsign.session(objective="handle a refund request") as ctx:
+            await ctx.record_decision(
+                selected_action="issue_refund",
+                reasoning_summary="Order is 12 days old, inside the 30-day window, and under the 100.00 auto-refund limit.",
+                confidence=0.92,
+                alternatives_considered=["escalate_to_human", "deny_refund"],
+            )
+            print(await issue_refund("ord-1042", 49.00))
+        print(ctx.session_id)
+
+
+    asyncio.run(main())
+    ```
+  </Step>
+  <Step title="Run it">
+    ```bash
+    python refund.py
+    ```
+
+    ```text
+    refunded 49.00 on ord-1042
+    d2d0a63a-8083-4652-8010-5ec92dee8132
+    ```
+  </Step>
+  <Step title="Check what was stored">
+    The session file now has a decision record ahead of the action, and the action carries the decision's ID:
+
+    ```json DECISION_RECORD
+    {"event_type": "DECISION_RECORD",
+     "decision_id": "f3702c51-083d-4e8a-b63d-72574e40eaae",
+     "payload": {"selected_action": "issue_refund",
+                 "reasoning_summary": "Order is 12 days old, inside the 30-day window, and under the 100.00 auto-refund limit.",
+                 "confidence": 0.92,
+                 "alternatives_considered": [],
+                 "reasoning_depth": "summary",
+                 "reasoning_captured": true}}
+    ```
+
+    ```json ACTION_RECORD
+    {"event_type": "ACTION_RECORD",
+     "tool_name": "issue_refund",
+     "sequence_number": 1,
+     "decision_id": "f3702c51-083d-4e8a-b63d-72574e40eaae"}
+    ```
+
+    `alternatives_considered` is empty: at the default depth, `summary`, alternatives are not kept. Run it with `ROOTSIGN_REASONING_DEPTH=full` and the record keeps both.
+  </Step>
+</Steps>
+
+## How a decision links to an action
+
+- **The next action recorded in the session takes the decision.** It gets the decision's ID as its `decision_id`. The link is by order: `selected_action` is stored as you wrote it and is not compared with the tool that runs.
+- **One decision links to one action.** An action after that has `decision_id: null` until you record another decision. To explain several tool calls, record a decision before each one.
+- **A second decision replaces the first.** If you call `record_decision()` twice with no tool call between them, both decisions are stored, and the next action links to the second. The first is linked to nothing.
+- **A call held for approval takes it too.** With `require_approval=True`, the pending action carries the `decision_id`, so the decision, the held call and the [approval](/guides/human-approval) read in order.
+
+## How much reasoning is kept
+
+`ROOTSIGN_REASONING_DEPTH` decides: `minimal` keeps only the chosen action and the confidence, `summary` (the default) also keeps the first 500 characters of the reasoning, and `full` keeps up to 10,000 characters and the alternatives. [Configuration](/reference/configuration#decision-capture) has the table.
+
+Each decision stores the depth it was captured at as `reasoning_depth`, so a reader can tell a summary that `minimal` dropped from one that was never given. `reasoning_captured` is `true` when a summary was kept.
+
+<Info>
+  The PostgreSQL backend stores `reasoning_depth` after RootSign 0.3.1. Run `rootsign-admin init` after upgrading to add the column; decisions recorded earlier have no depth. In 0.3.1 and earlier, only the JSONL backend kept it.
+</Info>
+
+## Values that are not recorded
+
+| Field | Allowed values |
+| --- | --- |
+| `selected_action` | Required, 1 to 200 characters |
+| `confidence` | `0.0` to `1.0`, or `None` |
+| `reasoning_summary` | Any text, cut to the depth's limit |
+| `alternatives_considered` | A list of strings |
+
+A decision outside these limits is not recorded, on any backend. `record_decision()` returns `None`, the next action has no `decision_id`, and RootSign logs one warning that names the field. It does not raise, so the agent keeps running:
+
+```text
+rootsign: decision not recorded (confidence: Input should be less than or equal to 1); the next action is not linked to one
+```
+
+<Info>
+  Checking decisions on every backend was added after RootSign 0.3.1. In 0.3.1 and earlier, the JSONL backend stored values such as `confidence=1.5`, and PostgreSQL refused them with a longer warning.
+</Info>
+
+## When capture is off
+
+`record_decision()` does nothing and returns `None`, and the session has no decision records. You can leave the calls in code that runs with capture on in one environment and off in another.
+
+## What gets recorded
+
+| Record | Fields |
+| --- | --- |
+| Decision record | `decision_id`, `selected_action`, `reasoning_summary`, `confidence`, `alternatives_considered`, `reasoning_depth`, `reasoning_captured`, `timestamp` |
+| The next action | `decision_id`, the link to the decision |
+| [Evidence bundle](/reference/evidence-bundle#timeline-json) | A `DECISION` entry in `timeline.json` and the report, before the action it explains |
+
+When you export with `--redact-previews`, the bundle leaves out `reasoning_summary` and `alternatives_considered`, and keeps the chosen action and the confidence.
+
+## What it does not do
+
+- **It is not in the hash chain.** Decision records and an action's `decision_id` sit outside the chain, by design ([ADR-008](https://github.com/Providex-AI/rootsign/blob/main/docs/adr/ADR-008-decision-capture.md)). Editing a decision's reasoning, or which decision an action points to, still verifies as `VALID`. Verification proves the actions; treat decisions as the narrative around them.
+- **It does not redact.** [Redaction configs](/guides/redaction) apply to tool inputs and outputs, not to decision text. Keep personal data out of `reasoning_summary`, or leave capture off.
+- **It does not read the model's reasoning for you.** You pass the summary. RootSign does not extract it from a model response, and it does not store the prompt.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Configuration" icon="settings" href="/reference/configuration#decision-capture">
+    The capture and depth settings, and when they are read.
+  </Card>
+  <Card title="Python API" icon="code" href="/reference/python-api#ctx-record-decision">
+    The `ctx.record_decision()` signature.
+  </Card>
+</Columns>

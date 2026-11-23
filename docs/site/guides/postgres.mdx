@@ -1,0 +1,157 @@
+---
+title: "Run RootSign on PostgreSQL with TimescaleDB"
+sidebarTitle: "Run on PostgreSQL"
+description: "Move RootSign from local JSONL files to PostgreSQL with TimescaleDB: start the database, create the tables, switch the backend, and verify sessions by ID."
+keywords: ["postgresql", "timescaledb", "ROOTSIGN_BACKEND", "rootsign-admin", "start-db", "init", "DATABASE_URL", "production backend"]
+---
+
+The default JSONL backend writes each session to a file on the machine that ran it. The PostgreSQL backend keeps every session in one database: agents on several machines record to the same place, `rootsign approve` can answer a held call from another terminal, and sessions are verified and exported by ID. RootSign needs PostgreSQL 16 with the TimescaleDB extension. Your instrumentation code does not change.
+
+## When to switch
+
+| You need | JSONL | PostgreSQL |
+| --- | --- | --- |
+| Sessions from several machines or containers in one place | One folder of files per machine | One database |
+| Several processes writing at once | One writer per data folder: nothing locks the shared agent registry between processes | Supported |
+| Approving a held call from another terminal | An inline prompt in the agent's own terminal | [`rootsign approve`](/guides/human-approval) |
+| Verifying or exporting a session | By file path, with `--local` | By session ID |
+
+## Set it up
+
+<Steps>
+  <Step title="Install the PostgreSQL extra">
+    ```bash
+    pip install 'rootsign[postgres]'
+    ```
+  </Step>
+  <Step title="Start a database">
+    `start-db` runs PostgreSQL 16 with TimescaleDB in Docker, in a container named `rootsign-timescaledb`:
+
+    ```bash
+    rootsign-admin start-db
+    ```
+
+    ```text
+    Pulling timescale/timescaledb:latest-pg16 and starting rootsign-timescaledb on port 5432...
+    Waiting for Postgres to accept connections...
+    Ready. Next: `rootsign-admin init`
+    ```
+
+    The data lives in a Docker volume named `rootsign_pgdata`, so it survives `rootsign-admin stop-db --remove`. The database is for a laptop: its user and password are both `rootsign`. To use a database you already run, skip this step and see [Use your own database](#use-your-own-database).
+  </Step>
+  <Step title="Create the tables">
+    ```bash
+    rootsign-admin init
+    ```
+
+    ```text
+    Running alembic upgrade head...
+    Done in 0.40s
+    ```
+
+    Run it again after each RootSign upgrade. It brings the tables up to date and leaves an up-to-date database as it is.
+  </Step>
+  <Step title="Switch the backend">
+    ```bash
+    export ROOTSIGN_BACKEND=postgres
+    ```
+
+    Or put `ROOTSIGN_BACKEND=postgres` in a `.env` file in the directory you run from. [Configuration](/reference/configuration#how-settings-are-read) explains where settings come from.
+  </Step>
+  <Step title="Run your agent">
+    Run the same script as before. The [quickstart's](/quickstart) `agent.py`, unchanged:
+
+    ```bash
+    python agent.py
+    ```
+
+    ```text
+    4af82f32-29fe-4af1-97ba-6e950922ed65
+    ```
+
+    The first session registers the agent in the `agents` table. Later runs with the same `agent` name and `environment` reuse it.
+  </Step>
+  <Step title="Verify the session by ID">
+    ```bash
+    rootsign verify 4af82f32-29fe-4af1-97ba-6e950922ed65
+    ```
+
+    ```text
+    VALID ✓  —  2 records, chain intact
+      Session:  4af82f32-29fe-4af1-97ba-6e950922ed65
+    ```
+
+    `rootsign export <session_id>` builds an [evidence bundle](/guides/evidence-bundles) from the database the same way.
+  </Step>
+  <Step title="Check what is stored">
+    `rootsign-admin status` counts the rows in each table:
+
+    ```bash
+    rootsign-admin status
+    ```
+
+    ```text
+    table                rows
+    --------------------------
+    agents                  1
+    sessions                1
+    decisions               0
+    actions                 2
+    approvals               0
+    policies                0
+    incidents               0
+    ```
+  </Step>
+</Steps>
+
+## Use your own database
+
+Point RootSign at any PostgreSQL 16 server with TimescaleDB 2 installed. It reads two connection URLs, one per driver, and both should name the same database:
+
+```bash
+export DATABASE_URL="postgresql+asyncpg://<user>:<password>@<host>:5432/<database>"
+export DATABASE_URL_SYNC="postgresql+psycopg2://<user>:<password>@<host>:5432/<database>"
+rootsign-admin init
+```
+
+| Setting | Used by |
+| --- | --- |
+| `DATABASE_URL` | Your agent, through the SDK |
+| `DATABASE_URL_SYNC` | `rootsign-admin init` and `status` |
+
+`init` turns the TimescaleDB extension on if it is installed but not enabled. On a server without TimescaleDB, `init` stops with this error and exits `1`; the extension is what is missing, even though the hint mentions the server:
+
+```text
+Error: cannot use the database at postgresql+psycopg2://<user>:***@<host>:5432/<database>: extension "timescaledb" is not available. Check that it is running and that DATABASE_URL_SYNC points at it.
+```
+
+In a real deployment, also set `ENVIRONMENT=production`. RootSign then refuses to start with the default URLs, which point at the laptop database, instead of writing records there. [Configuration](/reference/configuration#environment) has this and the connection pool settings.
+
+## What changes and what stays
+
+- **Your code stays the same.** `init()`, `session()`, `@rootsign.trace()` and `wrap_tools()` work as they do on JSONL.
+- **Commands take a session ID.** `rootsign verify <session_id>` and `rootsign export <session_id>` read from the database, without `--local`.
+- **Existing JSONL sessions stay in their files.** Switching backends does not move them. Verify them with `rootsign verify --local <path>` as before.
+- **Verdicts are the same.** Both backends use the same hash formula, so a session verifies the same way in a file or in the database.
+
+## If the database cannot be used
+
+- **The tables do not exist.** If `rootsign-admin init` was never run against the database, `rootsign.session()` raises `RecordPersistenceError` and the session body does not run. The message names the missing table:
+
+  ```text
+  rootsign.errors.RecordPersistenceError: session could not be opened (ProgrammingError: ... relation "agents" does not exist ...). Nothing was recorded, and the session body did not run.
+  ```
+- **The database is down when a session opens.** `session()` raises `RecordPersistenceError` the same way, chained from the connection error. See [Errors](/reference/errors#recordpersistenceerror).
+- **The database fails during a session.** A tool call whose record cannot be written still runs and returns its result; RootSign logs a warning. Calls held for approval are the exception: they do not run without a record.
+- **The CLI cannot reach it.** `rootsign verify` exits `3` with a one-line error, so an outage never reads as `TAMPERED`. The [CLI reference](/reference/cli-rootsign#rootsign-verify) lists the messages.
+
+## Related
+
+<Columns cols={2}>
+  <Card title="rootsign-admin" icon="terminal" href="/reference/cli-rootsign-admin">
+    Every option of `start-db`, `stop-db`, `init` and `status`.
+  </Card>
+  <Card title="Require human approval" icon="user-check" href="/guides/human-approval">
+    Hold a tool call until someone approves it from another terminal.
+  </Card>
+</Columns>
