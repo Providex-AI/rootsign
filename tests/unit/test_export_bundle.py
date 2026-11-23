@@ -201,6 +201,7 @@ class TestPreviewHonesty:
         # `inputs_summary` is absent because this session did not record one —
         # only fields that actually held something are named as withheld.
         assert timeline["previews"]["withheld_fields"] == [
+            "alternatives_considered",
             "context_presented",
             "input_preview",
             "output_preview",
@@ -230,6 +231,23 @@ class TestPreviewHonesty:
         assert bundle.verification["verdict"] == "VALID"
         assert all(r["self_hash"] for r in bundle.verification["records"])
         assert "[REDACTED]" in json.dumps(bundle.redaction)
+
+    def test_redact_previews_withholds_the_alternatives_a_decision_considered(self, tmp_path):
+        """`alternatives_considered` is free text the model writes, kept only
+        at `ROOTSIGN_REASONING_DEPTH=full`, the most verbose depth. It is not
+        demonstrably metadata, so it goes with the reasoning beside it."""
+        from rootsign.sdk.report import attach_reports
+
+        path = write_session_file(tmp_path, actions=1, decision=True)
+        bundle = attach_reports(export_local(path, redact_previews=True))
+
+        (decision,) = [e for e in bundle.timeline["events"] if e["type"] == "DECISION"]
+        assert "alternatives_considered" not in decision
+        assert decision["selected_action"]  # the choice itself is kept
+        assert "alternatives_considered" in bundle.timeline["previews"]["withheld_fields"]
+        haystack = "\n".join(bundle.files().values())
+        for alternative in ("auto_approve", "reject"):
+            assert f'"{alternative}"' not in haystack
 
     def test_the_withheld_fields_are_named_rather_than_silently_absent(self, tmp_path):
         """A reader who cannot tell whether a field was stripped or never
