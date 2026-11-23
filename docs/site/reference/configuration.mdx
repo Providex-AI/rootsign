@@ -51,7 +51,7 @@ BACKEND
   | `postgres` | PostgreSQL with TimescaleDB, at `DATABASE_URL` | `pip install 'rootsign[postgres]'` |
   | `cloud` | The hosted ingest endpoint, **preview** | `pip install 'rootsign[cloud]'` |
 
-  `local` is a deprecated name for `postgres`, and prints a `FutureWarning`. With `rootsign.init()`, use `jsonl` or `postgres`: `cloud` is refused with a `ValueError` when the first session opens. While the hosted endpoint is in preview, the cloud transport is used through an explicit `HttpIngestClient`.
+  `local` is a deprecated name for `postgres`, and prints a `FutureWarning`. With `cloud`, RootSign cannot register the agent, because the hosted backend issues agent IDs: pass the ID with `rootsign.session(agent_id=...)`. A session opened without one raises `ValueError`.
 </ResponseField>
 
 <ResponseField name="ROOTSIGN_DATA_DIR" type="path" default="~/.rootsign">

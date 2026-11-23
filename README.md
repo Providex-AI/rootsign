@@ -404,7 +404,16 @@ For bundles leaving the building, `--redact-previews` withholds every field that
 
 ## Offline & sync (cloud mode)
 
-Set `ROOTSIGN_BACKEND=cloud` and records go to the hosted ingest endpoint (`pip install 'rootsign[cloud]'`). The interesting part is what happens when that endpoint is not there.
+Set `ROOTSIGN_BACKEND=cloud` and records go to the hosted ingest endpoint (`pip install 'rootsign[cloud]'`). The hosted backend issues agent IDs, so RootSign cannot register the agent itself: pass its ID to the session.
+
+```python
+rootsign.init(agent="invoice-agent")
+
+async with rootsign.session(agent_id=AGENT_ID, objective="invoice ACME"):
+    ...
+```
+
+The interesting part is what happens when that endpoint is not there.
 
 **Nothing is lost, and the agent never notices.** When retries are exhausted, the SDK fails over to the same append-only writer the local backend uses, rooted at `$ROOTSIGN_DATA_DIR/spool/`. One WARNING is logged — not one per record — and your tool calls keep returning their real results, because an audit layer that halts the business it observes has inverted its own value.
 
