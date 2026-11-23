@@ -23,6 +23,7 @@ from rootsign._version import SDK_VERSION
 from rootsign.ingest.schemas import SCHEMA_VERSION, EventType
 from rootsign.sdk.client import IngestClient
 from rootsign.sdk.context import SessionContext
+from rootsign.sdk.decorator import _warn_if_refused
 
 logger = logging.getLogger("rootsign.sdk.session")
 
@@ -146,7 +147,7 @@ async def session(
 
         should_open = await ctx.mark_session_open()
         if should_open:
-            await client.handle(
+            response = await client.handle(
                 {
                     **base,
                     "event_type": EventType.SESSION_OPEN.value,
@@ -158,6 +159,7 @@ async def session(
                     },
                 }
             )
+            _warn_if_refused(response, f"SESSION_OPEN for session {ctx.session_id}")
     except Exception as exc:
         if owns_client:
             await _close_quietly(facade, client)
@@ -199,7 +201,7 @@ async def session(
         # Best-effort SESSION_CLOSE — log but never swallow the original
         # exception from inside the `with` body.
         try:
-            await client.handle(
+            response = await client.handle(
                 {
                     **base,
                     "event_type": EventType.SESSION_CLOSE.value,
@@ -211,6 +213,7 @@ async def session(
                     },
                 }
             )
+            _warn_if_refused(response, f"SESSION_CLOSE for session {ctx.session_id}")
         except Exception as close_err:  # noqa: BLE001
             logger.warning(
                 "rootsign SESSION_CLOSE emit failed for session %s: %s",
