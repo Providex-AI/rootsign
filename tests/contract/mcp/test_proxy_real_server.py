@@ -29,7 +29,8 @@ from __future__ import annotations
 import asyncio
 import json
 import socket
-from contextlib import asynccontextmanager
+from collections.abc import Iterator
+from contextlib import asynccontextmanager, contextmanager
 from uuid import uuid4
 
 import httpx
@@ -85,10 +86,25 @@ def _billing_server(**settings) -> FastMCP:
     return server
 
 
+class _TestServer(uvicorn.Server):
+    """A uvicorn server that leaves the process's signal handlers alone.
+
+    sse-starlette ends every SSE stream in the process once it sees "the"
+    uvicorn server exiting, and it finds that server through the SIGTERM
+    handler `serve()` installs. Stopping one test's server then cut short the
+    SSE replies of every server started after it, in later tests too. A test
+    server is never stopped by a signal, so it has no reason to install one.
+    """
+
+    @contextmanager
+    def capture_signals(self) -> Iterator[None]:
+        yield
+
+
 @asynccontextmanager
 async def _serving(app):
     port = _free_port()
-    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error"))
+    server = _TestServer(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error"))
     task = asyncio.create_task(server.serve())
     while not server.started:
         await asyncio.sleep(0.02)
@@ -138,3 +154,25 @@ async def test_a_real_client_calls_a_real_server_through_the_proxy(mode, upstrea
     assert reply["result"]["content"][0]["text"] == "invoice sent to acme-corp for $1,500.00"
 
     assert verify_session_local(str(session_file)).verdict is Verdict.VALID
+
+
+async def test_a_test_servers_shutdown_does_not_end_every_later_stream():
+    """sse-starlette keeps one process-wide shutdown flag, `AppStatus.should_exit`.
+    A watcher finds "the" uvicorn server through the process's SIGTERM handler
+    and, once that server is told to exit, sets the flag, after which every SSE
+    stream in the process ends before its first event. A test server that
+    installed signal handlers therefore broke the next test's SSE replies:
+    `stateful-sse-redirected` runs right after `stateful-sse-direct`, and failed
+    in CI whenever the watcher polled before the first test's loop closed."""
+    from sse_starlette.sse import AppStatus
+
+    try:
+        async with _serving(_billing_server().streamable_http_app()) as base:
+            async with httpx.AsyncClient() as raw:
+                reply = await raw.post(base + "/mcp", json=_INITIALIZE, headers=_ACCEPT)
+            assert reply.status_code == 200  # an SSE reply: the watcher is now running
+        await asyncio.sleep(1.2)  # longer than the watcher's 0.5 s poll
+
+        assert AppStatus.should_exit is False
+    finally:
+        AppStatus.should_exit = False  # never let a regression break later tests

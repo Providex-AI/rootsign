@@ -188,6 +188,14 @@ async def get_or_register_agent(
         )
         return UUID(str(created["agent_id"]))
 
+    if settings.BACKEND == "cloud":
+        # The old message, "rootsign.init() does not support ... cloud", read
+        # as "cloud does not work with init()". It does, given the agent's ID.
+        raise ValueError(
+            "ROOTSIGN_BACKEND=cloud: RootSign cannot register this agent, because the "
+            "hosted backend issues agent IDs. Pass its ID with "
+            "rootsign.session(agent_id=...)."
+        )
     if settings.BACKEND != "postgres":
         raise ValueError(
             f"rootsign.init() does not support ROOTSIGN_BACKEND={settings.BACKEND!r}. "

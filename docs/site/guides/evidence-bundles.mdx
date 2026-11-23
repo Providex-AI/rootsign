@@ -111,7 +111,7 @@ If a file was changed, `--check` names it and exits `1`:
 
 ## Withhold stored content before sharing
 
-When a bundle leaves your organisation, `--redact-previews` leaves out the stored content of the session: the tool arguments and results, the context a person saw when approving, and captured decision summaries.
+When a bundle leaves your organisation, `--redact-previews` leaves out the stored content of the session: the tool arguments and results, the context a person saw when approving, and captured decision summaries with the alternatives they considered.
 
 ```bash
 rootsign export --local ~/.rootsign/sessions/<session_id>.jsonl --out ./outgoing --redact-previews

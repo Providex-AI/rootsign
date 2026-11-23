@@ -18,9 +18,11 @@ a marker.
 from __future__ import annotations
 
 import asyncio
-
+import logging
 from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
 
+from rootsign.ingest.schemas import ErrorCode, IngestResponse
 from rootsign.sdk.buffered_client import BufferedIngestClient, _BufferedResponse, _should_buffer
 from rootsign.sdk.client import IngestClient
 
@@ -250,4 +252,104 @@ class TestSelectivePassthrough:
         assert sent[0]["payload"]["seq"] == 1
         assert sent[1]["payload"]["seq"] == 2
         assert sent[2]["event_type"] == "SESSION_CLOSE"
+        await client.close()
+
+
+# --------------------------------------------------------------------------
+# A flush that is already sending
+# --------------------------------------------------------------------------
+
+
+class _SlowStore(IngestClient):
+    """An inner that takes time per record and, like the real store, refuses
+    an action once its session is closed.
+
+    The `asyncio.sleep` is the point: the PostgreSQL client awaits the network
+    for every record, so a flush is still sending when other code runs. The
+    JSONL client never yields mid-batch, which is why it hid the race.
+    """
+
+    def __init__(self, delay: float = 0.02) -> None:
+        self.delay = delay
+        self.stored: list[dict] = []
+        self.closed = False
+        self.receiving = asyncio.Event()
+
+    async def handle(self, envelope: dict) -> IngestResponse:
+        self.receiving.set()
+        await asyncio.sleep(self.delay)
+        if envelope["event_type"] == "ACTION_RECORD" and self.closed:
+            return IngestResponse.rejected(
+                event_id=uuid4(),
+                error_code=ErrorCode.SESSION_CLOSED,
+                error_message="session is closed",
+                retryable=False,
+            )
+        if envelope["event_type"] == "SESSION_CLOSE":
+            self.closed = True
+        self.stored.append(envelope)
+        return IngestResponse.accepted(event_id=uuid4())
+
+
+class TestFlushWhileSending:
+    async def test_flush_waits_for_a_batch_already_being_sent(self):
+        # The background loop takes the whole buffer, then sends it record by
+        # record. A flush that finds the buffer empty must still wait for that
+        # batch, or SESSION_CLOSE overtakes it and the store refuses the rest.
+        store = _SlowStore()
+        client = BufferedIngestClient(store, flush_interval_seconds=0.01)
+        for i in range(5):
+            await client.handle(auto_action(i))
+        await store.receiving.wait()  # the background flush is mid-batch
+
+        await client.handle({"event_type": "SESSION_CLOSE", "payload": {}})
+
+        assert [e["event_type"] for e in store.stored] == ["ACTION_RECORD"] * 5 + ["SESSION_CLOSE"]
+        await client.close()
+
+    async def test_close_waits_for_a_batch_already_being_sent(self):
+        # Cancelling the background task mid-send dropped the unsent rest of
+        # its batch, which existed only inside that flush.
+        store = _SlowStore()
+        client = BufferedIngestClient(store, flush_interval_seconds=0.01)
+        for i in range(5):
+            await client.handle(auto_action(i))
+        await store.receiving.wait()
+
+        await client.close()
+
+        assert len(store.stored) == 5
+
+    async def test_a_refused_record_is_logged(self, caplog):
+        store = _SlowStore(delay=0)
+        store.closed = True
+        client = BufferedIngestClient(store, flush_interval_seconds=999)
+        await client.handle(auto_action(1))
+
+        with caplog.at_level(logging.WARNING, logger="rootsign.sdk.buffered_client"):
+            await client.flush()
+
+        assert "SESSION_CLOSED" in caplog.text
+        assert "not recorded" in caplog.text
+        await client.close()
+
+    async def test_a_retryable_refusal_is_sent_again(self):
+        # A retryable rejection is a record the store did not take; counting
+        # it as delivered lost it.
+        inner = _sequential_inner()
+        inner.handle.side_effect = [
+            IngestResponse.rejected(
+                event_id=uuid4(),
+                error_code=ErrorCode.STORE_UNAVAILABLE,
+                error_message="store busy",
+                retryable=True,
+            ),
+            MagicMock(status="accepted"),
+        ]
+        client = BufferedIngestClient(inner, max_retries=3, flush_interval_seconds=999)
+        await client.handle(auto_action(1))
+        await client.flush()
+
+        assert inner.handle.call_count == 2
+        assert len(client._buffer) == 0
         await client.close()
