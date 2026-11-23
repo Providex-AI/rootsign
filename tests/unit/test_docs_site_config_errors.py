@@ -403,6 +403,11 @@ def test_the_cloud_approval_message():
     assert output_after(ERRORS, "On the cloud transport:") == [cloud]
 
 
+def test_the_own_transaction_approval_message():
+    message = str(errors.HiTLUnsupportedBackendError("wire_transfer", backend="transaction"))
+    assert output_after(ERRORS, "With a client bound to your own transaction:") == [message]
+
+
 def test_not_initialised_is_raised_with_the_documented_message(tmp_path):
     source = """
         import asyncio, rootsign

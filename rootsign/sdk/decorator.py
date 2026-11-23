@@ -598,6 +598,13 @@ async def _emit_hitl_action(
         from rootsign.errors import HiTLUnsupportedBackendError
 
         raise HiTLUnsupportedBackendError(tool_name, backend="cloud")
+    # A LocalIngestClient writes into the caller's transaction, which is not
+    # committed while the call waits: nobody could see the pending record to
+    # approve it, and the hold ended in a misleading ActionNotFoundError.
+    if _is_caller_transaction(client):
+        from rootsign.errors import HiTLUnsupportedBackendError
+
+        raise HiTLUnsupportedBackendError(tool_name, backend="transaction")
 
     # Lazy imports — HiTL is a Sprint 4 surface and pulling these at
     # module load would pessimize cold start for non-HiTL users.
@@ -699,6 +706,14 @@ def _is_jsonl_backend(client: IngestClient) -> bool:
 
     inner = getattr(client, "_inner", None)
     return isinstance(client, JsonlIngestClient) or isinstance(inner, JsonlIngestClient)
+
+
+def _is_caller_transaction(client: IngestClient) -> bool:
+    """True if *client* is (or wraps) a LocalIngestClient on the caller's session."""
+    from rootsign.sdk.client import LocalIngestClient
+
+    inner = getattr(client, "_inner", None)
+    return isinstance(client, LocalIngestClient) or isinstance(inner, LocalIngestClient)
 
 
 def _is_cloud_backend(client: IngestClient) -> bool:
