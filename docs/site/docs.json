@@ -33,7 +33,7 @@
           },
           {
             "group": "Guides",
-            "pages": ["guides/verify", "guides/evidence-bundles", "guides/human-approval", "guides/redaction", "guides/decision-capture", "guides/postgres", "guides/batching", "guides/cloud-and-sync"]
+            "pages": ["guides/verify", "guides/evidence-bundles", "guides/human-approval", "guides/redaction", "guides/decision-capture", "guides/postgres", "guides/without-init", "guides/batching", "guides/cloud-and-sync"]
           }
         ]
       },

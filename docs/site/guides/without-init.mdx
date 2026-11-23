@@ -1,0 +1,193 @@
+---
+title: "Use RootSign without init(): your own agents and clients"
+sidebarTitle: "Without init()"
+description: "Record for several agents in one process, or write records inside your own database transaction, by passing an agent ID and an ingest client to session()."
+keywords: ["register_agent", "LocalIngestClient", "ManagedLocalIngestClient", "explicit API", "several agents", "transaction", "agent_id"]
+---
+
+`rootsign.init()` configures one agent for the whole process and builds the client that stores its records. Two jobs need more control: recording for several agents from one process, and writing records inside a database transaction you own. For both, pass the agent's ID and an ingest client to `rootsign.session()` yourself. Everything inside the session, `@rootsign.trace()` and `wrap_tools()` included, then uses them. This page uses the [PostgreSQL backend](/guides/postgres).
+
+Arguments you pass always win over `init()`. A session given both `agent_id=` and `client=` needs no `init()` at all.
+
+## Record for several agents in one process
+
+<Steps>
+  <Step title="Register each agent once">
+    `register_agent()` stores an agent and returns it. Registration is a one-time setup step, so run it once and keep the IDs. This script saves them to `agents.json`:
+
+    ```python register.py
+    import asyncio
+    import json
+
+    import rootsign
+    from rootsign import AgentEnvironment, AgentFramework, AgentRiskTier
+
+
+    async def main() -> None:
+        ids = {}
+        for name in ("billing-agent", "refund-agent"):
+            agent = await rootsign.register_agent(
+                name=name,
+                owner="platform-team",
+                environment=AgentEnvironment.PRODUCTION,
+                risk_tier=AgentRiskTier.HIGH,
+                framework=AgentFramework.CUSTOM,
+            )
+            ids[name] = str(agent.agent_id)
+        with open("agents.json", "w") as f:
+            json.dump(ids, f, indent=2)
+        print(json.dumps(ids, indent=2))
+
+
+    asyncio.run(main())
+    ```
+
+    ```bash
+    python register.py
+    ```
+
+    ```text
+    {
+      "billing-agent": "e549fec8-19d5-4ca7-b30b-e92e89653bf4",
+      "refund-agent": "3a9bc0f5-88d0-424a-acb7-4328bcdc99e9"
+    }
+    ```
+
+    Running it again does not register the agents twice. It stops with an error that gives the ID you already have:
+
+    ```text
+    ValueError: register_agent(): an agent named 'billing-agent' is already registered in 'production' (agent_id=e549fec8-19d5-4ca7-b30b-e92e89653bf4). Registration is a one-time setup step: pass that ID to rootsign.session(agent_id=...), or let rootsign.init(agent='billing-agent', environment='production') reuse it.
+    ```
+  </Step>
+  <Step title="Open a session per agent">
+    Pass each agent's ID, and a client, to `rootsign.session()`. `ManagedLocalIngestClient` is the client `init()` uses on PostgreSQL: it commits each record as it is written.
+
+    ```python agents.py
+    import asyncio
+    import json
+    from uuid import UUID
+
+    import rootsign
+    from rootsign import ManagedLocalIngestClient
+
+    with open("agents.json") as f:
+        AGENTS = {name: UUID(agent_id) for name, agent_id in json.load(f).items()}
+
+
+    @rootsign.trace()
+    async def send_invoice(customer_id: str, amount: float) -> str:
+        return "sent"
+
+
+    @rootsign.trace()
+    async def issue_refund(order_id: str, amount: float) -> str:
+        return "refunded"
+
+
+    async def main() -> None:
+        client = ManagedLocalIngestClient()
+        async with rootsign.session(agent_id=AGENTS["billing-agent"], client=client) as billing:
+            await send_invoice("acme-corp", 1500.0)
+        async with rootsign.session(agent_id=AGENTS["refund-agent"], client=client) as refunds:
+            await issue_refund("ord-1042", 49.0)
+        print("billing:", billing.session_id)
+        print("refunds:", refunds.session_id)
+
+
+    asyncio.run(main())
+    ```
+
+    ```bash
+    python agents.py
+    ```
+
+    ```text
+    billing: d70c33b2-8afb-42fb-b480-4472d9b7541f
+    refunds: 75d21ef3-edb3-4cb8-b02b-acbf9fec5556
+    ```
+  </Step>
+  <Step title="Verify each session">
+    ```bash
+    rootsign verify d70c33b2-8afb-42fb-b480-4472d9b7541f
+    ```
+
+    ```text
+    VALID ✓  —  1 records, chain intact
+      Session:  d70c33b2-8afb-42fb-b480-4472d9b7541f
+    ```
+  </Step>
+</Steps>
+
+An agent ID the store does not know is refused, and the session does not open:
+
+```text
+rootsign.errors.RecordPersistenceError: session could not be opened (the store refused SESSION_OPEN: UNKNOWN_AGENT: agent_id=<agent_id> not registered). Nothing was recorded, and the session body did not run.
+```
+
+<Info>
+  The clear errors for registering an agent twice and for an unknown agent ID were added after RootSign 0.3.1. In 0.3.1 and earlier, a second `register_agent()` failed with a raw `IntegrityError`, and a session for an unknown agent ran with every record refused.
+</Info>
+
+## Write records inside your own transaction
+
+`LocalIngestClient(db=...)` writes into an `AsyncSession` you own, and you decide when to commit:
+
+```python own_transaction.py
+import asyncio
+import json
+from uuid import UUID
+
+import rootsign
+from rootsign import LocalIngestClient
+from rootsign.database import AsyncSessionLocal
+
+with open("agents.json") as f:
+    BILLING = UUID(json.load(f)["billing-agent"])
+
+
+@rootsign.trace()
+async def send_invoice(customer_id: str, amount: float) -> str:
+    return "sent"
+
+
+async def main() -> None:
+    async with AsyncSessionLocal() as db:
+        client = LocalIngestClient(db=db)
+        async with rootsign.session(agent_id=BILLING, client=client) as ctx:
+            await send_invoice("acme-corp", 1500.0)
+        await db.commit()  # nothing is stored until you commit
+    print(ctx.session_id)
+
+
+asyncio.run(main())
+```
+
+Three rules follow from owning the transaction:
+
+- **Nothing is visible until you commit.** Another connection, `rootsign verify` included, sees no records from the session until then.
+- **A rollback discards the whole session.** Roll back instead of committing, and `rootsign verify <session_id>` prints `Error: no session <session_id> in the database` and exits `3`.
+- **Calls cannot be held for approval.** A held call's pending record would stay uncommitted, so nobody could see it to approve it. `require_approval=True` with this client raises [`HiTLUnsupportedBackendError`](/reference/errors#hitlunsupportedbackenderror) before anything is written. Use `ManagedLocalIngestClient` for held calls.
+
+<Info>
+  The approval error with your own transaction was added after RootSign 0.3.1. In 0.3.1 and earlier, the held call waited for an approval nobody could see, then failed with `ActionNotFoundError`.
+</Info>
+
+## Which client to use
+
+| Client | When records are stored | Use it for |
+| --- | --- | --- |
+| `ManagedLocalIngestClient()` | Each record is committed as it is written | Several agents, and calls held for approval |
+| `LocalIngestClient(db=...)` | When you commit the `AsyncSession` | Records that must commit or roll back with your own data |
+| `JsonlIngestClient(data_dir=...)` | Each record is appended to its session file | The JSONL backend |
+| `HttpIngestClient(...)` | Sent, or spooled when the endpoint is unreachable | The [cloud transport](/guides/cloud-and-sync), a preview |
+
+## Related
+
+<Columns cols={2}>
+  <Card title="Python API" icon="code" href="/reference/python-api#rootsign-session">
+    `session()`, its arguments and what it raises.
+  </Card>
+  <Card title="Run on PostgreSQL" icon="database" href="/guides/postgres">
+    Start the database, create the tables and switch the backend.
+  </Card>
+</Columns>
