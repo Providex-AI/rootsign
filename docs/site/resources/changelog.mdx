@@ -38,6 +38,9 @@ Every RootSign release, newest first, with the changes that matter when you upgr
   - `ctx.record_decision()` checks a decision the same way on every backend: an invalid one is not recorded and logs one warning. ([#90](https://github.com/Providex-AI/rootsign/pull/90))
   - PostgreSQL keeps each decision's `reasoning_depth`. **Run `rootsign-admin init` after upgrading** to add the column. ([#91](https://github.com/Providex-AI/rootsign/pull/91))
   - `ROOTSIGN_BACKEND=local` shows its deprecation warning by default. ([#76](https://github.com/Providex-AI/rootsign/pull/76))
+  - `rootsign.session()` raises `RecordPersistenceError`, and the body does not run, when the store refuses the session's first record, for example for an unknown agent ID. ([#101](https://github.com/Providex-AI/rootsign/pull/101))
+  - `register_agent()` for a name and environment already registered raises `ValueError` naming the existing agent ID, instead of a raw `IntegrityError`. ([#102](https://github.com/Providex-AI/rootsign/pull/102))
+  - `require_approval=True` with a `LocalIngestClient` on your own transaction raises `HiTLUnsupportedBackendError` straight away, naming `ManagedLocalIngestClient`. ([#103](https://github.com/Providex-AI/rootsign/pull/103))
 
   **Cloud transport (preview)**
 
