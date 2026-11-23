@@ -20,7 +20,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from rootsign._version import SDK_VERSION
-from rootsign.ingest.schemas import SCHEMA_VERSION, EventType
+from rootsign.ingest.schemas import SCHEMA_VERSION, ErrorCode, EventType
 from rootsign.sdk.client import IngestClient
 from rootsign.sdk.context import SessionContext
 from rootsign.sdk.decorator import _warn_if_refused
@@ -46,6 +46,45 @@ def _raise_if_storage_failure(exc: Exception) -> None:
             f"session could not be opened ({type(exc).__name__}: {exc}). "
             "Nothing was recorded, and the session body did not run."
         ) from exc
+
+
+#: Registry codes that mean a record was not delivered, rather than refused:
+#: the "retryable transient errors" of the error registry. One that reaches
+#: `session()` is the cloud transport's own account of a record it could
+#: neither send nor spool, which ROOTSIGN_ON_RECORD_LOSS governs.
+_UNDELIVERED = frozenset(
+    {
+        ErrorCode.STORE_UNAVAILABLE,
+        ErrorCode.WRITE_TIMEOUT,
+        ErrorCode.RATE_LIMITED,
+        ErrorCode.INTERNAL_ERROR,
+    }
+)
+
+
+def _raise_if_open_refused(response: Any, record: str) -> None:
+    """Fail closed when the store refuses SESSION_OPEN.
+
+    A refused open is a session that never opened, the same as one whose open
+    could not be written (above). Running the body anyway only made the store
+    refuse every record in it too (SESSION_NOT_FOUND), while the run looked
+    healthy: an unknown agent ID, or a rejected API key on the cloud transport.
+    An open that was not delivered is not a refusal: it is logged, and the
+    agent keeps running under the default ROOTSIGN_ON_RECORD_LOSS=warn.
+    """
+    if getattr(response, "status", None) != "rejected":
+        return
+    code = getattr(response, "error_code", None)
+    if code in _UNDELIVERED:
+        _warn_if_refused(response, record)
+        return
+    from rootsign.errors import RecordPersistenceError
+
+    raise RecordPersistenceError(
+        "session could not be opened (the store refused SESSION_OPEN: "
+        f"{getattr(code, 'value', code)}: {getattr(response, 'error_message', '')}). "
+        "Nothing was recorded, and the session body did not run."
+    )
 
 
 async def _close_quietly(facade: Any, client: IngestClient) -> None:
@@ -122,9 +161,11 @@ async def session(
         RootSignNotInitializedError: neither `rootsign.init()` was called nor
             both `agent_id=` and `client=` were passed.
         RecordPersistenceError: the session could not be opened, because the
-            agent could not be registered or its SESSION_OPEN could not be
+            agent could not be registered, its SESSION_OPEN could not be
             written (a data folder that is not writable, a database that is
-            down). Raised before the body runs, chained from the storage error.
+            down), or the store refused it (an agent ID it does not know).
+            Raised before the body runs, chained from the storage error when
+            there is one.
     """
     from rootsign.sdk import facade
 
@@ -159,7 +200,7 @@ async def session(
                     },
                 }
             )
-            _warn_if_refused(response, f"SESSION_OPEN for session {ctx.session_id}")
+            _raise_if_open_refused(response, f"SESSION_OPEN for session {ctx.session_id}")
     except Exception as exc:
         if owns_client:
             await _close_quietly(facade, client)

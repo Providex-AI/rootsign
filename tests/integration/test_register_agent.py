@@ -9,6 +9,10 @@ from __future__ import annotations
 
 from uuid import uuid4
 
+import pytest
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
 import rootsign
 
 
@@ -64,3 +68,64 @@ class TestRegisterAgent:
         assert agent.model_version == "gpt-4o-2026-04"
         assert agent.permitted_tools == ["send_invoice", "lookup_customer"]
         assert agent.regulatory_categories == ["SOC2", "GDPR"]
+
+
+class TestRegisteringTwice:
+    """`register_agent()` is a one-time setup step. A second call for the same
+    (name, environment) used to fail with a raw sqlalchemy IntegrityError from
+    the unique constraint, which named neither the agent nor the fix, and left
+    a caller's own transaction unusable."""
+
+    @staticmethod
+    async def _register(name: str, **kwargs):
+        return await rootsign.register_agent(
+            name=name,
+            owner="twice-team",
+            environment=rootsign.AgentEnvironment.PRODUCTION,
+            risk_tier=rootsign.AgentRiskTier.MEDIUM,
+            framework=rootsign.AgentFramework.CUSTOM,
+            **kwargs,
+        )
+
+    async def test_a_second_registration_names_the_existing_agent(self, db):
+        name = f"register-twice-{uuid4().hex[:8]}"
+        first = await self._register(name, db=db)
+
+        with pytest.raises(ValueError) as raised:
+            await self._register(name, db=db)
+
+        assert str(raised.value) == (
+            f"register_agent(): an agent named '{name}' is already registered in "
+            f"'production' (agent_id={first.agent_id}). Registration is a one-time setup "
+            "step: pass that ID to rootsign.session(agent_id=...), or let "
+            f"rootsign.init(agent='{name}', environment='production') reuse it."
+        )
+        # The caller's transaction is still usable.
+        still = (
+            await db.execute(text("SELECT count(*) FROM agents WHERE name = :n"), {"n": name})
+        ).scalar_one()
+        assert still == 1
+
+    async def test_the_same_name_in_another_environment_is_a_new_agent(self, db):
+        name = f"register-envs-{uuid4().hex[:8]}"
+        await self._register(name, db=db)
+        other = await rootsign.register_agent(
+            name=name,
+            owner="twice-team",
+            environment=rootsign.AgentEnvironment.STAGING,
+            risk_tier=rootsign.AgentRiskTier.MEDIUM,
+            framework=rootsign.AgentFramework.CUSTOM,
+            db=db,
+        )
+        assert other.environment == "staging"
+
+    async def test_without_db_the_second_call_raises_the_same(
+        self, monkeypatch, test_engine, clean_db
+    ):
+        factory = async_sessionmaker(bind=test_engine, class_=AsyncSession, expire_on_commit=False)
+        monkeypatch.setattr("rootsign.database.AsyncSessionLocal", factory)
+        name = f"register-own-{uuid4().hex[:8]}"
+        first = await self._register(name)
+
+        with pytest.raises(ValueError, match=rf"agent_id={first.agent_id}\)"):
+            await self._register(name)

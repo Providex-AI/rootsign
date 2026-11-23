@@ -56,10 +56,10 @@ async def register_agent(
     engine) pass `db=` an `AsyncSession`; the caller then owns flushing
     and committing.
 
-    The same `(name, environment)` twice will raise via the
-    `uq_agents_name_environment` unique constraint — registration is a one-shot
-    setup step. Use `get_or_register_agent` for the idempotent variant the
-    `rootsign.init()` facade needs.
+    Registration is a one-shot setup step: the same `(name, environment)`
+    twice raises `ValueError` naming the existing agent's ID, which
+    `rootsign.session(agent_id=...)` takes. `get_or_register_agent` is the
+    idempotent variant the `rootsign.init()` facade uses.
     """
     # Lazy imports — the DB stack is the postgres extra (ADR-011). Registration
     # only runs on the postgres path today; the jsonl backend gets its own
@@ -81,15 +81,45 @@ async def register_agent(
     )
 
     if db is not None:
+        await _refuse_if_registered(db, obj_in)
         agent = await agent_crud.create(db, obj_in=obj_in)
         await db.flush()
         return agent
 
     async with AsyncSessionLocal() as session:
+        await _refuse_if_registered(session, obj_in)
         agent = await agent_crud.create(session, obj_in=obj_in)
         await session.commit()
         await session.refresh(agent)
         return agent
+
+
+async def _refuse_if_registered(db: AsyncSession, obj_in: AgentCreate) -> None:
+    """Raise a clear error for an agent that is already registered.
+
+    Checked before the insert: the unique constraint alone answered with a raw
+    IntegrityError that named neither the agent nor the fix, and left a
+    caller's own transaction unusable. The constraint still backstops a race.
+    """
+    from sqlalchemy import select
+
+    from rootsign.models.agent import Agent
+
+    environment = getattr(obj_in.environment, "value", obj_in.environment)
+    existing = (
+        await db.execute(
+            select(Agent.agent_id).where(
+                Agent.name == obj_in.name, Agent.environment == environment
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        raise ValueError(
+            f"register_agent(): an agent named {obj_in.name!r} is already registered in "
+            f"{environment!r} (agent_id={existing}). Registration is a one-time setup step: "
+            "pass that ID to rootsign.session(agent_id=...), or let "
+            f"rootsign.init(agent={obj_in.name!r}, environment={environment!r}) reuse it."
+        )
 
 
 # Attributes compared for drift when an agent already exists. `name` and

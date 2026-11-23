@@ -1,47 +1,44 @@
-"""On PostgreSQL, a session for an agent the store does not know warns.
+"""On PostgreSQL, a session for an agent the store does not know does not open.
 
 Real PostgreSQL + TimescaleDB. `session(agent_id=...)` with an ID that was
-never registered: the store refuses SESSION_OPEN (UNKNOWN_AGENT), then every
-action (SESSION_NOT_FOUND) and the close. Each refusal used to reach only
-DEBUG, so the run looked healthy while nothing was stored.
+never registered: the store refuses SESSION_OPEN (UNKNOWN_AGENT). The session
+used to run anyway, and the store then refused every action
+(SESSION_NOT_FOUND) and the close, so the run looked healthy while nothing was
+stored. Now `session()` raises RecordPersistenceError and the body does not run.
 """
 
 from __future__ import annotations
 
-import logging
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import text
 
 import rootsign
+from rootsign.errors import RecordPersistenceError
 from rootsign.sdk.client import LocalIngestClient
+from tests.support.docs_pages import output_after
 
 pytestmark = pytest.mark.integration
 
 
-async def test_an_unknown_agent_warns_for_every_record(clean_db, caplog):
+async def test_an_unknown_agent_fails_the_session_closed(clean_db):
     client = LocalIngestClient(db=clean_db)
+    agent_id = uuid4()
+    ran = []
 
-    with caplog.at_level(logging.WARNING, logger="rootsign"):
-        async with rootsign.session(agent_id=uuid4(), client=client) as ctx:
+    with pytest.raises(RecordPersistenceError) as raised:
+        async with rootsign.session(agent_id=agent_id, client=client):
+            ran.append("body")
 
-            @rootsign.trace(ingest_client=client, session_context=ctx)
-            async def send_invoice(amount: float) -> str:
-                return "sent"
-
-            await send_invoice(10.0)
-
-    messages = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
-    refused = [m for m in messages if m.startswith("rootsign: the store refused the ")]
-    assert len(refused) == 3, messages
-    assert "SESSION_OPEN" in refused[0] and "UNKNOWN_AGENT" in refused[0]
-    assert "ACTION_RECORD for tool 'send_invoice'" in refused[1]
-    assert "SESSION_NOT_FOUND" in refused[1]
-    stored = (
-        await clean_db.execute(
-            text("SELECT count(*) FROM actions WHERE session_id = :sid"),
-            {"sid": str(ctx.session_id)},
-        )
-    ).scalar_one()
-    assert stored == 0
+    assert ran == []
+    message = str(raised.value)
+    assert message.startswith(
+        "session could not be opened (the store refused SESSION_OPEN: UNKNOWN_AGENT:"
+    )
+    assert str(agent_id) in message
+    assert message.endswith("Nothing was recorded, and the session body did not run.")
+    sessions = (await clean_db.execute(text("SELECT count(*) FROM sessions"))).scalar_one()
+    assert sessions == 0
+    (shown,) = output_after("reference/errors.mdx", "For an unknown agent ID:")
+    assert shown.replace("<agent_id>", str(agent_id)) == message

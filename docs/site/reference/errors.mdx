@@ -129,6 +129,16 @@ session could not be opened (PermissionError: [Errno 13] Permission denied: '<da
 
 The original error is its `__cause__`.
 
+It is raised the same way when the store refuses the session's first record, for example on PostgreSQL for an agent ID that was never registered. A first record the cloud transport could not deliver at all is not a refusal; `ROOTSIGN_ON_RECORD_LOSS` decides what happens to it, as above. For an unknown agent ID:
+
+```text
+session could not be opened (the store refused SESSION_OPEN: UNKNOWN_AGENT: agent_id=<agent_id> not registered). Nothing was recorded, and the session body did not run.
+```
+
+<Info>
+  Failing on a refused session open was added after RootSign 0.3.1. Until then the session body ran, and the store refused every record in it.
+</Info>
+
 <Info>
   Before the release after RootSign 0.3.1, a session that could not be opened raised the underlying `PermissionError` or `OSError` instead.
 </Info>
