@@ -47,6 +47,9 @@ class Decision(Base):
         DateTime(timezone=True), nullable=False, default=_utcnow
     )
     reasoning_captured: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # ROOTSIGN_REASONING_DEPTH when the decision was captured (ADR-008).
+    # NULL for rows written before migration 0006.
+    reasoning_depth: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     __table_args__ = (
         Index("ix_decisions_session_timestamp", "session_id", "timestamp"),

@@ -16,6 +16,7 @@ class DecisionCreate(BaseModel):
     alternatives_considered: list[str] | None = None
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     reasoning_captured: bool = False
+    reasoning_depth: str | None = Field(default=None, max_length=20)
 
 
 class DecisionUpdate(BaseModel):
