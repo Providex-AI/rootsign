@@ -1,0 +1,28 @@
+---
+title: "Design records behind RootSign's guarantees"
+sidebarTitle: "Design decisions"
+description: "The fifteen architecture decision records that fix how RootSign hashes, records, redacts, holds and exports agent actions, each summarised in one line."
+keywords: ["ADR", "architecture decision records", "design", "hash specification", "rootsign design"]
+---
+
+RootSign's design decisions are written down as architecture decision records (ADRs) in the repository. Each one states a problem, the choice made and the alternatives rejected. When a page on this site says RootSign behaves a certain way by design, the record behind it is here. Changing a frozen decision, such as the hash formula, needs a new record.
+
+| Record | Decision |
+| --- | --- |
+| [ADR-001](https://github.com/Providex-AI/rootsign/blob/main/docs/adr/ADR-001-hash-canonical-spec.md) | The eight fields and the canonical form each record's hash is computed over. Frozen. |
+| [ADR-002](https://github.com/Providex-AI/rootsign/blob/main/docs/adr/ADR-002-transport-agnostic-client.md) | One ingest client interface for every backend, and recording never raises into the tool it wraps |
+| [ADR-003](https://github.com/Providex-AI/rootsign/blob/main/docs/adr/ADR-003-framework-contract-tests.md) | Every framework integration is tested against the framework's real releases in CI |
+| [ADR-004](https://github.com/Providex-AI/rootsign/blob/main/docs/adr/ADR-004-langgraph-interception-strategy.md) | LangGraph and LangChain tools are recorded by wrapping the tool's own `invoke` and `ainvoke` |
+| [ADR-005](https://github.com/Providex-AI/rootsign/blob/main/docs/adr/ADR-005-crewai-interception-strategy.md) | CrewAI tools are recorded by wrapping `_run`, recognised by shape rather than by import |
+| [ADR-006](https://github.com/Providex-AI/rootsign/blob/main/docs/adr/ADR-006-redaction-contract.md) | Redaction runs before hashing, so a stored hash never carries the redacted value |
+| [ADR-007](https://github.com/Providex-AI/rootsign/blob/main/docs/adr/ADR-007-hitl-checkpoint-design.md) | How a call held for approval waits, times out and is recorded |
+| [ADR-008](https://github.com/Providex-AI/rootsign/blob/main/docs/adr/ADR-008-decision-capture.md) | Decision capture is opt-in, links one decision to one action, and sits outside the chain |
+| [ADR-009](https://github.com/Providex-AI/rootsign/blob/main/docs/adr/ADR-009-buffered-ingest-client.md) | Batched writes hold only ordinary tool call records, and keep the chain in call order |
+| [ADR-010](https://github.com/Providex-AI/rootsign/blob/main/docs/adr/ADR-010-mcp-interception-strategy.md) | MCP agents are recorded at the protocol layer, by a proxy in front of the server |
+| [ADR-011](https://github.com/Providex-AI/rootsign/blob/main/docs/adr/ADR-011-jsonl-local-backend.md) | JSONL files are the default backend, so the first run needs no database |
+| [ADR-012](https://github.com/Providex-AI/rootsign/blob/main/docs/adr/ADR-012-init-facade-contextvar-session.md) | `rootsign.init()` and an ambient session, so instrumented code needs no arguments |
+| [ADR-013](https://github.com/Providex-AI/rootsign/blob/main/docs/adr/ADR-013-http-ingest-client-spool.md) | The cloud transport seals records on the client and spools them when the endpoint is unreachable |
+| [ADR-014](https://github.com/Providex-AI/rootsign/blob/main/docs/adr/ADR-014-export-evidence-bundle.md) | What an evidence bundle contains and how its files are hashed |
+| [ADR-015](https://github.com/Providex-AI/rootsign/blob/main/docs/adr/ADR-015-sync-receipts.md) | Every upload attempt leaves a receipt of what the endpoint accepted and refused |
+
+All fifteen are accepted. The [`docs/adr` folder](https://github.com/Providex-AI/rootsign/tree/main/docs/adr) on GitHub has the full text.

@@ -1,0 +1,76 @@
+---
+title: "Report a security issue or contribute to RootSign"
+sidebarTitle: "Security and contributing"
+description: "How to report a RootSign vulnerability privately, which issues are in scope, how dependency CVEs are handled, and what a pull request needs before it is merged."
+keywords: ["security", "vulnerability", "responsible disclosure", "contributing", "pull request", "CLA", "code of conduct"]
+---
+
+RootSign is an audit product, so a flaw that lets a record be changed, forged or leaked without detection is the most serious bug it can have. This page covers how to report one privately and how to contribute code. The full policies are [`SECURITY.md`](https://github.com/Providex-AI/rootsign/blob/main/SECURITY.md) and [`CONTRIBUTING.md`](https://github.com/Providex-AI/rootsign/blob/main/CONTRIBUTING.md) in the repository.
+
+## Report a vulnerability
+
+<Warning>
+  Do not open a public GitHub issue for a security vulnerability.
+</Warning>
+
+Report it privately, through [GitHub's private vulnerability reporting](https://github.com/Providex-AI/rootsign/security/advisories/new) or by email to `info@getprovidex.com`. You get an acknowledgement within 48 hours, and the target for a critical issue is a patch release within 14 days. Fixes go into the latest release, 0.3.x.
+
+**In scope:** vulnerabilities in the RootSign SDK, ingest handler or CLIs that could allow:
+
+- Tampering with audit records without breaking the hash chain
+- Bypassing hash chain verification
+- Leaking redacted PII through the SDK
+- Forging approval or decision records, or escalation chains
+- Unauthorized writes to the stored data model
+
+**Out of scope:**
+
+- Issues in third-party dependencies: report them upstream first. If RootSign needs to pin or work around one, open a security advisory here as a tracking issue once the upstream report exists.
+- Theoretical attacks with no practical exploit path
+- Denial of service against a single-tenant local deployment, whose storage assumes a trusted operator
+- Social engineering of maintainers
+
+Once a fix is released, an advisory describes the issue, the affected versions and the fix. Reporters are credited by name, with a link if given, unless they ask not to be.
+
+## Vulnerabilities in dependencies
+
+The `langgraph` and `crewai` extras pull in large dependency trees that may carry their own CVEs.
+
+| The vulnerable code is | What happens |
+| --- | --- |
+| Not reachable from any RootSign code path | The alert is dismissed as "vulnerable code not in execution path", with a pointer to the policy |
+| Reachable from RootSign | A version bump in the next patch release, or a pin to a safe version, or removing the dependency if no fix exists |
+| Only in test or development dependencies | The same rules, with less urgency, because users do not install them |
+
+If you think an alert was dismissed wrongly and the code is reachable, report it privately as above.
+
+## Contribute
+
+Contributions of every kind are welcome: fixes, documentation, framework integrations and tests. Before you start:
+
+- **Code of conduct.** RootSign follows the [Contributor Covenant v2.1](https://www.contributor-covenant.org/version/2/1/code_of_conduct/). Report unacceptable behaviour to `info@getprovidex.com`.
+- **CLA.** You are asked to sign the contributor licence agreement on your first pull request.
+- **Discuss first.** Check the issues for existing discussion, and open a [framework integration request](https://github.com/Providex-AI/rootsign/issues/new?template=framework_integration.yml) before writing a new integration.
+
+[`CONTRIBUTING.md`](https://github.com/Providex-AI/rootsign/blob/main/CONTRIBUTING.md) covers the development setup, including the local database the test suite needs.
+
+### What a pull request needs
+
+- Branches start with `feat/`, `fix/`, `test/` or `docs/`, and commits read `type(scope): short description`, for example `fix(hashing): correct canonical field order`.
+- Every test passes with `python -m pytest`. Run pytest through `python -m`, so it uses your virtual environment's interpreter.
+- New code has at least 90% test coverage, and overall coverage stays at 85% or more.
+- `ruff check .` and `ruff format .` are clean.
+- A framework integration passes its contract tests on every framework release in the CI matrix.
+
+### What is not merged
+
+- A change to the canonical hash formula without a new design record ([ADR-001](https://github.com/Providex-AI/rootsign/blob/main/docs/adr/ADR-001-hash-canonical-spec.md))
+- Synchronous SQLAlchemy outside migrations
+- Integration tests that mock the database instead of using PostgreSQL with TimescaleDB
+- A change that takes overall coverage below 85%
+- A renamed or removed evidence bundle field without a bundle version bump ([ADR-014](https://github.com/Providex-AI/rootsign/blob/main/docs/adr/ADR-014-export-evidence-bundle.md))
+- Code that swallows a recording failure silently: recording never raises into the agent, but every failure is logged at `WARNING`
+
+## Questions
+
+Ask in [GitHub Discussions](https://github.com/Providex-AI/rootsign/discussions) or on [Discord](https://discord.gg/tuABzbPdkE). Open a [GitHub issue](https://github.com/Providex-AI/rootsign/issues) for a reproducible bug or a concrete feature request.

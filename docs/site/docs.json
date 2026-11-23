@@ -53,6 +53,15 @@
             "pages": ["reference/evidence-bundle", "reference/ingest-spec-v1"]
           }
         ]
+      },
+      {
+        "tab": "Resources",
+        "groups": [
+          {
+            "group": "Project",
+            "pages": ["resources/framework-support", "resources/changelog", "resources/roadmap", "resources/design-decisions", "resources/security"]
+          }
+        ]
       }
     ]
   },

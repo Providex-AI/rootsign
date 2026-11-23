@@ -1,0 +1,33 @@
+---
+title: "RootSign roadmap: what ships next and what is planned"
+sidebarTitle: "Roadmap"
+description: "Where RootSign is today and what comes next: the hosted ingest backend and compliance dashboard, approvals from a browser, AutoGen and a TypeScript SDK."
+keywords: ["roadmap", "phase 2", "hosted backend", "compliance dashboard", "typescript sdk", "autogen"]
+---
+
+RootSign is the capture layer of the Providex AI agent accountability platform: the open-source SDK that records, hashes and verifies what an agent did. This page lists what is next for it. Plans change, so the active roadmap lives in [GitHub issues](https://github.com/Providex-AI/rootsign/issues), and design discussion in [GitHub Discussions](https://github.com/Providex-AI/rootsign/discussions).
+
+## Where it is today
+
+RootSign v0.3.1 records tool calls from LangGraph, CrewAI, MCP and any Python function, to local JSONL files or PostgreSQL, and verifies them offline. It ships human approval, PII redaction before hashing, decision capture, batched writes, evidence bundles, and the cloud transport with its offline spool, as a [preview](/guides/cloud-and-sync).
+
+## Next: the hosted backend
+
+- **The hosted ingest endpoint.** The service the cloud transport already speaks to, built to the published [ingest specification](/reference/ingest-spec-v1). The SDK half ships today and is tested against a mock server.
+- **A compliance dashboard** that reads sessions from the hosted store.
+- **Exporting from the cloud.** `rootsign export` for a cloud session, once the server has a read API. Today, cloud sessions export from their spool files.
+- **Approvals from a browser,** instead of only `rootsign approve` in a terminal.
+
+## RootSign v1.0
+
+RootSign v1.0 ships with the hosted backend and adds:
+
+- **AutoGen integration,** recognised by shape like the CrewAI integration.
+- **A TypeScript SDK** with the same five stable calls as the Python SDK. See [what stays stable](/resources/framework-support#what-stays-stable).
+
+## Later phases
+
+| Phase | Scope |
+| --- | --- |
+| 3 | Policy enforcement and incident workflow |
+| 4 | Governance across platforms |

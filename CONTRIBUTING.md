@@ -62,7 +62,7 @@ docs(adr): add ADR-004 for retry strategy
 
 ## Pull request requirements
 
-- All existing tests must pass: `pytest tests/ -v`
+- All existing tests must pass: `python -m pytest`
 - New code must have test coverage >= 90%
 - Overall coverage must not drop below 85% (enforced by `fail_under = 85` in `pyproject.toml`)
 - No breaking changes to the canonical hash spec without a new ADR (see [ADR-001](docs/adr/ADR-001-hash-canonical-spec.md))
@@ -97,7 +97,7 @@ without first deciding which of the two you are doing.
 
 - Changes to `compute_action_self_hash` canonical spec (see [ADR-001](docs/adr/ADR-001-hash-canonical-spec.md)) without a new ADR approved by the maintainer
 - Synchronous SQLAlchemy in any non-Alembic code
-- Mock-based integration tests (real PostgreSQL + TimescaleDB only — see [the data model rationale](AGENTS.md))
+- Mock-based integration tests (real PostgreSQL + TimescaleDB only)
 - Any PR that reduces test coverage below 85% overall
 - A regenerated `evidence_bundle_v1.json` that renames or removes a field without a matching `EVIDENCE_BUNDLE_VERSION` bump (see [ADR-014](docs/adr/ADR-014-export-evidence-bundle.md))
 - Code that swallows ingest failures silently (RootSign's promise is that ingest never raises into the agent, but failures *must* be logged at WARNING level — see [ADR-002](docs/adr/ADR-002-transport-agnostic-client.md))
@@ -105,10 +105,10 @@ without first deciding which of the two you are doing.
 ## Adding a new framework integration
 
 1. Open a `framework_integration` issue first so we can discuss API surface and version targets
-2. Copy the LangGraph integration as a reference (lands in Sprint 2)
+2. Use the LangGraph integration (`rootsign/sdk/frameworks/langgraph.py`) as a reference
 3. Implement contract tests against a minimum of two framework versions (latest stable + previous minor) — see [ADR-003](docs/adr/ADR-003-framework-contract-tests.md)
-4. Update `docs/framework-support.md` (created in Sprint 2)
+4. Add the framework to the support table on the docs site (`docs/site/resources/framework-support.mdx`)
 
 ## Questions?
 
-Open a [GitHub Discussion](https://github.com/Providex-AI/rootsign/discussions). A `#rootsign` channel on the LangChain Discord is coming alongside Sprint 2.
+Open a [GitHub Discussion](https://github.com/Providex-AI/rootsign/discussions), or ask on [Discord](https://discord.gg/tuABzbPdkE).

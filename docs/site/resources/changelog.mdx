@@ -1,0 +1,132 @@
+---
+title: "RootSign changelog: releases and unreleased changes"
+sidebarTitle: "Changelog"
+description: "What changed in each RootSign release from v0.1.0 to v0.3.1, and the changes merged since v0.3.1 that the next release will ship, with links to the full notes."
+keywords: ["changelog", "release notes", "rootsign releases", "upgrade", "unreleased"]
+---
+
+Every RootSign release, newest first, with the changes that matter when you upgrade. Each entry links to the full release notes on GitHub. The Unreleased entry lists what is merged on `main` and ships in the next release; the pages on this site already describe that behaviour, with a note wherever it differs from 0.3.1.
+
+<Update label="Unreleased" description="Merged since v0.3.1">
+  **Records that were lost**
+
+  - With `ROOTSIGN_BUFFERED=true` on PostgreSQL, the last tool calls of a session could be lost without an error while the session verified as `VALID`. A write now waits for one already in progress. ([#88](https://github.com/Providex-AI/rootsign/pull/88))
+  - On the cloud transport, a URL that answers 404, including the default one while the hosted endpoint is not live, now spools records instead of losing them. ([#97](https://github.com/Providex-AI/rootsign/pull/97))
+  - A record the store refuses is logged at `WARNING`. It was visible only with debug logging. ([#96](https://github.com/Providex-AI/rootsign/pull/96))
+
+  **Security and privacy**
+
+  - Redaction applies to positional arguments, by parameter name. `send("alice@example.com")` stored the address unredacted. Sessions recorded on 0.3.1 or earlier may hold PII from positional calls. ([#68](https://github.com/Providex-AI/rootsign/pull/68))
+  - On the JSONL backend, a tool held with `require_approval=True` could run after approval even when the approval record was not written. It now raises `HiTLPersistenceError` and does not run. ([#77](https://github.com/Providex-AI/rootsign/pull/77))
+  - The `init --reset` confirmation prompt no longer prints the database password. ([#73](https://github.com/Providex-AI/rootsign/pull/73))
+  - `rootsign export --redact-previews` also withholds a decision's `alternatives_considered`. ([#92](https://github.com/Providex-AI/rootsign/pull/92))
+
+  **Verification and the CLIs**
+
+  - `rootsign verify` exits `3` when there is nothing to verify: an unknown session ID, a missing, unreadable or empty file, or a usage error. An unknown session ID reported `VALID`. ([#66](https://github.com/Providex-AI/rootsign/pull/66))
+  - `rootsign verify` exits `3`, not `1`, when it cannot use the database, so an outage no longer reads as `TAMPERED`, and both CLIs print one line instead of a traceback. ([#71](https://github.com/Providex-AI/rootsign/pull/71))
+  - `rootsign-admin start-db` keeps its data in a Docker volume named `rootsign_pgdata`, so removing the container keeps the data. ([#72](https://github.com/Providex-AI/rootsign/pull/72))
+  - `rootsign-admin sync` reports an unreachable endpoint as `FAILED`, not `REJECTED`. ([#74](https://github.com/Providex-AI/rootsign/pull/74))
+  - The inline approval prompt reads the first word: typing `yes` approves with no note. It recorded the note `es`. ([#69](https://github.com/Providex-AI/rootsign/pull/69))
+
+  **SDK**
+
+  - All `ROOTSIGN_` settings are read when `rootsign.init()` runs: the decision capture settings were read at import ([#76](https://github.com/Providex-AI/rootsign/pull/76)), and the session's client re-read the rest when the session opened ([#89](https://github.com/Providex-AI/rootsign/pull/89)).
+  - `rootsign.session()` raises `RecordPersistenceError` when it cannot open a session, instead of the raw `PermissionError` or `OSError`. ([#83](https://github.com/Providex-AI/rootsign/pull/83))
+  - `rootsign.init()` rejects agent fields outside the registry's limits with `ValueError` on every backend. ([#84](https://github.com/Providex-AI/rootsign/pull/84))
+  - `wrap_tools()` and `wrap_crewai_tools()` raise `TypeError` naming the item when given something that is not a tool. ([#85](https://github.com/Providex-AI/rootsign/pull/85))
+  - `ctx.record_decision()` checks a decision the same way on every backend: an invalid one is not recorded and logs one warning. ([#90](https://github.com/Providex-AI/rootsign/pull/90))
+  - PostgreSQL keeps each decision's `reasoning_depth`. **Run `rootsign-admin init` after upgrading** to add the column. ([#91](https://github.com/Providex-AI/rootsign/pull/91))
+  - `ROOTSIGN_BACKEND=local` shows its deprecation warning by default. ([#76](https://github.com/Providex-AI/rootsign/pull/76))
+
+  **Cloud transport (preview)**
+
+  - A session without `agent_id` raises a `ValueError` that names `rootsign.session(agent_id=...)`. ([#93](https://github.com/Providex-AI/rootsign/pull/93))
+  - Without `ROOTSIGN_API_KEY`, records go straight to the spool with a warning that names the missing key. ([#94](https://github.com/Providex-AI/rootsign/pull/94))
+  - `require_approval=True` raises `HiTLUnsupportedBackendError` before anything is sent, instead of an `OSError` from a local database. ([#95](https://github.com/Providex-AI/rootsign/pull/95))
+
+  **Integrations**
+
+  - The MCP proxy works with real streamable-HTTP MCP servers; it answered every request with 406. ([#64](https://github.com/Providex-AI/rootsign/pull/64))
+  - The extras require what CI tests: `langgraph>=0.2` and `crewai>=0.95`. ([#61](https://github.com/Providex-AI/rootsign/pull/61))
+  - The `autogen` extra is removed; AutoGen support is planned for v1.0. ([#60](https://github.com/Providex-AI/rootsign/pull/60))
+</Update>
+
+<Update label="v0.3.1" description="October 20, 2026">
+  **Sync receipts.** `rootsign-admin sync` writes a receipt for every upload attempt: what the endpoint accepted, already had, refused and why, and never received, with a SHA-256 of the spool file. `rootsign export` includes it in the evidence bundle as `sync-receipt.json`.
+
+  - `sync` prints `REJECTED`, not `INCOMPLETE`, for a refused record.
+  - Numeric PII, such as an account number stored as a JSON number, is now redacted. A payload with numeric PII hashes differently than under 0.3.0.
+
+  [Full release notes](https://github.com/Providex-AI/rootsign/releases/tag/v0.3.1)
+</Update>
+
+<Update label="v0.3.0" description="August 22, 2026">
+  **Evidence bundles and the cloud transport.**
+
+  - `rootsign export` turns a session into a bundle a reviewer can read: JSON documents, Markdown and HTML reports, and a `manifest.json` with a SHA-256 per file.
+  - The cloud transport, `HttpIngestClient`, ships with an offline spool, so an unreachable endpoint loses nothing, and `rootsign-admin sync` to upload it.
+  - The ingest wire format is published as the [ingest specification](/reference/ingest-spec-v1).
+  - `rootsign verify` has three verdicts: `INCOMPLETE` (exit `2`) for a missing record, apart from `TAMPERED` (exit `1`) for an altered one.
+
+  [Full release notes](https://github.com/Providex-AI/rootsign/releases/tag/v0.3.0)
+</Update>
+
+<Update label="v0.2.1" description="August 19, 2026">
+  - The `rootsign` and `rootsign-admin` commands work on a bare `pip install rootsign`. On 0.2.0 every command failed with `ModuleNotFoundError: No module named 'sqlalchemy'`.
+  - Tool names are sanitised before they reach RootSign's own log, so a caller of the MCP proxy cannot forge log lines.
+
+  [Full release notes](https://github.com/Providex-AI/rootsign/releases/tag/v0.2.1)
+</Update>
+
+<Update label="v0.2.0" description="August 7, 2026">
+  **Zero-dependency onboarding.**
+
+  - JSONL is the default backend: records go to files under `~/.rootsign`, with no database. PostgreSQL users set `ROOTSIGN_BACKEND=postgres`.
+  - `rootsign.init()` configures RootSign once, so `session()`, `wrap_tools()` and `@rootsign.trace()` need no arguments.
+  - The database packages moved to the `postgres` extra.
+
+  [Full release notes](https://github.com/Providex-AI/rootsign/releases/tag/v0.2.0)
+</Update>
+
+<Update label="v0.1.5" description="August 3, 2026">
+  - **Batched writes:** `BufferedIngestClient` and `ROOTSIGN_BUFFERED`, so tool calls do not wait for each write.
+  - **MCP proxy:** records every `tools/call` at the protocol layer, for any MCP agent.
+
+  [Full release notes](https://github.com/Providex-AI/rootsign/releases/tag/v0.1.5)
+</Update>
+
+<Update label="v0.1.4" description="July 29, 2026">
+  **Security and correctness.**
+
+  - Verification checks that the stored arguments and results still match their hashes.
+  - Approvals are safe against two people resolving the same action at once. Includes a migration: run `rootsign-admin init`.
+  - `ENVIRONMENT=production` refuses the default database URLs.
+  - A timed-out approval always raises `HiTLTimeoutError`, never `HiTLRejectedError`.
+
+  [Full release notes](https://github.com/Providex-AI/rootsign/releases/tag/v0.1.4)
+</Update>
+
+<Update label="v0.1.3" description="June 25, 2026">
+  - Concurrent tool calls through `LocalIngestClient` no longer interleave on its database session.
+
+  [Full release notes](https://github.com/Providex-AI/rootsign/releases/tag/v0.1.3)
+</Update>
+
+<Update label="v0.1.2" description="June 18, 2026">
+  - LangGraph's `ToolNode` and `create_react_agent` path is recorded: the tool's result arrived as a `ToolMessage`, which could not be stored.
+
+  [Full release notes](https://github.com/Providex-AI/rootsign/releases/tag/v0.1.2)
+</Update>
+
+<Update label="v0.1.1" description="June 17, 2026">
+  - **Decision capture:** `ctx.record_decision()` with `ROOTSIGN_CAPTURE_DECISIONS` and `ROOTSIGN_REASONING_DEPTH`.
+
+  [Full release notes](https://github.com/Providex-AI/rootsign/releases/tag/v0.1.1)
+</Update>
+
+<Update label="v0.1.0" description="June 11, 2026">
+  **First release.** The hash chain, `@rootsign.trace()`, LangGraph and CrewAI integrations, PII redaction before hashing, human approval with `rootsign approve`, and `rootsign verify`, on PostgreSQL with TimescaleDB.
+
+  [Full release notes](https://github.com/Providex-AI/rootsign/releases/tag/v0.1.0)
+</Update>
