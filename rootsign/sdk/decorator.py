@@ -32,7 +32,14 @@ from rootsign.errors import (
     RecordPersistenceError,
     postgres_extra_required,
 )
-from rootsign.ingest.schemas import SCHEMA_VERSION, EventType, IngestResponse
+from pydantic import ValidationError
+
+from rootsign.ingest.schemas import (
+    SCHEMA_VERSION,
+    DecisionRecordPayload,
+    EventType,
+    IngestResponse,
+)
 from rootsign.sdk.client import IngestClient
 from rootsign.sdk.context import SessionContext
 from rootsign.sdk.hashing import compute_payload_hash
@@ -93,6 +100,26 @@ def _log_safe(value: Any, *, limit: int = _LOG_FIELD_LIMIT) -> str:
     text = text.replace("\r\n", "\\x0d\\x0a").replace("\n", "\\x0a").replace("\r", "\\x0d")
     # Then everything else non-printable: NUL, ANSI escapes, control codes.
     return "".join(c if c.isprintable() else f"\\x{ord(c):02x}" for c in text)
+
+
+def _warn_if_refused(response: Any, record: str) -> None:
+    """WARN when the store refused a record, which was then stored nowhere.
+
+    An exception from the client is logged at WARNING; a refusal (a response
+    with status "rejected") used to reach only DEBUG, so an agent whose records
+    were all refused, by a URL with no ingest endpoint behind it or an agent
+    ID the store does not know, ran with nothing recorded and nothing said.
+    `record` names the record, for example "ACTION_RECORD for tool 'pay'".
+    """
+    if getattr(response, "status", None) != "rejected":
+        return
+    code = getattr(response, "error_code", None)
+    logger.warning(
+        "rootsign: the store refused the %s (%s: %s); it was not recorded",
+        _log_safe(record),
+        _log_safe(getattr(code, "value", code)),
+        _log_safe(getattr(response, "error_message", "")),
+    )
 
 
 def _to_json_safe(value: Any) -> Any:
@@ -463,6 +490,7 @@ async def _try_ingest(
             },
         }
         response = await client.handle(envelope)
+        _warn_if_refused(response, f"ACTION_RECORD for tool {tool_name!r}")
         # audit #9: advance the SDK counter ONLY when the store accepted the
         # ACTION_RECORD, so SESSION_CLOSE's total_actions (ctx.current_sequence)
         # matches the store's action_count and the AC-3.11 reconciliation
@@ -562,6 +590,14 @@ async def _emit_hitl_action(
             approval_context_builder=approval_context_builder,
             _input_payload_override=_input_payload_override,
         )
+
+    # The cloud transport has no approval flow until the hosted backend is
+    # live. Refuse before sending the pending action: the PostgreSQL poll loop
+    # below would otherwise poll a local database nobody configured.
+    if _is_cloud_backend(client):
+        from rootsign.errors import HiTLUnsupportedBackendError
+
+        raise HiTLUnsupportedBackendError(tool_name, backend="cloud")
 
     # Lazy imports — HiTL is a Sprint 4 surface and pulling these at
     # module load would pessimize cold start for non-HiTL users.
@@ -663,6 +699,14 @@ def _is_jsonl_backend(client: IngestClient) -> bool:
 
     inner = getattr(client, "_inner", None)
     return isinstance(client, JsonlIngestClient) or isinstance(inner, JsonlIngestClient)
+
+
+def _is_cloud_backend(client: IngestClient) -> bool:
+    """True if *client* is (or wraps) the cloud transport, `HttpIngestClient`."""
+    from rootsign.sdk.client import HttpIngestClient
+
+    inner = getattr(client, "_inner", None)
+    return isinstance(client, HttpIngestClient) or isinstance(inner, HttpIngestClient)
 
 
 #: First words the inline approval prompt accepts as "approve". Anything else,
@@ -842,6 +886,8 @@ async def _emit_approval_record(
             },
         }
         response = await client.handle(envelope)
+        if not required:
+            _warn_if_refused(response, f"APPROVAL_RECORD for tool {tool_name!r}")
         if required and getattr(response, "status", None) != "accepted":
             raise HiTLPersistenceError(
                 "the approval record was refused "
@@ -874,6 +920,24 @@ async def _emit_approval_record(
             action_id,
             ingest_err,
         )
+
+
+def _decision_problem(payload: dict[str, Any]) -> str | None:
+    """Why a store would refuse this decision payload, or None if it is valid.
+
+    Checked in the SDK with the schema PostgreSQL validates against, so a bad
+    value is refused the same way on every backend. The JSONL backend used to
+    store whatever it was given: `confidence=1.5` was recorded there and
+    refused by PostgreSQL.
+    """
+    try:
+        DecisionRecordPayload.model_validate(payload)
+    except ValidationError as exc:
+        return "; ".join(
+            f"{'.'.join(str(part) for part in error['loc'])}: {error['msg']}"
+            for error in exc.errors()
+        )
+    return None
 
 
 async def _emit_decision_record(
@@ -944,6 +1008,13 @@ async def _emit_decision_record(
                 "reasoning_captured": summary is not None,
             },
         }
+        problem = _decision_problem(envelope["payload"])
+        if problem is not None:
+            logger.warning(
+                "rootsign: decision not recorded (%s); the next action is not linked to one",
+                _log_safe(problem),
+            )
+            return None
         response = await client.handle(envelope)
         if response is None or response.entity_id is None:
             logger.warning(

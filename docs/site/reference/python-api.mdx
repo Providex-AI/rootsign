@@ -159,7 +159,7 @@ Opens a session, the unit that RootSign chains and verifies. Every traced call i
 | `RootSignNotInitializedError` | `init()` was not called and `agent_id` and `client` were not both passed |
 | `RecordPersistenceError` | The session could not be opened: the agent could not be registered, or the session's first record could not be written, because the data folder is not writable or the database is down. Nothing in the block runs. |
 | `RootSignPostgresExtraRequired` | `ROOTSIGN_BACKEND=postgres` without `rootsign[postgres]` installed |
-| `ValueError` | `ROOTSIGN_BACKEND=cloud` with `init()`. The cloud transport is used through an explicit `HttpIngestClient` while it is in preview. |
+| `ValueError` | `ROOTSIGN_BACKEND=cloud` without `agent_id`. The hosted backend issues agent IDs, so pass the agent's ID. |
 
 **Notes**
 

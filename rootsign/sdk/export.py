@@ -95,6 +95,10 @@ CONTENT_FIELDS = (
     # and `withheld_fields` tells the reader exactly what to ask for.
     "inputs_summary",
     "reasoning_summary",
+    # Free text the model writes, kept only at ROOTSIGN_REASONING_DEPTH=full.
+    # Not demonstrably metadata, so it goes with the reasoning beside it;
+    # `selected_action`, the choice itself, stays like a tool name.
+    "alternatives_considered",
 )
 
 

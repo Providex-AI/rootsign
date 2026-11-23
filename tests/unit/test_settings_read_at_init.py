@@ -111,3 +111,74 @@ def test_the_local_alias_warning_is_shown_by_default(tmp_path):
 
     assert result.returncode == 0, result.stderr
     assert "ROOTSIGN_BACKEND=local is deprecated; use 'postgres'" in result.stderr
+
+
+# The session's client used to be built from settings read when the session
+# opened, while the agent registry used the ones init() read. A data folder
+# changed after init() split one run across two folders: agents.jsonl in the
+# old one, the session file in the new one.
+CLIENT = textwrap.dedent(
+    """
+    import asyncio
+    import os
+
+    import rootsign
+    from rootsign.sdk.facade import current_session
+
+    rootsign.init(agent="settings-timing")
+    os.environ.update({after_init})
+
+
+    @rootsign.trace()
+    async def lookup(q: str) -> str:
+        return q.upper()
+
+
+    async def main() -> None:
+        async with rootsign.session(objective="settings timing"):
+            _, client = current_session()
+            print(type(client).__name__)
+            await lookup(q="x")
+
+
+    asyncio.run(main())
+    """
+)
+
+
+def _client_run(tmp_path, after_init: dict[str, str]):
+    return run_script(CLIENT.format(after_init=repr(after_init)), tmp_path, name="agent.py")
+
+
+def test_data_dir_changed_after_init_is_ignored(tmp_path):
+    elsewhere = tmp_path / "elsewhere"
+    run = _client_run(tmp_path, {"ROOTSIGN_DATA_DIR": str(elsewhere)})
+
+    assert len(run.actions()) == 1  # the session file is in the init() folder
+    assert (run.data_dir / "agents.jsonl").exists()
+    assert not elsewhere.exists()
+
+
+def test_buffering_changed_after_init_is_ignored(tmp_path):
+    run = _client_run(tmp_path, {"ROOTSIGN_BUFFERED": "true"})
+
+    assert run.stdout.strip() == "JsonlIngestClient"
+
+
+def test_backend_changed_after_init_is_ignored(tmp_path):
+    run = _client_run(tmp_path, {"ROOTSIGN_BACKEND": "cloud", "ROOTSIGN_API_KEY": "key"})
+
+    assert run.stdout.strip() == "JsonlIngestClient"
+    assert len(run.actions()) == 1
+
+
+def test_buffering_set_before_init_still_applies(tmp_path):
+    run = run_script(
+        CLIENT.format(after_init="{}"),
+        tmp_path,
+        name="agent.py",
+        extra_env={"ROOTSIGN_BUFFERED": "true"},
+    )
+
+    assert run.stdout.strip() == "BufferedIngestClient"
+    assert len(run.actions()) == 1

@@ -935,3 +935,55 @@ def test_factory_selects_the_cloud_transport(monkeypatch: pytest.MonkeyPatch) ->
     assert isinstance(client, HttpIngestClient)
     assert client.endpoint == f"{BASE_URL}/ingest"
     assert client._max_retries == 5
+
+
+# ---------------------------------------------------------------------------
+# No API key
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("api_key", ["", "   "])
+async def test_without_an_api_key_records_go_straight_to_the_spool(
+    api_key: str, tmp_path, caplog
+) -> None:
+    """With no key, no request can succeed: an empty bearer token is not even
+    a valid header, so httpx refuses to send it. That used to cost three
+    attempts and a WARNING saying the endpoint was unreachable, which it was
+    not. Now nothing is sent, and the one WARNING names the missing key."""
+    recorder = _Recorder(lambda request, n: httpx.Response(200, json=[]))
+    client = HttpIngestClient(
+        BASE_URL, api_key, transport=httpx.MockTransport(recorder), spool_dir=str(tmp_path)
+    )
+    first, second = _envelope(), _envelope()
+    second["session_id"] = first["session_id"]
+
+    with caplog.at_level("WARNING", logger="rootsign.sdk.client"):
+        responses = [await client.handle(first), await client.handle(second)]
+
+    assert recorder.requests == []
+    assert [r.status for r in responses] == ["accepted", "accepted"]  # durable on disk
+    assert client.is_spooling is True
+    assert len(_spool_records(tmp_path, first["session_id"])) == 2
+    (warning,) = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert "ROOTSIGN_API_KEY is not set" in warning.getMessage()
+    assert "unreachable" not in warning.getMessage()
+    assert SYNC_BREADCRUMB in warning.getMessage()
+
+
+async def test_a_replay_client_without_a_key_still_does_not_spool(tmp_path) -> None:
+    """`rootsign-admin sync` builds its client with the spool off and checks
+    the key before uploading; a client with nowhere to spool keeps its old
+    behaviour instead of writing back into the file it is reading."""
+    recorder = _Recorder(lambda request, n: httpx.Response(401))
+    client = HttpIngestClient(
+        BASE_URL,
+        "",
+        transport=httpx.MockTransport(recorder),
+        spool_dir=str(tmp_path),
+        enable_spool=False,
+    )
+
+    response = await client.handle(_envelope())
+
+    assert response.status == "rejected"
+    assert client.is_spooling is False

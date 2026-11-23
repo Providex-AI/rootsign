@@ -43,6 +43,8 @@ if TYPE_CHECKING:
     # type hint here; imported for real inside LocalIngestClient.__init__.
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from rootsign.sdk.config import SDKSettings
+
 
 class IngestClient(ABC):
     """Abstract transport for ingest envelopes. See ADR-002."""
@@ -480,6 +482,8 @@ class HttpIngestClient(IngestClient):
             return []
 
         self._seal(envelopes)
+        if not self._spooling and self._spool_enabled and not self._api_key.strip():
+            self._spool_without_key()
         if self._spooling:
             # One-way: this client already gave up on the network (ADR-013
             # Decision 4). Sealing still happened above, so the spooled record
@@ -534,6 +538,27 @@ class HttpIngestClient(IngestClient):
             record_count,
             self.spool_dir,
             self.endpoint,
+            SYNC_BREADCRUMB,
+        )
+
+    def _spool_without_key(self) -> None:
+        """Spool from the first record when there is no API key to send with.
+
+        No request can succeed without one: an empty bearer token is not even
+        a valid header, so httpx refuses to send it. That used to cost the
+        full retry budget and a WARNING saying the endpoint was unreachable.
+        The spool keeps the records as it does in an outage (ADR-013 Decision
+        4); the one WARNING names the actual cause. `VALIDATION_ERROR` is the
+        code a 401 or 403 maps to, as there is no auth code in the v1 registry.
+        """
+        self._spooling = True
+        self._spool_reason = ErrorCode.VALIDATION_ERROR
+        logger.warning(
+            "rootsign: ROOTSIGN_API_KEY is not set, so nothing can be sent to %s. Records "
+            "are spooling to %s instead. They stay tamper-evident and verify offline "
+            "(`rootsign verify --local`); set ROOTSIGN_API_KEY, then upload them with:  %s",
+            self.endpoint,
+            self.spool_dir,
             SYNC_BREADCRUMB,
         )
 
@@ -795,17 +820,23 @@ class HttpIngestClient(IngestClient):
             self._http = None
 
 
-def get_ingest_client(db: AsyncSession | None = None) -> IngestClient:
+def get_ingest_client(
+    db: AsyncSession | None = None, *, settings: SDKSettings | None = None
+) -> IngestClient:
     """Factory — picks an implementation based on ROOTSIGN_BACKEND.
 
     `db` is required for the local backend (it's how IngestHandler reaches
     the storage layer). It is ignored for the cloud backend.
+
+    `settings` is the snapshot to build from. `rootsign.session()` passes the
+    one `init()` read, so the client and the agent registry agree on the
+    backend and the data folder. Omitted, settings are read now.
     """
-    # Read settings fresh so monkeypatched env vars in tests take effect
-    # without needing to reload the module.
     from rootsign.sdk.config import SDKSettings
 
-    s = SDKSettings()
+    # Read fresh when not given, so monkeypatched env vars in tests take
+    # effect without needing to reload the module.
+    s = settings if settings is not None else SDKSettings()
     if s.BACKEND == "jsonl":
         # ADR-011 default: zero-dependency append-only local backend. Needs no db.
         from rootsign.sdk.jsonl_client import JsonlIngestClient

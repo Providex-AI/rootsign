@@ -180,7 +180,7 @@ def test_redact_previews_removes_the_listed_fields():
     assert set(re.findall(r"`(\w+)`", sentence)) - {"--redact-previews"} == set(
         export.CONTENT_FIELDS
     )
-    assert len(export.CONTENT_FIELDS) == 5 and "five fields" in sentence
+    assert len(export.CONTENT_FIELDS) == 6 and "six fields" in sentence
 
 
 def test_redaction_fields_and_example(tmp_path):

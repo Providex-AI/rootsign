@@ -119,8 +119,8 @@ def test_owner_falls_back_when_the_os_user_is_unavailable(monkeypatch):
     assert facade._default_owner() == "unknown"
 
 
-def test_unsupported_backend_is_rejected_at_first_session(monkeypatch):
-    """`cloud` has no agent registry until Phase 2 — fail with a clear message."""
+def test_cloud_without_an_agent_id_is_rejected_at_first_session(monkeypatch):
+    """`cloud` has no agent registry until Phase 2: name the form that works."""
     monkeypatch.setenv("ROOTSIGN_BACKEND", "cloud")
     rootsign.init(agent="cloud-agent")
 
@@ -128,7 +128,7 @@ def test_unsupported_backend_is_rejected_at_first_session(monkeypatch):
         async with rootsign.session():
             pass
 
-    with pytest.raises(ValueError, match="does not support ROOTSIGN_BACKEND"):
+    with pytest.raises(ValueError, match=r"rootsign\.session\(agent_id=\.\.\.\)"):
         asyncio.run(main())
 
 
