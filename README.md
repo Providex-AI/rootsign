@@ -398,13 +398,22 @@ $ rootsign export --check ./bundles/evidence-<session_id>
 
 Re-hashing files against the manifest proves the bundle is internally consistent — nothing more. Someone who edits a file *and* updates the manifest passes that check trivially. The out-of-band manifest hash is the only anchor they cannot forge, which is why `--check` prints it whether or not anything is wrong.
 
-For bundles leaving the building, `--redact-previews` withholds every field that carries stored content — payload previews, the context a human was shown at a checkpoint, and captured decision summaries — and names what it withheld, so the recipient knows what to ask for rather than guessing whether a field was stripped or never existed. Hashes, identities and timings are unaffected: the chain still verifies.
+For bundles leaving the building, `--redact-previews` withholds every field that carries stored content — payload previews, the context a human was shown at a checkpoint, and captured decision summaries with the alternatives they considered — and names what it withheld, so the recipient knows what to ask for rather than guessing whether a field was stripped or never existed. Hashes, identities and timings are unaffected: the chain still verifies.
 
 `--format json|md|html` narrows the renderings; it never drops the machine truth. `rootsign export <session_id>` reads a Postgres-backed session (agent name, owner and risk tier come along, since those live in the registration row). See [ADR-014](docs/adr/ADR-014-export-evidence-bundle.md).
 
 ## Offline & sync (cloud mode)
 
-Set `ROOTSIGN_BACKEND=cloud` and records go to the hosted ingest endpoint (`pip install 'rootsign[cloud]'`). The interesting part is what happens when that endpoint is not there.
+Set `ROOTSIGN_BACKEND=cloud` and records go to the hosted ingest endpoint (`pip install 'rootsign[cloud]'`). The hosted backend issues agent IDs, so RootSign cannot register the agent itself: pass its ID to the session.
+
+```python
+rootsign.init(agent="invoice-agent")
+
+async with rootsign.session(agent_id=AGENT_ID, objective="invoice ACME"):
+    ...
+```
+
+The interesting part is what happens when that endpoint is not there.
 
 **Nothing is lost, and the agent never notices.** When retries are exhausted, the SDK fails over to the same append-only writer the local backend uses, rooted at `$ROOTSIGN_DATA_DIR/spool/`. One WARNING is logged — not one per record — and your tool calls keep returning their real results, because an audit layer that halts the business it observes has inverted its own value.
 

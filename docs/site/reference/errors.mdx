@@ -186,7 +186,7 @@ Some mistakes raise standard Python exceptions rather than `RootSignError`:
 
 | Exception | When |
 | --- | --- |
-| `ValueError` | `rootsign.init()` gets an invalid value, such as `risk_tier="extreme"` or a one-character `agent`, or is called a second time with different arguments. A session opened after `init()` with `ROOTSIGN_BACKEND=cloud`. |
+| `ValueError` | `rootsign.init()` gets an invalid value, such as `risk_tier="extreme"` or a one-character `agent`, or is called a second time with different arguments. A session opened with `ROOTSIGN_BACKEND=cloud` and no `agent_id`. |
 | `pydantic.ValidationError` | A `ROOTSIGN_` environment variable has a value outside its allowed list, which stops `import rootsign`. `ENVIRONMENT=production` with the default database URLs. See [Configuration](/reference/configuration#how-settings-are-read). |
 | `NotImplementedError` | `require_approval=True` on a LangChain `BaseTool` or a CrewAI tool. Put it on the plain function the tool calls. |
 | `FileNotFoundError` | `verify_session_local()` is given a path that does not exist. |
