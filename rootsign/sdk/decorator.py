@@ -32,7 +32,14 @@ from rootsign.errors import (
     RecordPersistenceError,
     postgres_extra_required,
 )
-from rootsign.ingest.schemas import SCHEMA_VERSION, EventType, IngestResponse
+from pydantic import ValidationError
+
+from rootsign.ingest.schemas import (
+    SCHEMA_VERSION,
+    DecisionRecordPayload,
+    EventType,
+    IngestResponse,
+)
 from rootsign.sdk.client import IngestClient
 from rootsign.sdk.context import SessionContext
 from rootsign.sdk.hashing import compute_payload_hash
@@ -876,6 +883,24 @@ async def _emit_approval_record(
         )
 
 
+def _decision_problem(payload: dict[str, Any]) -> str | None:
+    """Why a store would refuse this decision payload, or None if it is valid.
+
+    Checked in the SDK with the schema PostgreSQL validates against, so a bad
+    value is refused the same way on every backend. The JSONL backend used to
+    store whatever it was given: `confidence=1.5` was recorded there and
+    refused by PostgreSQL.
+    """
+    try:
+        DecisionRecordPayload.model_validate(payload)
+    except ValidationError as exc:
+        return "; ".join(
+            f"{'.'.join(str(part) for part in error['loc'])}: {error['msg']}"
+            for error in exc.errors()
+        )
+    return None
+
+
 async def _emit_decision_record(
     *,
     client: IngestClient,
@@ -944,6 +969,13 @@ async def _emit_decision_record(
                 "reasoning_captured": summary is not None,
             },
         }
+        problem = _decision_problem(envelope["payload"])
+        if problem is not None:
+            logger.warning(
+                "rootsign: decision not recorded (%s); the next action is not linked to one",
+                _log_safe(problem),
+            )
+            return None
         response = await client.handle(envelope)
         if response is None or response.entity_id is None:
             logger.warning(
