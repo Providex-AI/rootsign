@@ -313,6 +313,10 @@ class HiTLUnsupportedBackendError(RootSignError):
     come from the hosted backend, which is not live yet, and the PostgreSQL
     poll loop it used to fall through to polled a local database a cloud user
     never configured.
+
+    So does a `LocalIngestClient` bound to the caller's own transaction
+    (`backend="transaction"`): its pending record is not committed until the
+    caller commits, so nobody can approve it while the call waits.
     """
 
     FIX_HINT = (
@@ -327,11 +331,19 @@ class HiTLUnsupportedBackendError(RootSignError):
         "or use the JSONL backend in an interactive terminal."
     )
 
+    TRANSACTION_HINT = (
+        "A held call's pending record must be committed when it is written, so that "
+        "`rootsign approve` can see it. Use ManagedLocalIngestClient, which commits each "
+        "record (rootsign.init() uses it), instead of LocalIngestClient(db=...)."
+    )
+
     def __init__(self, tool_name: str | None = None, *, backend: str | None = None):
-        cloud = backend == "cloud"
-        where = "on the cloud transport" if cloud else "on this backend"
+        where, hint = {
+            "cloud": ("on the cloud transport", self.CLOUD_HINT),
+            "transaction": ("with a client bound to your own transaction", self.TRANSACTION_HINT),
+        }.get(backend or "", ("on this backend", self.FIX_HINT))
         prefix = f"HiTL not available for tool {tool_name!r} {where}. " if tool_name else ""
-        super().__init__(prefix + (self.CLOUD_HINT if cloud else self.FIX_HINT))
+        super().__init__(prefix + hint)
         self.tool_name = tool_name
 
 

@@ -69,7 +69,7 @@ HiTL approval timed out after 300s for action b5e0e3d3-fa5e-4cb4-9462-b1048fd54c
 
 ### HiTLUnsupportedBackendError
 
-`require_approval=True` was used where nobody can be asked: on the JSONL backend with no terminal to prompt in, such as a background job or CI, or on the cloud transport, whose approvals will come from the hosted backend once it is live. Raised on the tool's first call, before it runs and before anything is recorded. Run it in a terminal, or use the PostgreSQL backend and `rootsign approve`.
+`require_approval=True` was used where nobody can be asked: on the JSONL backend with no terminal to prompt in, such as a background job or CI; on the cloud transport, whose approvals will come from the hosted backend once it is live; or with a `LocalIngestClient` bound to your own database transaction, whose pending record nobody can see until you commit. Raised on the tool's first call, before it runs and before anything is recorded. Run it in a terminal, or use the PostgreSQL backend and `rootsign approve`.
 
 ```text
 HiTL not available for tool 'wire_transfer' on this backend. Human-in-the-loop with require_approval=True needs either an interactive terminal (JSONL backend prompts inline) or the shared store: set ROOTSIGN_BACKEND=postgres for the async poll-loop / `rootsign approve` flow.
@@ -81,8 +81,14 @@ On the cloud transport:
 HiTL not available for tool 'wire_transfer' on the cloud transport. Approvals on the cloud transport will come from the hosted backend, which is not live yet. Set ROOTSIGN_BACKEND=postgres to approve with `rootsign approve`, or use the JSONL backend in an interactive terminal.
 ```
 
+With a client bound to your own transaction:
+
+```text
+HiTL not available for tool 'wire_transfer' with a client bound to your own transaction. A held call's pending record must be committed when it is written, so that `rootsign approve` can see it. Use ManagedLocalIngestClient, which commits each record (rootsign.init() uses it), instead of LocalIngestClient(db=...).
+```
+
 <Info>
-  The cloud case was added after RootSign 0.3.1. In 0.3.1 and earlier, a held call on the cloud transport tried to reach a local PostgreSQL database and failed with `OSError`, or with `ActionNotFoundError` if one was running. The tool did not run.
+  The cloud and own-transaction cases were added after RootSign 0.3.1. In 0.3.1 and earlier, a held call with your own transaction waited for an approval nobody could see, then failed with `ActionNotFoundError`. A held call on the cloud transport tried to reach a local PostgreSQL database and failed with `OSError`, or with `ActionNotFoundError` if one was running. In neither case did the tool run.
 </Info>
 
 <ResponseField name="tool_name" type="str | None">The tool that was called.</ResponseField>
