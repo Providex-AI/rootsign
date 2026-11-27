@@ -81,7 +81,7 @@ Each export has its own manifest hash, because the manifest records when it was 
 </ResponseField>
 
 <ResponseField name="agent" type="object">
-  The agent that recorded the session. From a JSONL file it holds only `agent_id`. From PostgreSQL it also holds `name`, `owner`, `environment`, `risk_tier`, `framework`, `model_version` and `regulatory_categories`. When the source records no agent, it holds a `detail` string saying so.
+  The agent that recorded the session. From PostgreSQL, and from a JSONL file that is still in its data folder with `agents.jsonl` beside it, it holds `agent_id`, `name`, `owner`, `environment`, `risk_tier`, `framework`, `model_version`, `regulatory_categories`, and a `registry` object: `backend` (`jsonl` or `postgres`), `location` (the `agents.jsonl` path, JSONL only) and `in_hash_chain`, which is `false` because neither registry is covered by the hash chain. From a JSONL file copied out of its data folder, or an agent the registry does not list, it holds only `agent_id`. When the source records no agent, it holds a `detail` string saying so.
 </ResponseField>
 
 <ResponseField name="source" type="object">
