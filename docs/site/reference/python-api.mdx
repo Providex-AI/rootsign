@@ -109,7 +109,7 @@ rootsign.init(): agent: String should have at least 2 characters
 - An agent's attributes are stored when it is first registered. If a later run passes different values for the same agent and environment, RootSign keeps the stored ones and logs a warning naming the difference.
 
 <Info>
-  The length limits apply on every backend since the release after RootSign 0.3.1. Before, the JSONL backend accepted any length, and PostgreSQL rejected the value only when the first session opened.
+  The length limits apply on every backend since RootSign 0.4.0. Before, the JSONL backend accepted any length, and PostgreSQL rejected the value only when the first session opened.
 </Info>
 
 ## rootsign.session()
@@ -168,7 +168,7 @@ Opens a session, the unit that RootSign chains and verifies. Every traced call i
 - Calling a traced function after the block has ended raises `RootSignNotInitializedError`.
 
 <Info>
-  `RecordPersistenceError` here was added after RootSign 0.3.1. In 0.3.1 and earlier, a session that could not be opened raised the underlying `PermissionError` or `OSError`.
+  `RecordPersistenceError` here was added in RootSign 0.4.0. In 0.3.1 and earlier, a session that could not be opened raised the underlying `PermissionError` or `OSError`.
 </Info>
 
 ### ctx.record_decision()

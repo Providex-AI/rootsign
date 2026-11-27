@@ -121,9 +121,10 @@ class TestChangelog:
         return re.findall(r'<Update label="([^"]+)"', page_text(CHANGELOG))
 
     def test_one_entry_per_release_newest_first(self):
+        """An Unreleased entry is optional (none right after a release) and always first."""
         labels = self._labels()
-        assert labels[0] == "Unreleased"
-        released = labels[1:]
+        released = labels[1:] if labels[0] == "Unreleased" else labels
+        assert "Unreleased" not in released
         files = {p.stem for p in (REPO / "docs" / "releases").glob("v*.md")}
         # v0.2.1 has a GitHub release and no file in docs/releases.
         assert set(released) == files | {"v0.2.1"}
@@ -136,16 +137,16 @@ class TestChangelog:
 
     def test_each_release_links_to_its_tag(self):
         text = page_text(CHANGELOG)
-        for label in self._labels()[1:]:
+        for label in [label for label in self._labels() if label != "Unreleased"]:
             entry = text[text.index(f'<Update label="{label}"') :]
             entry = entry[: entry.index("</Update>")]
             assert f"releases/tag/{label})" in entry, label
 
-    def test_unreleased_links_are_pull_requests(self):
-        text = page_text(CHANGELOG)
-        entry = text[: text.index("</Update>")]
+    def test_pull_request_links_point_at_their_own_number(self):
+        """`[#88](.../pull/88)`: a line pasted from another PR keeps the wrong link otherwise."""
         links = re.findall(
-            r"\[#(\d+)\]\(https://github\.com/Providex-AI/rootsign/pull/(\d+)\)", entry
+            r"\[#(\d+)\]\(https://github\.com/Providex-AI/rootsign/pull/(\d+)\)",
+            page_text(CHANGELOG),
         )
         assert links and all(a == b for a, b in links)
 
