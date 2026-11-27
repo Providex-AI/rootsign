@@ -88,7 +88,7 @@ A value is redacted when **its field name has a rule and the value matches that 
 </Warning>
 
 <Info>
-  Redaction of positional arguments by parameter name was added after RootSign 0.3.1. In 0.3.1 and earlier, `email_customer("alice@example.com", ...)` stored the address unredacted; only the keyword form was redacted.
+  Redaction of positional arguments by parameter name was added in RootSign 0.4.0. In 0.3.1 and earlier, `email_customer("alice@example.com", ...)` stored the address unredacted; only the keyword form was redacted.
 </Info>
 
 Other details:
@@ -118,7 +118,7 @@ redaction = FinancialPIIConfig(extra_rules={"policy_number": r"POL-\d{6}"})
 ```
 
 <Info>
-  `extra_rules` on `FinancialPIIConfig` and `HealthcarePIIConfig` was added after RootSign 0.3.1. In 0.3.1 and earlier, only `StandardPIIConfig` accepts it.
+  `extra_rules` on `FinancialPIIConfig` and `HealthcarePIIConfig` was added in RootSign 0.4.0. In 0.3.1 and earlier, only `StandardPIIConfig` accepts it.
 </Info>
 
 To start from nothing, build a `RedactionConfig` with only your rules:

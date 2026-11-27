@@ -23,7 +23,7 @@ Set it before `rootsign.init()` runs; your code does not change. Two settings tu
 [Configuration](/reference/configuration#batching) lists them with the other settings.
 
 <Info>
-  A fix after RootSign 0.3.1 makes batching safe on PostgreSQL. In 0.3.1 and earlier, with `ROOTSIGN_BUFFERED=true` on PostgreSQL, the last tool calls of a session could be lost without any error, and the session still verified as `VALID`. Upgrade before you turn batching on with PostgreSQL.
+  A fix in RootSign 0.4.0 makes batching safe on PostgreSQL. In 0.3.1 and earlier, with `ROOTSIGN_BUFFERED=true` on PostgreSQL, the last tool calls of a session could be lost without any error, and the session still verified as `VALID`. Upgrade before you turn batching on with PostgreSQL.
 </Info>
 
 ## What it changes

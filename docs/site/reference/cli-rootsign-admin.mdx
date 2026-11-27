@@ -51,7 +51,7 @@ The database is `rootsign_dev`, with user `rootsign` and password `rootsign`. It
 | `1` | `docker` is not on your `PATH`, Docker failed, or the database was not ready within 30 seconds. |
 
 <Info>
-  The `rootsign_pgdata` volume was added after RootSign 0.3.1. In 0.3.1 and earlier, each new container got an empty volume, so `stop-db --remove` followed by `start-db` started with no data.
+  The `rootsign_pgdata` volume was added in RootSign 0.4.0. In 0.3.1 and earlier, each new container got an empty volume, so `stop-db --remove` followed by `start-db` started with no data.
 </Info>
 
 ## rootsign-admin stop-db
@@ -200,7 +200,7 @@ Every attempt adds an entry to the session's receipt, `spool/receipts/<session_i
 | `1` | At least one session did not finish, a spool file could not be read, `ROOTSIGN_API_KEY` is not set, or `rootsign[cloud]` is not installed. |
 
 <Info>
-  The `FAILED` line for an unreachable endpoint was added after RootSign 0.3.1. In 0.3.1 and earlier, an outage was reported as `REJECTED`, although the receipt recorded it as a transport failure.
+  The `FAILED` line for an unreachable endpoint was added in RootSign 0.4.0. In 0.3.1 and earlier, an outage was reported as `REJECTED`, although the receipt recorded it as a transport failure.
 </Info>
 
 ## Related

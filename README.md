@@ -84,7 +84,7 @@ Runnable apps for each integration are in [`examples/`](https://github.com/Provi
 
 ## Status
 
-RootSign is at **v0.3.1** and classified as **alpha**. The five calls `init`, `session`, `wrap_tools`, `trace` and `verify` are the stable public surface. Cloud mode is a preview: the SDK's HTTP transport and offline spool ship today, but the hosted ingest service is not live yet. See the [roadmap](https://docs.getprovidex.com/resources/roadmap) for what comes next and the [changelog](https://docs.getprovidex.com/resources/changelog) for what changed.
+RootSign is at **v0.4.0** and classified as **alpha**. The five calls `init`, `session`, `wrap_tools`, `trace` and `verify` are the stable public surface. Cloud mode is a preview: the SDK's HTTP transport and offline spool ship today, but the hosted ingest service is not live yet. See the [roadmap](https://docs.getprovidex.com/resources/roadmap) for what comes next and the [changelog](https://docs.getprovidex.com/resources/changelog) for what changed.
 
 ## Contributing
 

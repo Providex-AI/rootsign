@@ -69,7 +69,7 @@ Each export has its own manifest hash, because the manifest records when it was 
 </ResponseField>
 
 <ResponseField name="generator" type="string">
-  The RootSign that wrote the bundle, such as `rootsign 0.3.1`.
+  The RootSign that wrote the bundle, such as `rootsign 0.4.0`.
 </ResponseField>
 
 <ResponseField name="generated_at" type="string">
@@ -189,7 +189,7 @@ The session as it happened, in three parts: `session`, `previews` and `events`.
 On a `DECISION`, `reasoning_depth` is the depth the decision was captured at: `minimal`, `summary` or `full`. It tells a reader whether a short `reasoning_summary` or an empty `alternatives_considered` was cut by the depth or was never given. It is `null` for a decision recorded without one, such as a PostgreSQL decision stored before migration 0006.
 
 <Info>
-  `reasoning_depth` is in bundles exported after RootSign 0.3.1. Bundles exported by 0.3.1 and earlier have no such field, and their format version is the same, `1.0`.
+  `reasoning_depth` is in bundles exported by RootSign 0.4.0 and later. Bundles exported by 0.3.1 and earlier have no such field, and their format version is the same, `1.0`.
 </Info>
 
 An action that a person rejected:
@@ -218,7 +218,7 @@ An action that a person rejected:
 With `--redact-previews`, six fields are removed from every event: `input_preview`, `output_preview`, `context_presented`, `reasoning_summary`, `inputs_summary` and `alternatives_considered`. Hashes, IDs, timings and statuses stay.
 
 <Info>
-  `alternatives_considered` was added to the withheld fields after RootSign 0.3.1. In 0.3.1 and earlier, `--redact-previews` kept it.
+  `alternatives_considered` was added to the withheld fields in RootSign 0.4.0. In 0.3.1 and earlier, `--redact-previews` kept it.
 </Info>
 
 ## redaction.json
