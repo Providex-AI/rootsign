@@ -129,7 +129,7 @@ rootsign: decision not recorded (confidence: Input should be less than or equal 
 | --- | --- |
 | Decision record | `decision_id`, `selected_action`, `reasoning_summary`, `confidence`, `alternatives_considered`, `reasoning_depth`, `reasoning_captured`, `timestamp` |
 | The next action | `decision_id`, the link to the decision |
-| [Evidence bundle](/reference/evidence-bundle#timeline-json) | A `DECISION` entry in `timeline.json` and the report, before the action it explains |
+| [Evidence bundle](/reference/evidence-bundle#timeline-json) | A `DECISION` entry in `timeline.json` and the report, with its `reasoning_depth`, before the action it explains |
 
 When you export with `--redact-previews`, the bundle leaves out `reasoning_summary` and `alternatives_considered`, and keeps the chosen action and the confidence.
 

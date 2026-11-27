@@ -104,6 +104,8 @@ def _write_pinned_session(data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> Pa
             {
                 "selected_action": "escalate_to_human",
                 "confidence": 0.41,
+                # alternatives are kept only at `full`, as the SDK records it
+                "reasoning_depth": "full",
                 "alternatives_considered": ["auto_approve", "reject"],
                 "reasoning_summary": "transfer exceeds the unattended threshold",
                 "timestamp": BASE_TIME,
