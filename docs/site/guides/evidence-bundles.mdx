@@ -11,6 +11,20 @@ keywords: ["rootsign export", "evidence bundle", "manifest", "chain of custody",
   Exporting a JSONL session file needs only `pip install rootsign`. Exporting by session ID reads the PostgreSQL store and needs `pip install 'rootsign[postgres]'` and `ROOTSIGN_BACKEND=postgres`.
 </Note>
 
+<Frame caption="Export the quickstart's session, open report.html, then check the bundle before and after someone edits the report">
+  <video
+    src="/videos/evidence-bundle.mp4"
+    autoPlay
+    muted
+    loop
+    playsInline
+    controls
+    className="w-full aspect-video"
+  >
+    Recording: rootsign export --local writes the bundle and prints the manifest hash, report.html scrolls from the VALID verdict through the chain and every event, rootsign export --check finds every file intact, and after the amount in report.html is edited the check names report.html as altered and exits 1.
+  </video>
+</Frame>
+
 ## Export a session
 
 <Steps>
