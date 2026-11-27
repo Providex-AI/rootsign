@@ -12,7 +12,7 @@
 [![LinkedIn](https://img.shields.io/badge/LinkedIn-Providex-0A66C2?logo=linkedin)](https://www.linkedin.com/company/providex)
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Providex-AI/rootsign/main/docs/demo.gif" alt="RootSign demo — pip install with no database, three instrumented tool calls land on the hash chain, rootsign verify --local confirms VALID" width="780" />
+  <img src="https://raw.githubusercontent.com/Providex-AI/rootsign/main/docs/demo.gif" alt="RootSign demo: pip install rootsign, two traced tool calls, rootsign verify --local reports VALID, then TAMPERED for an edited record and INCOMPLETE for a deleted one" width="780" />
 </p>
 
 ## What is RootSign?

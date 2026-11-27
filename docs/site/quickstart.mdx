@@ -9,8 +9,18 @@ This quickstart gets you a verified hash chain in under a minute. You install Ro
 
 Nothing here needs a database, Docker, an API key or a network connection. Records go to a local JSONL file.
 
-<Frame caption="Install, record three tool calls, verify the chain">
-  <img src="/images/quickstart-demo.gif" alt="Terminal recording: pip install rootsign, a script records three tool calls, and rootsign verify --local reports VALID" />
+<Frame caption="The steps below in one minute: install, run, verify, then edit a record and delete one">
+  <video
+    src="/videos/quickstart.mp4"
+    autoPlay
+    muted
+    loop
+    playsInline
+    controls
+    className="w-full aspect-video"
+  >
+    Terminal recording: pip install rootsign, python agent.py prints a session ID, rootsign verify --local reports VALID with exit code 0, an edited copy reports TAMPERED with exit code 1, and a copy with a deleted line reports INCOMPLETE with exit code 2.
+  </video>
 </Frame>
 
 ## Prerequisites
