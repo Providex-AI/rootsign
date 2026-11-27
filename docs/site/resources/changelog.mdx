@@ -53,6 +53,7 @@ Every RootSign release, newest first, with the changes that matter when you upgr
 
   - The MCP proxy works with real streamable-HTTP MCP servers; it answered every request with 406. ([#64](https://github.com/Providex-AI/rootsign/pull/64))
   - The extras require what CI tests: `langgraph>=0.2` and `crewai>=0.95`. ([#61](https://github.com/Providex-AI/rootsign/pull/61))
+  - The `mcp` extra requires `mcp>=1.22`: every earlier 1.x release fails to import next to Pydantic 2.14 or later. CI tests 1.22.x as well as the newest 1.x. ([#110](https://github.com/Providex-AI/rootsign/pull/110))
   - The `autogen` extra is removed; AutoGen support is planned for v1.0. ([#60](https://github.com/Providex-AI/rootsign/pull/60))
 </Update>
 

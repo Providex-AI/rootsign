@@ -64,7 +64,10 @@ mcp = [
     # `mcp.server.fastmcp` (and pulls an httpx2/mcp-types ecosystem). The audit
     # server (rootsign/mcp/server.py) is built against the 1.x FastMCP API
     # (streamable_http_app, @mcp.tool). Revisit when porting to 2.x.
-    "mcp>=1.9,<2.0",
+    # Floor 1.22: every mcp from 1.9 to 1.21 fails to import next to
+    # pydantic 2.14+ (ImportError: eval_type_backport), and pip picks the
+    # newest pydantic. CI tests this floor and the newest 1.x.
+    "mcp>=1.22,<2.0",
     "fastapi>=0.111",
     "uvicorn[standard]>=0.30",
     "httpx>=0.27",
