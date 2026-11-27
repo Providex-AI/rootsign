@@ -2,7 +2,7 @@
 
 `resources/framework-support.mdx`: the tested lines are the CI matrix, the
 Python versions are CI's, the extras exist, and the repo's
-`docs/framework-support.md` table agrees. `resources/changelog.mdx`: one entry
+`docs/framework-support.md` points at the page instead of keeping a copy. `resources/changelog.mdx`: one entry
 per release, newest first, the newest is the version in `pyproject.toml`, and
 each links to its tag. `resources/design-decisions.mdx`: every ADR in
 `docs/adr`, linked by its real file name. `resources/security.mdx`: the
@@ -68,24 +68,30 @@ class TestFrameworkSupport:
         tested = _row(SUPPORT, row)[2]
         assert tested == f"{name} " + ", ".join(lines[:-1]) + f", {lines[-1]}"
 
-    def test_the_repo_support_table_agrees(self):
+    def test_the_repo_doc_points_at_the_page_instead_of_copying_it(self):
+        """One copy to keep in line with CI: a second table drifted before."""
         repo_doc = (REPO / "docs" / "framework-support.md").read_text()
-        for job, name in (
-            ("LangGraph contract (langgraph", "LangGraph"),
-            ("CrewAI contract (crewai", "CrewAI"),
-        ):
-            lines = ", ".join(_ci_lines(job))
-            assert re.search(
-                rf"^\| {name}\s*\| Supported \| {re.escape(lines)} \(CI matrix\)", repo_doc, re.M
-            ), name
+        assert "https://docs.getprovidex.com/resources/framework-support" in repo_doc
+        assert "](site/resources/framework-support.mdx)" in repo_doc
+        assert not re.search(r"^\|", repo_doc, re.M), "the pointer has grown a table again"
 
-    def test_mcp_is_tested_on_1x(self):
+    def test_mcp_floor_is_tested_and_stated(self):
+        """The extra's floor, the CI row that tests it and the page say the same release."""
         (spec,) = [
             d for d in PYPROJECT["project"]["optional-dependencies"]["mcp"] if d.startswith("mcp")
         ]
-        assert spec == "mcp>=1.9,<2.0"
-        assert _row(SUPPORT, "MCP")[2] == "`mcp` 1.x, the newest 1.x release on each run"
-        assert "pip install -e '.[dev,mcp]'" in CI
+        floor = re.fullmatch(r"mcp>=(\d+)\.(\d+),<2\.0", spec)
+        assert floor, spec
+        line = f"{floor.group(1)}.{floor.group(2)}"
+        assert f"line: '{line}.x', spec: '~={line}.0'" in CI
+        assert "line: 'newest 1.x', spec: ''" in CI
+        assert _row(SUPPORT, "MCP")[2] == f"`mcp` {line}.x and the newest 1.x release on each run"
+        assert "pip install -e '.[dev,mcp]' \"mcp${{ matrix.spec }}\"" in CI
+
+    def test_the_required_mcp_check_keeps_its_name(self):
+        """Branch protection requires "MCP proxy contract tests"; the newest row must keep it."""
+        assert "name: MCP proxy contract tests${{ matrix.suffix }}" in CI
+        assert "line: 'newest 1.x', spec: '', prefix: '1.', suffix: ''" in CI
 
     def test_install_extras_exist(self):
         extras = PYPROJECT["project"]["optional-dependencies"]

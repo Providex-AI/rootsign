@@ -8,7 +8,7 @@ A minimal but fully runnable LangGraph ReAct agent with three instrumented tools
 
 Every tool call lands on the RootSign hash chain. After the agent finishes, run `rootsign verify <session-id>` and you should see `VALID ✓ — 3 records, chain intact`.
 
-This example runs against **Postgres/TimescaleDB** because that's the production shape — hence the Docker step below. If you just want to see RootSign work, [`../quickstart-jsonl`](../quickstart-jsonl/) needs no database at all. The agent code is identical either way; only `ROOTSIGN_BACKEND` differs.
+This example runs against **Postgres/TimescaleDB** because that's the production shape, hence the Docker step below. If you just want to see RootSign work, [`../quickstart-jsonl`](../quickstart-jsonl/) needs no database at all. The agent code is identical either way; only `ROOTSIGN_BACKEND` differs.
 
 ## Setup
 
@@ -28,7 +28,7 @@ set -a && source .env && set +a       # export DATABASE_URL[_SYNC] for rootsign-
 rootsign-admin init
 ```
 
-(`rootsign-admin` reads `DATABASE_URL` / `DATABASE_URL_SYNC` directly — no `ROOTSIGN_` prefix. The `set -a` trick exports every variable in `.env` to the subprocess so the admin CLI sees them.)
+(`rootsign-admin` reads `DATABASE_URL` / `DATABASE_URL_SYNC` directly, with no `ROOTSIGN_` prefix. The `set -a` trick exports every variable in `.env` to the subprocess so the admin CLI sees them.)
 
 ## Run it
 
@@ -68,7 +68,7 @@ async with rootsign.session(objective="...") as ctx:
     tools = rootsign.wrap_tools([send_invoice, log_payment, notify_customer])
 ```
 
-`init()` does no I/O — the agent record is get-or-created on the first `session()` entry, keyed on `(name, environment)`, so re-running the script never re-registers (that's why there's no `.agent_id` cache file any more). `wrap_tools()` needs no `ctx=`/`client=`: the session publishes them and each tool call resolves them. The explicit form is still public — see the comment block at the bottom of `agent.py`.
+`init()` does no I/O: the agent record is get-or-created on the first `session()` entry, keyed on `(name, environment)`, so re-running the script never re-registers (that's why there's no `.agent_id` cache file any more). `wrap_tools()` needs no `ctx=`/`client=`: the session publishes them and each tool call resolves them. The explicit form is still public; see the comment block at the bottom of `agent.py`.
 
 `rootsign.wrap_tools(...)` wraps each `BaseTool` so that every `tool.ainvoke(...)` call:
 
@@ -77,4 +77,4 @@ async with rootsign.session(objective="...") as ctx:
 3. Hashes the output
 4. Emits an `ACTION_RECORD` envelope with `prev_action_hash` linking it to the previous action in the session
 
-The agent code itself doesn't know any of this is happening — it just calls tools as normal LangGraph tools. The tracer is the only thing between the agent and the wrapped callable.
+The agent code itself doesn't know any of this is happening: it just calls tools as normal LangGraph tools. The tracer is the only thing between the agent and the wrapped callable.

@@ -280,8 +280,19 @@ jobs:
     # Installs the mcp extra (fastapi + uvicorn + mcp + httpx). Lazy imports in
     # rootsign/mcp/* mean the core SDK still imports without it (verified by a
     # test in tests/contract/mcp/), but the proxy itself needs fastapi to run.
-    name: MCP proxy contract tests
+    #
+    # Two rows: the newest 1.x, and the extra's floor. mcp 1.9 to 1.21 fail to
+    # import next to pydantic 2.14+, so the floor is 1.22 and this row keeps it
+    # honest. The newest row keeps the bare job name, because branch
+    # protection requires "MCP proxy contract tests" by that name.
+    name: MCP proxy contract tests${{ matrix.suffix }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { line: 'newest 1.x', spec: '', prefix: '1.', suffix: '' }
+          - { line: '1.22.x', spec: '~=1.22.0', prefix: '1.22.', suffix: ' (mcp 1.22.x)' }
     env:
       ROOTSIGN_SKIP_DB_BOOTSTRAP: '1'
     steps:
@@ -290,7 +301,12 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install with mcp extra
-        run: pip install -e '.[dev,mcp]'
+        run: pip install -e '.[dev,mcp]' "mcp${{ matrix.spec }}"
+      - name: Check installed version
+        run: |
+          v=$(python -c "import importlib.metadata as m; print(m.version('mcp'))")
+          echo "mcp $v"
+          case "$v" in ${{ matrix.prefix }}*) ;; *) echo "::error::expected mcp ${{ matrix.line }}, got $v"; exit 1 ;; esac
       - name: Contract tests
         run: pytest tests/contract/mcp/ -v
 

@@ -4,7 +4,7 @@ Self-contained, runnable apps demonstrating `@rootsign.trace` end-to-end.
 
 | Example | Framework | What it does |
 |---|---|---|
-| [`quickstart-jsonl`](quickstart-jsonl/) | none (plain `@rootsign.trace`) | **Start here.** Two traced tool calls, zero config — no Docker, no database, no API key. Ends in `rootsign verify --local` → `VALID ✓`. |
+| [`quickstart-jsonl`](quickstart-jsonl/) | none (plain `@rootsign.trace`) | **Start here.** Two traced tool calls, zero config: no Docker, no database, no API key. Ends in `rootsign verify --local` → `VALID ✓`. |
 | [`langgraph-jsonl`](langgraph-jsonl/) | LangGraph | A LangGraph graph with `ToolNode` and a scripted model, so it needs no database and no API key. Ends in `rootsign verify --local` → `VALID ✓`. |
 | [`crewai-jsonl`](crewai-jsonl/) | CrewAI | A CrewAI crew run with `kickoff_async()` and a scripted LLM, so it needs no database and no API key. Ends in `rootsign verify --local` → `VALID ✓`. |
 | [`mcp-proxy`](mcp-proxy/) | MCP (any framework) | An MCP client, the RootSign proxy and a FastMCP server in one script, talking real HTTP on localhost. No database, no API key. Ends in `rootsign verify --local` → `VALID ✓`. |
@@ -14,11 +14,11 @@ PRs with more examples are welcome.
 
 ## Prerequisites for any example
 
-`quickstart-jsonl` needs none of these — `pip install rootsign` and go. For the rest:
+`quickstart-jsonl` needs none of these: `pip install rootsign` and go. For the rest:
 
-- **Docker** — for the shared TimescaleDB container.
-- **Python 3.11 or 3.12** — CrewAI lags on 3.13 / 3.14 wheels.
-- **An OpenAI API key** — set `OPENAI_API_KEY` in `.env`. Examples that don't need an LLM say so in their own README.
+- **Docker**, for the shared TimescaleDB container.
+- **Python 3.11 or 3.12.** CrewAI lags on 3.13 / 3.14 wheels.
+- **An OpenAI API key.** Set `OPENAI_API_KEY` in `.env`. Examples that don't need an LLM say so in their own README.
 
 ## Shared TimescaleDB
 
