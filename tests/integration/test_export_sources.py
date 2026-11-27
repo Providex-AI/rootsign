@@ -185,6 +185,8 @@ class TestPostgresSource:
         assert from_db["agent"]["name"] == seeded_agent.name
         assert from_db["agent"]["owner"] == seeded_agent.owner
         assert from_db["agent"]["risk_tier"] == seeded_agent.risk_tier
+        # The registration row is not covered by the hash chain, and says so.
+        assert from_db["agent"]["registry"] == {"backend": "postgres", "in_hash_chain": False}
 
         # The file source knows the id and admits the rest is not there.
         assert set(from_file["agent"]) == {"agent_id"}

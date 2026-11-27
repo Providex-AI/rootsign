@@ -30,6 +30,7 @@ Every RootSign release, newest first, with the changes that matter when you upgr
   - The inline approval prompt reads the first word: typing `yes` approves with no note. It recorded the note `es`. ([#69](https://github.com/Providex-AI/rootsign/pull/69))
   - An evidence bundle's `report.html` fits a phone screen: long values wrap inside their card and a wide table scrolls inside it. Timestamps, paths and the chain table ran off the screen. ([#107](https://github.com/Providex-AI/rootsign/pull/107))
   - Each `DECISION` in an evidence bundle carries its `reasoning_depth`, so a reviewer can tell reasoning the depth cut from reasoning never given. The bundle format stays `1.0`. ([#111](https://github.com/Providex-AI/rootsign/pull/111))
+  - A bundle exported from a JSONL session file names the agent (name, owner, risk tier and the rest) from `agents.jsonl` in the same data folder, as a PostgreSQL bundle does from its registration row. Both now say the identity came from a registry that the hash chain does not cover. ([#112](https://github.com/Providex-AI/rootsign/pull/112))
 
   **SDK**
 

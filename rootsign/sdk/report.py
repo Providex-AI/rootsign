@@ -113,11 +113,25 @@ def _identity_rows(manifest: dict[str, Any], timeline: dict[str, Any]) -> list[t
         ("Started", _or_dash(session.get("start_time"))),
         ("Ended", _or_dash(session.get("end_time"))),
         ("Agent", _agent_label(agent)),
+        *_registry_row(agent),
         ("Source", f"{source.get('backend', '?')} ({source.get('location', '?')})"),
         ("Generated", f"{manifest.get('generated_at', '')} by {manifest.get('generator', '')}"),
         ("Bundle format", str(manifest.get("bundle_version", ""))),
     ]
     return rows
+
+
+def _registry_row(agent: dict[str, Any]) -> list[tuple[str, str]]:
+    """Where the agent's name and details came from, when the source named one."""
+    registry = agent.get("registry") or {}
+    if registry.get("backend") == "jsonl":
+        where = f"the JSONL agent registry ({registry.get('location', 'agents.jsonl')})"
+    elif registry.get("backend") == "postgres":
+        where = "the PostgreSQL agents table"
+    else:
+        return []
+    covered = "covered" if registry.get("in_hash_chain") else "not covered"
+    return [("Agent details", f"from {where}, {covered} by the hash chain")]
 
 
 def _agent_label(agent: dict[str, Any]) -> str:

@@ -457,3 +457,74 @@ class TestDecisionDepth:
 
         assert "reasoning_depth" in decision
         assert decision["reasoning_depth"] is None
+
+
+class TestAgentIdentityFromTheLocalRegistry:
+    """A JSONL bundle names the agent when its registry is beside the session.
+
+    `init()` registers the agent in `<data_dir>/agents.jsonl` and sessions go to
+    `<data_dir>/sessions/`. The bundle reads that row, the same fields a
+    PostgreSQL bundle takes from its registration row, and says where they came
+    from: neither registry is covered by the hash chain. A session file copied
+    anywhere else has no registry beside it, and the bundle says so as before.
+    """
+
+    AGENT_SCRIPT = (
+        "import asyncio, rootsign\n"
+        "rootsign.init(agent='ledger-agent', owner='finance-team', risk_tier='high')\n"
+        "@rootsign.trace()\n"
+        "async def post(entry: str) -> str:\n"
+        "    return 'posted'\n"
+        "async def main():\n"
+        "    async with rootsign.session(objective='close the books'):\n"
+        "        await post('Q3')\n"
+        "asyncio.run(main())\n"
+    )
+
+    def _session(self, tmp_path):
+        from tests.support.docs_pages import run_script
+
+        return run_script(self.AGENT_SCRIPT, tmp_path)
+
+    def test_the_registry_beside_the_session_names_the_agent(self, tmp_path):
+        from rootsign.sdk.report import attach_reports
+
+        run = self._session(tmp_path)
+        bundle = attach_reports(export_local(run.only_session()))
+
+        agent = bundle.manifest["agent"]
+        assert agent["name"] == "ledger-agent"
+        assert agent["owner"] == "finance-team"
+        assert agent["risk_tier"] == "high"
+        assert agent["registry"] == {
+            "backend": "jsonl",
+            "location": str(run.data_dir / "agents.jsonl"),
+            "in_hash_chain": False,
+        }
+        for name in ("report.md", "report.html"):
+            report = bundle.files()[name]
+            assert "ledger-agent" in report, name
+            assert "not covered by the hash chain" in report, name
+
+    def test_a_copied_session_file_still_knows_only_the_id(self, tmp_path):
+        run = self._session(tmp_path)
+        elsewhere = tmp_path / "handed-over" / "session.jsonl"
+        elsewhere.parent.mkdir()
+        elsewhere.write_bytes(run.only_session().read_bytes())
+
+        assert set(export_local(elsewhere).manifest["agent"]) == {"agent_id"}
+
+    def test_an_agent_missing_from_the_registry_is_not_guessed(self, tmp_path):
+        run = self._session(tmp_path)
+        (run.data_dir / "agents.jsonl").write_text(
+            '{"agent_id": "00000000-0000-4000-8000-000000000000", "name": "someone-else"}\n'
+        )
+
+        assert set(export_local(run.only_session()).manifest["agent"]) == {"agent_id"}
+
+    def test_an_unreadable_registry_does_not_stop_the_export(self, tmp_path):
+        """Identity is a nicety beside the evidence; the export must still happen."""
+        run = self._session(tmp_path)
+        (run.data_dir / "agents.jsonl").write_text("not json\n")
+
+        assert set(export_local(run.only_session()).manifest["agent"]) == {"agent_id"}
