@@ -2,7 +2,7 @@
 
 `resources/framework-support.mdx`: the tested lines are the CI matrix, the
 Python versions are CI's, the extras exist, and the repo's
-`docs/framework-support.md` table agrees. `resources/changelog.mdx`: one entry
+`docs/framework-support.md` points at the page instead of keeping a copy. `resources/changelog.mdx`: one entry
 per release, newest first, the newest is the version in `pyproject.toml`, and
 each links to its tag. `resources/design-decisions.mdx`: every ADR in
 `docs/adr`, linked by its real file name. `resources/security.mdx`: the
@@ -68,16 +68,12 @@ class TestFrameworkSupport:
         tested = _row(SUPPORT, row)[2]
         assert tested == f"{name} " + ", ".join(lines[:-1]) + f", {lines[-1]}"
 
-    def test_the_repo_support_table_agrees(self):
+    def test_the_repo_doc_points_at_the_page_instead_of_copying_it(self):
+        """One copy to keep in line with CI: a second table drifted before."""
         repo_doc = (REPO / "docs" / "framework-support.md").read_text()
-        for job, name in (
-            ("LangGraph contract (langgraph", "LangGraph"),
-            ("CrewAI contract (crewai", "CrewAI"),
-        ):
-            lines = ", ".join(_ci_lines(job))
-            assert re.search(
-                rf"^\| {name}\s*\| Supported \| {re.escape(lines)} \(CI matrix\)", repo_doc, re.M
-            ), name
+        assert "https://docs.getprovidex.com/resources/framework-support" in repo_doc
+        assert "](site/resources/framework-support.mdx)" in repo_doc
+        assert not re.search(r"^\|", repo_doc, re.M), "the pointer has grown a table again"
 
     def test_mcp_floor_is_tested_and_stated(self):
         """The extra's floor, the CI row that tests it and the page say the same release."""

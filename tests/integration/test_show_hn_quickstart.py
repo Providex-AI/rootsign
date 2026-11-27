@@ -145,7 +145,7 @@ class TestZeroConfigQuickstart:
             await tools[2].ainvoke({"customer_id": "acme", "message": "Invoice sent"})
 
         session_file = tmp_path / "sessions" / f"{ctx.session_id}.jsonl"
-        assert session_file.exists(), "the README's stated file layout changed"
+        assert session_file.exists(), "the quickstart's stated file layout changed"
 
         # Step 4: verify via the CLI, exactly as the README prints it.
         # Flag 2 Rule B: to_thread isolates the CLI's asyncio.run().
@@ -164,7 +164,7 @@ class TestZeroConfigQuickstart:
         assert chain_result.valid is True
         assert chain_result.record_count == 3
 
-        # Step 6: the README's last quickstart line — export the same session
+        # Step 6: the quickstart's last step — export the same session
         # as an evidence bundle, and prove the printed anchor is real by
         # checking the bundle with it (T4.1 / ADR-014).
         bundles = tmp_path / "bundles"
@@ -188,7 +188,7 @@ class TestZeroConfigQuickstart:
             "redaction.json",
             "report.md",
             "report.html",
-        }, "the README's bundle-contents table no longer matches what export writes"
+        }, "the docs' bundle-contents table no longer matches what export writes"
 
         check = await asyncio.to_thread(runner.invoke, app, ["export", "--check", str(directory)])
         assert check.exit_code == 0, check.output

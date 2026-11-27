@@ -31,7 +31,7 @@ You will receive acknowledgement within 48 hours. We target a patch release with
 
 **Out of scope:**
 
-- Issues in third-party dependencies — report upstream first; if RootSign needs to pin or work around, open a security advisory here as a tracking issue once the upstream report exists
+- Issues in third-party dependencies: report upstream first; if RootSign needs to pin or work around, open a security advisory here as a tracking issue once the upstream report exists
 - Theoretical attacks with no practical exploit path
 - Denial-of-service against single-tenant local deployments (the Phase 1 storage layer assumes a trusted operator)
 - Social engineering of maintainers
@@ -47,7 +47,7 @@ larger third-party trees that may carry their own CVEs. Our policy:
    pointer to this section. Example: the `chromadb` HTTP-server pre-auth
    code injection CVE arrives through `crewai`'s extra, but RootSign
    never imports `chromadb`, never starts its HTTP server, and never
-   uses `trust_remote_code=true` — the attack surface lives in the
+   uses `trust_remote_code=true`. The attack surface lives in the
    user's own infrastructure if they choose to run a ChromaDB server,
    not in RootSign.
 2. **CVEs in dependencies that ARE in our execution path** get a pin
