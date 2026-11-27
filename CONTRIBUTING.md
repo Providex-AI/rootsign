@@ -7,7 +7,7 @@ RootSign is the open-source agent capture layer of the Providex AI Agent Account
 ## Before you contribute
 
 - **Code of Conduct.** RootSign adopts the [Contributor Covenant v2.1](https://www.contributor-covenant.org/version/2/1/code_of_conduct/) as its code of conduct. By participating in this project (issues, PRs, discussions, Discord), you agree to uphold its standards. Report unacceptable behavior to `info@getprovidex.com`.
-- Sign the [CLA](CLA.md) (automated — you'll be prompted on your first PR)
+- Sign the [CLA](CLA.md) (automated: you'll be prompted on your first PR)
 - Check the issue tracker for existing discussion before opening a new issue
 
 ## Development setup
@@ -27,15 +27,15 @@ python -m pytest -m benchmark -v         # performance budgets (opt-in — see n
 >
 > The package's `requires-python` is `>=3.11,<3.15`, but the `[crewai]` extra currently lacks wheels for 3.13/3.14 so installs of `'.[crewai]'` on those versions fail with `No matching distribution found`. Bump the recommendation only after upstream ships matching wheels.
 >
-> **Always invoke pytest as `python -m pytest`.** If you `brew install`-ed pytest, the system binary will resolve ahead of the venv's pytest on PATH and run under the system Python — which does not see your venv's site-packages and will fail with confusing `ModuleNotFoundError` (typically on `sqlalchemy` first). `python -m pytest` always uses the venv's interpreter.
+> **Always invoke pytest as `python -m pytest`.** If you `brew install`-ed pytest, the system binary will resolve ahead of the venv's pytest on PATH and run under the system Python, which does not see your venv's site-packages and will fail with confusing `ModuleNotFoundError` (typically on `sqlalchemy` first). `python -m pytest` always uses the venv's interpreter.
 >
 > **Note on unit tests:** The session-scoped `_bootstrap_test_db` fixture in `tests/conftest.py` runs alembic against the test DB before any test (including unit tests). Bring `docker-compose up -d db` up first.
 >
-> **Performance benchmarks are opt-in.** Everything under `tests/performance/` is marked `benchmark` and is **skipped** by a default `python -m pytest` run; pass `-m benchmark` to execute it. These tests assert wall-clock budgets, so they are the most hardware-sensitive part of the suite — `test_1000_actions_under_2_seconds` has only ~1.36x headroom on a developer laptop. They are deliberately kept out of every CI gating job: a timing budget that reddens `main` for reasons unrelated to the diff teaches people to ignore red. Run them locally (or on purpose in CI) when touching the ingest, hashing, or verify paths.
+> **Performance benchmarks are opt-in.** Everything under `tests/performance/` is marked `benchmark` and is **skipped** by a default `python -m pytest` run; pass `-m benchmark` to execute it. These tests assert wall-clock budgets, so they are the most hardware-sensitive part of the suite: `test_1000_actions_under_2_seconds` has only ~1.36x headroom on a developer laptop. They are deliberately kept out of every CI gating job: a timing budget that reddens `main` for reasons unrelated to the diff teaches people to ignore red. Run them locally (or on purpose in CI) when touching the ingest, hashing, or verify paths.
 >
-> **The thresholds are ACs and do not move.** To keep them honest without making them flaky, each budget is sampled several times and asserted on the **median** (`tests/performance/_bench.py`). A single stalled run barely shifts a median, while a real regression shifts every sample — so the AC stays exactly as specified and the measurement stops reacting to background load, cold caches, or a noisy neighbour. Failures print every sample, not just the median, so you can see the spread. `test_p99_overhead_under_5ms` is the exception: it already asserts on the p99 of 1,000 calls, so it is a distribution by construction.
+> **The thresholds are ACs and do not move.** To keep them honest without making them flaky, each budget is sampled several times and asserted on the **median** (`tests/performance/_bench.py`). A single stalled run barely shifts a median, while a real regression shifts every sample, so the AC stays exactly as specified and the measurement stops reacting to background load, cold caches, or a noisy neighbour. Failures print every sample, not just the median, so you can see the spread. `test_p99_overhead_under_5ms` is the exception: it already asserts on the p99 of 1,000 calls, so it is a distribution by construction.
 >
-> These numbers are still **hardware- and environment-dependent** — they measure your disk, your Postgres tuning, and whatever else the machine is doing. Treat a failure as a prompt to investigate on an idle machine, not as proof of a regression. For scale: a trial run of `test_1000_actions_under_2_seconds` produced samples of 1.6s / 2.4s / 1.4s on an idle laptop; the 2.4s sample alone exceeds the 2.0s budget, which is exactly why the median exists.
+> These numbers are still **hardware- and environment-dependent**: they measure your disk, your Postgres tuning, and whatever else the machine is doing. Treat a failure as a prompt to investigate on an idle machine, not as proof of a regression. For scale: a trial run of `test_1000_actions_under_2_seconds` produced samples of 1.6s / 2.4s / 1.4s on an idle laptop; the 2.4s sample alone exceeds the 2.0s budget, which is exactly why the median exists.
 
 ## Branch naming
 
@@ -76,13 +76,13 @@ depends on. A failure against one is a decision, not a bug:
 
 | Fixture | Freezes | If it fails |
 | --- | --- | --- |
-| `hash_vectors.json` | the canonical Action hash (ADR-001) | stop — a new ADR is required, see below |
+| `hash_vectors.json` | the canonical Action hash (ADR-001) | stop: a new ADR is required, see below |
 | `redaction_vectors.json` | the PII rule-set mappings (ADR-006) | confirm the mapping change is intended |
 | `evidence_bundle_v1.json` | the `rootsign export` bundle schema (ADR-014) | see below |
 
 The bundle schema is read by Phase 2 tooling and by anything a partner builds
 on an exported bundle. **Additive** changes (a new optional field, content in
-the reserved `compliance` block) are fine — regenerate and commit the diff:
+the reserved `compliance` block) are fine. Regenerate and commit the diff:
 
 ```bash
 ROOTSIGN_UPDATE_GOLDEN=1 python -m pytest tests/unit/test_export_golden.py
@@ -100,13 +100,13 @@ without first deciding which of the two you are doing.
 - Mock-based integration tests (real PostgreSQL + TimescaleDB only)
 - Any PR that reduces test coverage below 85% overall
 - A regenerated `evidence_bundle_v1.json` that renames or removes a field without a matching `EVIDENCE_BUNDLE_VERSION` bump (see [ADR-014](docs/adr/ADR-014-export-evidence-bundle.md))
-- Code that swallows ingest failures silently (RootSign's promise is that ingest never raises into the agent, but failures *must* be logged at WARNING level — see [ADR-002](docs/adr/ADR-002-transport-agnostic-client.md))
+- Code that swallows ingest failures silently (RootSign's promise is that ingest never raises into the agent, but failures *must* be logged at WARNING level; see [ADR-002](docs/adr/ADR-002-transport-agnostic-client.md))
 
 ## Adding a new framework integration
 
 1. Open a `framework_integration` issue first so we can discuss API surface and version targets
 2. Use the LangGraph integration (`rootsign/sdk/frameworks/langgraph.py`) as a reference
-3. Implement contract tests against a minimum of two framework versions (latest stable + previous minor) — see [ADR-003](docs/adr/ADR-003-framework-contract-tests.md)
+3. Implement contract tests against a minimum of two framework versions (latest stable + previous minor); see [ADR-003](docs/adr/ADR-003-framework-contract-tests.md)
 4. Add the framework to the support table on the docs site (`docs/site/resources/framework-support.mdx`)
 
 ## Questions?
