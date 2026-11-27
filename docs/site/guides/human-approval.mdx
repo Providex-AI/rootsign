@@ -11,6 +11,20 @@ Some tool calls should not run on an agent's say-so: a large payment, deleting d
   Approving from another terminal needs the **PostgreSQL backend**, because the agent and `rootsign approve` are different processes reading the same store. On the default JSONL backend, approval is an [inline prompt](#on-the-jsonl-backend) in the agent's own terminal.
 </Note>
 
+<Frame caption="On PostgreSQL: the agent waits in one terminal while a person approves the call, then rejects it, from another">
+  <video
+    src="/videos/human-approval.mp4"
+    autoPlay
+    muted
+    loop
+    playsInline
+    controls
+    className="w-full aspect-video"
+  >
+    Recording: python transfer.py waits at wire_transfer; in a second terminal rootsign approve --list shows the pending action and rootsign approve approves it, and the agent prints the transfer. On a second run the call is rejected, and the agent prints the HiTLRejectedError message.
+  </video>
+</Frame>
+
 ## Hold a tool for approval
 
 <Steps>

@@ -1,6 +1,7 @@
 """CI-runnable Show HN reproducibility test (Sprint 4 §S4-TASK 9 / §5.2).
 
-Mirrors both README quickstarts end-to-end.
+Mirrors the quickstart (README and docs/site/quickstart.mdx) and the
+PostgreSQL guide (docs/site/guides/postgres.mdx) end-to-end.
 
 `TestZeroConfigQuickstart` — the v0.2.0 headline path (ADR-011 + ADR-012).
 No Docker, no database, no extras:
@@ -13,15 +14,15 @@ No Docker, no database, no extras:
     $ rootsign export --local ~/.rootsign/sessions/<id>.jsonl
     VALID — 3 records, chain intact  ...  manifest.json SHA-256: <anchor>
 
-The export step is part of the gate, not a bonus: the README's bundle-contents
+The export step is part of the gate, not a bonus: the docs' bundle-contents
 table and its promise that the printed anchor is the value `--check` reports
 are both claims a reader will test in their terminal within a minute of
 finishing the quickstart.
 
-`TestShowHNQuickstart` — the "Production backend" section, same code against
+`TestShowHNQuickstart` — the PostgreSQL guide, same code against
 PostgreSQL/TimescaleDB, verified by session id.
 
-If either fails, the README is not publishable. The Sprint 4 DoD gate
+If either fails, the quickstart is not publishable. The Sprint 4 DoD gate
 (Section 5.4 item 11) calls it out as the hard gate before the post goes
 live.
 

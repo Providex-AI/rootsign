@@ -103,6 +103,28 @@ The chain protects the eight fields above and, through the payload hashes, the s
 
 If RootSign fails to write a record, for example because the database is unreachable, it logs a warning and your tool call completes normally. The audit layer never raises an error into the tool it wraps. The design is in [ADR-002](https://github.com/Providex-AI/rootsign/blob/main/docs/adr/ADR-002-transport-agnostic-client.md).
 
+## Overhead per call
+
+RootSign adds a fraction of a millisecond to each tool call. A benchmark in the repository wraps a LangGraph tool that does nothing and calls it 1,000 times. It sends records to an in-memory client, so the figures leave out writing the record:
+
+| Statistic | Time per call |
+| --- | --- |
+| Median | 0.24 ms |
+| Mean | 0.25 ms |
+| p99 | 0.41 to 0.54 ms |
+
+These are three runs on an Apple silicon laptop with Python 3.12; your figures will differ. A regression test fails if the p99 goes above 5 ms.
+
+Writing the record adds the backend's own cost: an append to a local file on JSONL, an insert on PostgreSQL. [Batched writes](/guides/batching) move most of those writes off the tool call's path.
+
+To run the benchmark from a clone of the repository, with no database:
+
+```bash
+ROOTSIGN_SKIP_DB_BOOTSTRAP=1 python -m pytest tests/performance/test_langgraph_benchmarks.py -m benchmark -s
+```
+
+Run it without `--cov`: coverage instrumentation slows every call and inflates the figures.
+
 ## Where records are stored
 
 | Backend | When to use it | Install |
