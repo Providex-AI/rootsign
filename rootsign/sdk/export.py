@@ -423,6 +423,10 @@ def _build_timeline(
                 "decision_id": decision.get("decision_id"),
                 "selected_action": decision.get("selected_action"),
                 "confidence": decision.get("confidence"),
+                # The depth the reasoning was captured at (ADR-008): what tells a
+                # reviewer whether a summary or the alternatives were cut by it.
+                # None for records written before the SDK recorded one.
+                "reasoning_depth": decision.get("reasoning_depth"),
                 "alternatives_considered": decision.get("alternatives_considered"),
                 "reasoning_summary": decision.get("reasoning_summary"),
                 "inputs_summary": decision.get("inputs_summary"),
@@ -808,6 +812,7 @@ def _decision_dict(decision: Any) -> dict[str, Any]:
         "timestamp": _iso(decision.timestamp),
         "selected_action": decision.selected_action,
         "confidence": decision.confidence,
+        "reasoning_depth": decision.reasoning_depth,
         "alternatives_considered": list(decision.alternatives_considered or []),
         "reasoning_summary": decision.reasoning_summary,
         "inputs_summary": decision.inputs_summary,

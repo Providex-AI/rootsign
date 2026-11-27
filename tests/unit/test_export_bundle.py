@@ -407,3 +407,53 @@ class TestLocalSource:
 
         assert set(manifest["agent"]) == {"agent_id"}
         assert manifest["agent"]["agent_id"]
+
+
+class TestDecisionDepth:
+    """A DECISION entry says the depth it was captured at.
+
+    A 500-character `reasoning_summary` reads the same whether the model wrote
+    500 characters or `summary` depth cut it there, and an empty
+    `alternatives_considered` reads the same whether there were none or the
+    depth dropped them. `reasoning_depth` is what tells a reviewer which.
+    """
+
+    def test_the_depth_the_sdk_recorded_reaches_the_bundle(self, tmp_path):
+        from tests.support.docs_pages import run_script
+
+        run = run_script(
+            "import asyncio, rootsign\n"
+            "rootsign.init(agent='depth-agent')\n"
+            "@rootsign.trace()\n"
+            "async def pay(amount: float) -> str:\n"
+            "    return 'paid'\n"
+            "async def main():\n"
+            "    async with rootsign.session(objective='pay') as ctx:\n"
+            "        await ctx.record_decision(selected_action='pay', confidence=0.9,\n"
+            "            reasoning_summary='within policy', alternatives_considered=['hold'])\n"
+            "        await pay(10.0)\n"
+            "asyncio.run(main())\n",
+            tmp_path,
+            extra_env={"ROOTSIGN_CAPTURE_DECISIONS": "true", "ROOTSIGN_REASONING_DEPTH": "full"},
+        )
+
+        bundle = export_local(run.only_session())
+
+        (decision,) = [e for e in bundle.timeline["events"] if e["type"] == "DECISION"]
+        assert decision["reasoning_depth"] == "full"
+        assert decision["alternatives_considered"] == ["hold"]
+
+        from rootsign.sdk.report import attach_reports
+
+        files = attach_reports(bundle).files()
+        for report in ("report.md", "report.html"):
+            assert "reasoning_depth" in files[report] and "full" in files[report], report
+
+    def test_a_record_without_a_depth_says_so(self, tmp_path):
+        """Sessions written before the SDK recorded a depth: null, not a guess."""
+        path = write_session_file(tmp_path, actions=1, decision=True)
+
+        (decision,) = [e for e in export_local(path).timeline["events"] if e["type"] == "DECISION"]
+
+        assert "reasoning_depth" in decision
+        assert decision["reasoning_depth"] is None

@@ -43,6 +43,7 @@ def _scripted(agent_id, session_id):
                 "selected_action": "proceed",
                 "confidence": 0.9,
                 "reasoning_summary": "within policy",
+                "reasoning_depth": "full",
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             },
         ),
@@ -152,6 +153,16 @@ class TestExportSourceParity:
             "ACTION",
             "SESSION_CLOSE",
         ]
+
+
+class TestDecisionDepthParity:
+    async def test_both_sources_carry_the_decision_depth(self, both_sources, clean_db):
+        """PostgreSQL keeps `reasoning_depth` since migration 0006; the bundle shows it on both."""
+        session_id, path = both_sources
+
+        for bundle in (export_local(path), await export_session(session_id, clean_db)):
+            (decision,) = [e for e in bundle.timeline["events"] if e["type"] == "DECISION"]
+            assert decision["reasoning_depth"] == "full"
 
 
 class TestPostgresSource:

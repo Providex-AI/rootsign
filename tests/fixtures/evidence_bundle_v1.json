@@ -14,7 +14,7 @@
     "verdict": "VALID",
     "files": {
       "redaction.json": "d1ba7b041838a3e45d3a10512f5dd962533432ca734057699aa5cdd94dfe2d3b",
-      "timeline.json": "4428f0ed48979e74438cb34486942a5d3039d5b1eb8ce2a05b1a52a334df09a2",
+      "timeline.json": "fbfc324601dc6495952039a42d75c00d6d5b6a77a9a7ca540a28b46293ba2a20",
       "verification.json": "1e6f930ca44f9c8d069c55a3079d0c8081a6cd06bd505785a38d2cd2588776a7"
     },
     "compliance": {}
@@ -85,6 +85,7 @@
         "decision_id": "00000001-0000-4000-8000-000000000000",
         "selected_action": "escalate_to_human",
         "confidence": 0.41,
+        "reasoning_depth": "full",
         "alternatives_considered": [
           "auto_approve",
           "reject"
