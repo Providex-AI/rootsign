@@ -22,6 +22,7 @@ Four claims carry the weight:
 from __future__ import annotations
 
 import json
+import re
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -186,6 +187,44 @@ class TestRenderedFromTheJsonOnly:
         assert bundle.manifest["files"][HTML_FILE] not in markdown
         assert "cannot quote its own digest" in markdown
         assert "rootsign export --check" in markdown
+
+
+def _stylesheet(page: str) -> str:
+    return page[page.index("<style>") : page.index("</style>")]
+
+
+def _css_rule(css: str, selector: str) -> str:
+    """The declarations of the first rule for `selector` in `css`."""
+    match = re.search(rf"(?:^|\n|\}})\s*{re.escape(selector)}\s*\{{([^}}]*)\}}", css)
+    assert match, f"the report's stylesheet has no rule for {selector!r}"
+    return " ".join(match.group(1).split())
+
+
+class TestItFitsANarrowScreen:
+    """A reviewer may open an emailed report.html on a phone.
+
+    Long values with no break point (timestamps, source paths, IDs) used to
+    hold the Session card's value column wider than a phone, so on a 390px
+    screen the timestamps and the chain table ran past the card and off the
+    screen. These rules are what keep every value inside its card: the value
+    column may shrink, long values wrap anywhere, and a table still wider
+    than the card scrolls inside it instead of widening the page.
+    """
+
+    def test_the_value_column_can_shrink(self, page):
+        assert "minmax(0, 1fr)" in _css_rule(_stylesheet(page), "dl")
+
+    def test_long_values_wrap(self, page):
+        assert "overflow-wrap: anywhere" in _css_rule(_stylesheet(page), "dd")
+
+    def test_a_wide_table_scrolls_inside_its_card(self, page):
+        assert "overflow-x: auto" in _css_rule(_stylesheet(page), "section")
+
+    def test_on_a_phone_each_label_sits_above_its_value(self, page):
+        """Side by side, a 12rem label column leaves a phone's value column a few characters wide."""
+        css = _stylesheet(page)
+        narrow = css[css.index("@media (max-width: 40rem)") :]
+        assert "minmax(0, 1fr)" in _css_rule(narrow, "dl")
 
 
 class TestTheHtmlIsInertAndSelfContained:

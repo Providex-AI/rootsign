@@ -401,16 +401,18 @@ main { max-width: 60rem; margin: 0 auto; }
 .incomplete { background: #fff7e6; border-color: #b7791f; color: #7a4b06; }
 h2 { margin: 2rem 0 .75rem; font-size: 1.1rem; text-transform: uppercase;
      letter-spacing: .06em; color: #4a5568; }
-section { background: #fff; border: 1px solid #e2e6ec; border-radius: 8px; padding: 1rem 1.25rem; }
+section { background: #fff; border: 1px solid #e2e6ec; border-radius: 8px; padding: 1rem 1.25rem;
+          overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: .9rem; }
 th, td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid #eceff3;
          vertical-align: top; }
 th { font-weight: 600; color: #4a5568; }
 td.hash, code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem;
                 word-break: break-all; }
-dl { display: grid; grid-template-columns: minmax(8rem, 12rem) 1fr; gap: .4rem 1rem; margin: 0; }
+dl { display: grid; grid-template-columns: minmax(8rem, 12rem) minmax(0, 1fr); gap: .4rem 1rem;
+     margin: 0; }
 dt { font-weight: 600; color: #4a5568; }
-dd { margin: 0; }
+dd { margin: 0; overflow-wrap: anywhere; }
 .status-verified { color: #276749; }
 .status-failed { color: #9b2c2c; font-weight: 600; }
 .status-unverified { color: #975a16; }
@@ -433,6 +435,8 @@ table.fields tr:last-child th, table.fields tr:last-child td { border-bottom: no
   table.fields, table.fields tbody, table.fields tr, table.fields th, table.fields td
     { display: block; width: auto; }
   table.fields th { padding-bottom: 0; border-bottom: none; }
+  dl { grid-template-columns: minmax(0, 1fr); row-gap: 0; }
+  dd { margin-bottom: .5rem; }
 }
 footer { margin-top: 2rem; color: #4a5568; font-size: .85rem; }
 @media print { body { background: #fff; } section { border: none; padding: 0; } }
