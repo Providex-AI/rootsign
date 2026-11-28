@@ -148,12 +148,21 @@ only when `ROOTSIGN_CAPTURE_DECISIONS=true`.
 | `timestamp` | datetime | defaults to now(UTC) |
 | `reasoning_depth` | string | `minimal` \| `summary` \| `full`; default `summary` |
 | `reasoning_captured` | bool \| null | derived from `reasoning_summary is not None` when omitted |
+| `decision_id` | UUID \| null | the id the client minted; optional |
 
 `extra="forbid"`. Store semantics: session MUST be `running`; the session's
 `decision_count` increments in the same transaction as the insert. The
 response MUST return `entity_id` (the `decision_id`). The SDK stashes it
 as the pending decision for the next `ACTION_RECORD`, so this event can
 never be batched (ADR-009 Decision 2).
+
+When `decision_id` is present the store MUST keep it as the decision's id,
+and MUST mint one when it is absent. The cloud transport always sends one, so
+a decision keeps a single id from the client, through the offline spool and
+`rootsign-admin sync`, to the store, and the next action's `decision_id`
+resolves. A `decision_id` the store already holds for a different event is
+`VALIDATION_ERROR`. The field is additive (§9.1): a store that predates it
+rejects it as an unknown field, so upgrade stores first (§9.2).
 
 ### 3.4 `APPROVAL_RECORD`
 

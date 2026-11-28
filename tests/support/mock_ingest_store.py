@@ -74,6 +74,8 @@ class MockIngestStore:
         #: shape, without scripting every reply.
         self.first_status: int | None = None
         self.raise_timeout: bool = False
+        #: The id the store answered with, by event_id.
+        self.entity_ids: dict[str, str] = {}
 
     # -- transport --------------------------------------------------------
 
@@ -120,10 +122,14 @@ class MockIngestStore:
         self.seen_event_ids.add(event_id)
         self.accepted.append(envelope)
         payload = envelope["payload"]
+        # Client-minted ids are kept: action ids (ADR-013), decision ids
+        # (spec §3.3). Anything else gets one minted here.
+        entity_id = payload.get("action_id") or payload.get("decision_id") or str(uuid4())
+        self.entity_ids[event_id] = entity_id
         return {
             "status": "accepted",
             "event_id": event_id,
-            "entity_id": payload.get("action_id") or str(uuid4()),
+            "entity_id": entity_id,
             "sequence_number": payload.get("sequence_number"),
             "self_hash": payload.get("self_hash"),
         }

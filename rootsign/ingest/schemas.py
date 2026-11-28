@@ -188,6 +188,11 @@ class DecisionRecordPayload(BaseModel):
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     reasoning_depth: str = "summary"
     reasoning_captured: bool | None = None
+    #: Minted by the cloud transport so the decision keeps one id from the
+    #: client through the spool and `rootsign-admin sync` to the store, which
+    #: is what the next action's `decision_id` points at. A store keeps it when
+    #: present and mints one when absent (spec §3.3).
+    decision_id: UUID | None = None
 
 
 class ApprovalRecordPayload(BaseModel):
