@@ -42,10 +42,10 @@ Exits `0`.
 ## rootsign verify
 
 ```text
-rootsign verify [SESSION_ID] [--local PATH] [--verbose]
+rootsign verify [SESSION_ID] [--local PATH] [--verbose] [--require-seal]
 ```
 
-Recomputes every hash in a session and prints one of three verdicts. The [Verify a session](/guides/verify) guide shows each verdict's output and how to run it in CI.
+Recomputes every hash in a session, checks the session's seal, and prints one of three verdicts. The [Verify a session](/guides/verify) guide shows each verdict's output and how to run it in CI.
 
 <ResponseField name="SESSION_ID" type="UUID">
   The session to verify in PostgreSQL. Ignored when `--local` is given.
@@ -59,6 +59,10 @@ Recomputes every hash in a session and prints one of three verdicts. The [Verify
   After the verdict, list every action with its `self_hash` and `prev_action_hash`.
 </ResponseField>
 
+<ResponseField name="--require-seal" type="flag">
+  Report a session with no seal as INCOMPLETE (exit `2`): without one, records cut from the end would not show. Sessions recorded by RootSign 0.4.0 and earlier, and sessions that never closed, have no seal.
+</ResponseField>
+
 ```bash
 rootsign verify --local ~/.rootsign/sessions/<session_id>.jsonl
 ```
@@ -66,6 +70,7 @@ rootsign verify --local ~/.rootsign/sessions/<session_id>.jsonl
 ```text
 VALID ✓  —  2 records, chain intact
   Session:  fe478124-ff91-4519-ab3e-726184fa92b4
+  Seal:     sealed at record 2
 ```
 
 When the file is in the spool, the output ends with a reminder to upload it with `rootsign-admin sync`.

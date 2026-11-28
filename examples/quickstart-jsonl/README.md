@@ -27,6 +27,7 @@ Run the command it prints:
 ```text
 VALID ✓  —  2 records, chain intact
   Session:  f758a636-7bcd-4f96-8940-eff7d80e760a
+  Seal:     sealed at record 2
 ```
 
 ## Prove it's tamper-evident

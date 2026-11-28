@@ -66,6 +66,7 @@ rootsign verify --local ~/.rootsign/sessions/88f15492-3be7-4f7e-af16-3f247b1134a
 ```text
 VALID ✓  —  2 records, chain intact
   Session:  88f15492-3be7-4f7e-af16-3f247b1134a9
+  Seal:     sealed at record 2
 ```
 
 Edit a record and `verify` reports `TAMPERED` with exit code `1`; delete one from the middle and it reports `INCOMPLETE` with exit code `2`. The [quickstart](https://docs.getprovidex.com/quickstart) walks through both and turns the session into an [evidence bundle](https://docs.getprovidex.com/guides/evidence-bundles) for a reviewer. [How it works](https://docs.getprovidex.com/how-it-works#what-verify-does-not-check) lists what `verify` cannot detect.
