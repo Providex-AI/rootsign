@@ -30,7 +30,7 @@ from uuid import UUID
 from pydantic import ValidationError
 
 from rootsign._version import SDK_VERSION
-from rootsign.chain_state import ChainRegistry, is_sealed
+from rootsign.chain_state import ChainRegistry, is_sealed, new_record_id
 from rootsign.ingest.idempotency import IdempotencyStore
 from rootsign.ingest.schemas import ErrorCode, EventType, IngestResponse
 from rootsign.sdk.loss_ledger import LossLedger
@@ -681,9 +681,20 @@ class HttpIngestClient(IngestClient):
         would (correctly) reject as HASH_CHAIN_BROKEN, or worse, accept as two
         records for one event.
 
-        Non-actions are untouched: only ACTION_RECORD is in the chain.
+        Decisions get their id here too (spec §3.3), for the same reason: the
+        next action points at it, so it must be the id that reaches the store
+        whether the decision goes over the wire or through the spool and
+        `rootsign-admin sync`. A store-minted id would differ after a sync and
+        leave that action pointing at nothing.
+
+        Other non-actions are untouched: only ACTION_RECORD is in the chain.
         """
         for envelope in envelopes:
+            if envelope.get("event_type") == EventType.DECISION_RECORD.value:
+                payload = envelope.get("payload")
+                if isinstance(payload, dict) and payload.get("decision_id") is None:
+                    payload["decision_id"] = str(new_record_id())
+                continue
             if envelope.get("event_type") != EventType.ACTION_RECORD.value:
                 continue
             payload = envelope.get("payload")
