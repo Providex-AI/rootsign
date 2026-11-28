@@ -161,7 +161,7 @@ class TestDesignDecisions:
         )
         assert [name for _, name in rows] == files
         assert all(name.startswith(number) for number, name in rows)
-        assert len(files) == 15 and "fifteen" in page_text(ADRS)
+        assert len(files) == 16 and "sixteen" in page_text(ADRS)
 
     def test_all_are_accepted(self):
         for path in (REPO / "docs" / "adr").glob("ADR-*.md"):
