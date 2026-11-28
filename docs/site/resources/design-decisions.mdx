@@ -1,7 +1,7 @@
 ---
 title: "Design records behind RootSign's guarantees"
 sidebarTitle: "Design decisions"
-description: "The fifteen architecture decision records that fix how RootSign hashes, records, redacts, holds and exports agent actions, each summarised in one line."
+description: "The sixteen architecture decision records that fix how RootSign hashes, records, redacts, holds, exports and seals agent sessions, each summarised in one line."
 keywords: ["ADR", "architecture decision records", "design", "hash specification", "rootsign design"]
 ---
 
@@ -24,5 +24,6 @@ RootSign's design decisions are written down as architecture decision records (A
 | [ADR-013](https://github.com/Providex-AI/rootsign/blob/main/docs/adr/ADR-013-http-ingest-client-spool.md) | The cloud transport seals records on the client and spools them when the endpoint is unreachable |
 | [ADR-014](https://github.com/Providex-AI/rootsign/blob/main/docs/adr/ADR-014-export-evidence-bundle.md) | What an evidence bundle contains and how its files are hashed |
 | [ADR-015](https://github.com/Providex-AI/rootsign/blob/main/docs/adr/ADR-015-sync-receipts.md) | Every upload attempt leaves a receipt of what the endpoint accepted and refused |
+| [ADR-016](https://github.com/Providex-AI/rootsign/blob/main/docs/adr/ADR-016-session-seal.md) | A seal on each session's close record makes a cut tail, an edited session event and an edited approval or decision detectable. Not yet in a release |
 
-All fifteen are accepted. The [`docs/adr` folder](https://github.com/Providex-AI/rootsign/tree/main/docs/adr) on GitHub has the full text.
+All sixteen are accepted. ADR-016 is not implemented yet: the seal ships in a release after 0.4.0, and until then the limits in [How it works](/how-it-works#what-verify-does-not-check) still apply. The [`docs/adr` folder](https://github.com/Providex-AI/rootsign/tree/main/docs/adr) on GitHub has the full text.
