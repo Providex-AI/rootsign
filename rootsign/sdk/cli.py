@@ -193,8 +193,13 @@ def verify(
         "-v",
         help="Show per-record hashes for debugging.",
     ),
+    require_seal: bool = typer.Option(
+        False,
+        "--require-seal",
+        help="Report a session with no seal as INCOMPLETE: its end cannot be verified.",
+    ),
 ) -> None:
-    """Verify the tamper-evident hash chain for a session.
+    """Verify the tamper-evident hash chain and the seal for a session.
 
     Examples:
 
@@ -205,7 +210,7 @@ def verify(
     Exit 0 VALID, 1 TAMPERED, 2 INCOMPLETE, 3 nothing was verified.
     """
     if local is not None:
-        _verify_local(local, verbose)
+        _verify_local(local, verbose, require_seal)
         return
     if session_id is not None:
         # audit #11a: parse the UUID here so a bad value gets the same clean
@@ -214,12 +219,12 @@ def verify(
             parsed = UUID(session_id)
         except ValueError:
             _cannot_verify(f"{session_id!r} is not a valid UUID.")
-        _verify_remote(parsed, verbose)
+        _verify_remote(parsed, verbose, require_seal)
         return
     _cannot_verify("provide a session_id or --local path")
 
 
-def _verify_local(path: Path, verbose: bool) -> None:
+def _verify_local(path: Path, verbose: bool, require_seal: bool = False) -> None:
     from rootsign.sdk.chain import verify_session_local
     from rootsign.verdict import exit_code
 
@@ -237,7 +242,7 @@ def _verify_local(path: Path, verbose: bool) -> None:
         # cron job chasing tampering that a mistyped path explains.
         _cannot_verify(f"{path} is empty; there are no records to verify")
 
-    result = verify_session_local(str(path))
+    result = verify_session_local(str(path), require_seal=require_seal)
     _print_result(result)
     if verbose:
         _print_records(_local_records(lines))
@@ -308,7 +313,7 @@ def _spool_breadcrumb(path: Path) -> None:
     )
 
 
-def _verify_remote(session_id: UUID, verbose: bool) -> None:
+def _verify_remote(session_id: UUID, verbose: bool, require_seal: bool = False) -> None:
     # The session factory is resolved lazily via `_session_factory()`; tests
     # monkeypatch the module-level `AsyncSessionLocal` seam to point at a test
     # engine. See tests/integration/test_verify_cli.py.
@@ -328,7 +333,7 @@ def _verify_remote(session_id: UUID, verbose: bool) -> None:
             # in a cron job reads as a clean audit.
             if await session_crud.get(db, session_id) is None:
                 return None, []
-            result = await verify_session(session_id, db)
+            result = await verify_session(session_id, db, require_seal=require_seal)
             chain = (
                 await action_crud.get_session_chain(db, session_id=session_id) if verbose else []
             )
@@ -355,18 +360,42 @@ def _verify_remote(session_id: UUID, verbose: bool) -> None:
     raise typer.Exit(code=exit_code(result.verdict))
 
 
+def _seal_line(result) -> str | None:
+    """The `Seal:` line under a VALID verdict (ADR-016)."""
+    from rootsign.seal import SealOutcome
+
+    seal = getattr(result, "seal", None)
+    if seal is None:
+        return None
+    if seal.outcome is SealOutcome.SEALED:
+        return f"  Seal:     {seal.detail}"
+    if seal.outcome is SealOutcome.UNKNOWN_VERSION:
+        return f"  Seal:     not checked ({seal.detail})"
+    return (
+        "  Seal:     none (records cut from the end would not show;\n"
+        "            --require-seal reports this as INCOMPLETE)"
+    )
+
+
 def _print_result(result) -> None:
+    from rootsign.seal import UNSEALED_OUTCOMES, SealOutcome
     from rootsign.verdict import Verdict
 
+    seal = getattr(result, "seal", None)
     if result.verdict is Verdict.INCOMPLETE:
         # Distinct from TAMPERED on purpose: "records are missing" and "records
         # were altered" call for different responses, and conflating them
         # either cries wolf or misses a theft. Yellow, not red — what is here
         # is intact.
+        unsealed = seal is not None and seal.outcome in UNSEALED_OUTCOMES
         typer.echo(
             typer.style(
                 f"INCOMPLETE ⚠  —  {result.record_count} records present and intact, "
-                f"but the chain is missing records",
+                + (
+                    "but the session is not sealed"
+                    if unsealed
+                    else "but the chain is missing records"
+                ),
                 fg=typer.colors.YELLOW,
                 bold=True,
             )
@@ -374,14 +403,25 @@ def _print_result(result) -> None:
         if result.error:
             typer.echo(f"  Detail:   {result.error}")
         typer.echo(f"  Session:  {result.session_id}")
-        typer.echo(
-            typer.style(
+        if unsealed:
+            advice = (
+                "The records present verify cleanly, but without a seal records cut from "
+                "the end cannot be ruled out."
+            )
+        elif seal is not None and seal.outcome is SealOutcome.MISSING_AT_END:
+            advice = (
+                "The records present verify cleanly; the session's seal proves records are "
+                "missing from the end. "
+                "Check for a spooled session that was never synced "
+                "(`rootsign-admin sync`) or a deleted row."
+            )
+        else:
+            advice = (
                 "The records present verify cleanly; the gap is proven by the chain itself. "
                 "Check for a spooled session that was never synced "
-                "(`rootsign-admin sync`) or a deleted row.",
-                fg=typer.colors.YELLOW,
+                "(`rootsign-admin sync`) or a deleted row."
             )
-        )
+        typer.echo(typer.style(advice, fg=typer.colors.YELLOW))
         return
 
     if result.valid:
@@ -393,15 +433,17 @@ def _print_result(result) -> None:
             )
         )
         typer.echo(f"  Session:  {result.session_id}")
+        line = _seal_line(result)
+        if line is not None:
+            typer.echo(line)
         return
 
-    typer.echo(
-        typer.style(
-            f"TAMPERED ✗  —  chain broken at record #{result.first_invalid_sequence}",
-            fg=typer.colors.RED,
-            bold=True,
-        )
+    headline = (
+        "TAMPERED ✗  —  the session's seal does not match its records"
+        if getattr(result, "seal_failed", False)
+        else f"TAMPERED ✗  —  chain broken at record #{result.first_invalid_sequence}"
     )
+    typer.echo(typer.style(headline, fg=typer.colors.RED, bold=True))
     if result.error:
         typer.echo(f"  Detail:   {result.error}")
     if getattr(result, "missing_ranges", None):

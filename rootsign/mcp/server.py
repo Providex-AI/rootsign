@@ -122,12 +122,25 @@ async def _verify_session_chain(
     *,
     session_id: str,
 ) -> dict[str, Any]:
-    """Recompute + verify the chain — identical result to `rootsign verify`."""
+    """Recompute + verify the chain and the seal — identical result to `rootsign verify`."""
     with postgres_extra_required():
         from rootsign.crud import action as action_crud
+        from rootsign.sdk.chain import verify_session
 
     async with session_factory() as db:
-        return await action_crud.verify_chain(db, session_id=UUID(session_id))
+        raw = await action_crud.verify_chain(db, session_id=UUID(session_id))
+        result = await verify_session(UUID(session_id), db)
+    seal = result.seal
+    return {
+        **raw,
+        # The seal can move the verdict (ADR-016), so these follow the full check.
+        "valid": result.valid,
+        "verdict": result.verdict.value,
+        "error": result.error,
+        "first_invalid_sequence": result.first_invalid_sequence,
+        "missing_ranges": [list(r) for r in result.missing_ranges],
+        "seal": None if seal is None else {"outcome": seal.outcome.value, "detail": seal.detail},
+    }
 
 
 async def _get_approval_records(

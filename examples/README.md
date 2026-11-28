@@ -44,4 +44,4 @@ python agent.py                   # runs the demo workflow
 ./verify.sh                       # rootsign verify the just-emitted session
 ```
 
-You should see `VALID ✓  —  N records, chain intact` on the last line.
+You should see `VALID ✓  —  N records, chain intact`, followed by the session ID and `Seal:     sealed at record N`.

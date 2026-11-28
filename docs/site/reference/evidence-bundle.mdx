@@ -58,7 +58,7 @@ Each export has its own manifest hash, because the manifest records when it was 
   "files": {
     "redaction.json": "d1ba7b041838a3e45d3a10512f5dd962533432ca734057699aa5cdd94dfe2d3b",
     "timeline.json": "fbfc324601dc6495952039a42d75c00d6d5b6a77a9a7ca540a28b46293ba2a20",
-    "verification.json": "1e6f930ca44f9c8d069c55a3079d0c8081a6cd06bd505785a38d2cd2588776a7"
+    "verification.json": "dd5f2328f129908abc0173eb6bc306722c4d6c1a3098a6dd3987ff42f20bacd9"
   },
   "compliance": {}
 }
@@ -129,7 +129,11 @@ The result of verifying the session's hash chain, with one entry per action reco
 </ResponseField>
 
 <ResponseField name="error" type="string | null">
-  Why the chain failed.
+  Why the chain or the seal failed.
+</ResponseField>
+
+<ResponseField name="seal" type="object">
+  Present only when the session carries a seal. `outcome` is what checking it found (`sealed`, `missing_at_end`, `open_edited`, `side_edited`, `seal_edited`, `client_differs`, `not_checkable`, `unknown_version`, or `not_checked` when the chain itself was broken or had gaps), and `detail` says it in a sentence. A session without a seal has no `seal` key, and the report says it is not sealed.
 </ResponseField>
 
 <ResponseField name="hash" type="object">

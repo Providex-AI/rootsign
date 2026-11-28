@@ -309,6 +309,7 @@ def _build_verification(evidence: SessionEvidence) -> dict[str, Any]:
         "first_invalid_sequence": first_invalid,
         "missing_ranges": [list(r) for r in (result.missing_ranges or [])],
         "error": result.error,
+        **_seal_block(result),
         "hash": {
             "algorithm": "sha256",
             "canonical_spec": "ADR-001",
@@ -321,6 +322,28 @@ def _build_verification(evidence: SessionEvidence) -> dict[str, Any]:
         "records": records,
         **_replay_block(evidence),
     }
+
+
+def _seal_block(result: Any) -> dict[str, Any]:
+    """The `seal` key (ADR-016), or nothing at all, for `verification.json`.
+
+    Present only when the session carries a seal, as the `replay` key is only
+    for a replayed session (ADR-015 Decision 5): an unsealed session exports
+    byte-identical to what 0.4.0 produced, and the report reads the absent key
+    as "not sealed". `not_checked` when the chain was already broken or had
+    gaps, so the seal is not what the verdict rests on.
+    """
+    if not getattr(result, "seal_present", False):
+        return {}
+    seal = getattr(result, "seal", None)
+    if seal is None:
+        return {
+            "seal": {
+                "outcome": "not_checked",
+                "detail": "not checked: the chain itself is broken or has gaps",
+            }
+        }
+    return {"seal": {"outcome": seal.outcome.value, "detail": seal.detail}}
 
 
 def _replay_block(evidence: SessionEvidence) -> dict[str, Any]:

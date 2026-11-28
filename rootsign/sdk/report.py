@@ -47,11 +47,11 @@ _JSON_DOCUMENT_FILES = (VERIFICATION_FILE, TIMELINE_FILE, REDACTION_FILE)
 
 #: What each verdict means, in an auditor's terms rather than a programmer's.
 _VERDICT_MEANING = {
-    "VALID": "Every record verifies. The chain is intact and complete.",
+    "VALID": "Every record verifies. The chain is intact.",
     "TAMPERED": "A record was altered after it was written. Treat this log as compromised.",
     "INCOMPLETE": (
         "Records are missing. The records present verify cleanly — the gap is proven "
-        "by the chain itself, not inferred."
+        "by the chain or the session's seal, not inferred."
     ),
 }
 
@@ -92,6 +92,21 @@ def attach_reports(bundle: EvidenceBundle) -> EvidenceBundle:
 # ---------------------------------------------------------------------------
 # Shared shaping — both renderers read the same facts, in the same order
 # ---------------------------------------------------------------------------
+
+
+def _seal_label(verification: dict[str, Any]) -> str | None:
+    """One line on the session seal (ADR-016). An absent `seal` key means unsealed."""
+    seal = verification.get("seal")
+    if seal is None:
+        return "Seal: none, so records cut from the end of this session would not show."
+    outcome = seal.get("outcome")
+    if outcome == "not_checked":
+        return f"Seal: present, {seal.get('detail')}."
+    if outcome == "sealed":
+        return f"Seal: {seal.get('detail')}, so the session ends where its seal says."
+    if outcome == "unsealed":
+        return "Seal: none, so records cut from the end of this session would not show."
+    return f"Seal: {seal.get('detail')}."
 
 
 def _verdict_line(verification: dict[str, Any]) -> tuple[str, str, str]:
@@ -292,6 +307,10 @@ def render_markdown(documents: dict[str, Any]) -> str:
     if missing:
         out.append(f"Missing sequence numbers: **{missing}**")
         out.append("")
+    seal_label = _seal_label(verification)
+    if seal_label:
+        out.append(seal_label)
+        out.append("")
 
     out.append("## Session")
     out.append("")
@@ -490,6 +509,9 @@ def render_html(documents: dict[str, Any]) -> str:
     missing = _missing_label(verification)
     if missing:
         out.append(f"<p>Missing sequence numbers: <strong>{e(missing)}</strong></p>")
+    seal_label = _seal_label(verification)
+    if seal_label:
+        out.append(f"<p>{e(seal_label)}</p>")
     out.append("</div>")
 
     out.append("<h2>Session</h2><section><dl>")

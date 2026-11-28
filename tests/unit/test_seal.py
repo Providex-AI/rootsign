@@ -89,7 +89,7 @@ class TestWhatACheckReports:
     def test_an_intact_session_is_sealed(self):
         seal, facts = _sealed(_two_actions())
         check = check_seal(seal, facts)
-        assert check.sealed and check.detail == "sealed at 2 record(s)"
+        assert check.sealed and check.detail == "sealed at record 2"
 
     @pytest.mark.parametrize("seal", [None, {}])
     def test_no_seal_is_unsealed(self, seal):
@@ -193,9 +193,11 @@ class TestPrecedence:
         assert "decisions and approvals could not be checked" in check.detail
 
     def test_outcomes_partition_into_the_verdicts(self):
-        neutral = {SealOutcome.SEALED, SealOutcome.UNSEALED, SealOutcome.UNKNOWN_VERSION}
-        assert INCOMPLETE_OUTCOMES | TAMPERED_OUTCOMES | neutral == set(SealOutcome)
-        assert not INCOMPLETE_OUTCOMES & TAMPERED_OUTCOMES
+        from rootsign.seal import UNSEALED_OUTCOMES
+
+        groups = [INCOMPLETE_OUTCOMES, TAMPERED_OUTCOMES, UNSEALED_OUTCOMES, {SealOutcome.SEALED}]
+        assert set().union(*groups) == set(SealOutcome)
+        assert sum(len(g) for g in groups) == len(SealOutcome)
 
 
 class TestWhatDoesNotMoveTheSeal:

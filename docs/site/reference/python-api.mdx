@@ -325,11 +325,11 @@ rootsign.wrap_tools() takes LangChain tools (objects with .name, .invoke and .ai
 ## Verify a session
 
 ```python
-rootsign.verify_session_local(jsonl_path) -> VerifyResult
-await rootsign.verify_session(session_id, db) -> VerifyResult
+rootsign.verify_session_local(jsonl_path, *, require_seal=False) -> VerifyResult
+await rootsign.verify_session(session_id, db, *, require_seal=False) -> VerifyResult
 ```
 
-Recompute every hash in a session and return the verdict. Neither function prints anything or exits.
+Recompute every hash in a session, check its seal, and return the verdict. Neither function prints anything or exits.
 
 <ResponseField name="jsonl_path" type="str | Path" required>
   A JSONL session file or spool file. `verify_session_local()` only.
@@ -343,7 +343,11 @@ Recompute every hash in a session and return the verdict. Neither function print
   An open SQLAlchemy async session, for example from `rootsign.database.AsyncSessionLocal()`. `verify_session()` only.
 </ResponseField>
 
-**Returns** a `VerifyResult`: `verdict` (`VALID`, `TAMPERED` or `INCOMPLETE`), `valid`, `record_count`, `first_invalid_sequence`, `missing_ranges`, `error` and `summary`. [Verify a session](/guides/verify#verify-from-python) describes each field.
+<ResponseField name="require_seal" type="bool" default="False">
+  Return INCOMPLETE for a session with no seal, as `rootsign verify --require-seal` does.
+</ResponseField>
+
+**Returns** a `VerifyResult`: `verdict` (`VALID`, `TAMPERED` or `INCOMPLETE`), `valid`, `record_count`, `first_invalid_sequence`, `missing_ranges`, `error`, `summary`, `seal` (what checking the seal found) and `sealed`. [Verify a session](/guides/verify#verify-from-python) describes each field.
 
 **Raises** `FileNotFoundError` from `verify_session_local()` when the file does not exist.
 

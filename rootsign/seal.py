@@ -203,10 +203,15 @@ class SealOutcome(str, Enum):
     OPEN_EDITED = "open_edited"
     SIDE_EDITED = "side_edited"
     SEAL_EDITED = "seal_edited"
+    #: A store's own seal checks, but the one its client sent differs (Decision 4).
+    CLIENT_DIFFERS = "client_differs"
+    #: The records a seal covers are not all here, so it cannot be checked (a
+    #: spool file that starts mid-session has no SESSION_OPEN line).
+    NOT_CHECKABLE = "not_checkable"
 
 
 #: Outcomes that mean a record is missing rather than altered.
-INCOMPLETE_OUTCOMES = frozenset({SealOutcome.MISSING_AT_END})
+INCOMPLETE_OUTCOMES = frozenset({SealOutcome.MISSING_AT_END, SealOutcome.NOT_CHECKABLE})
 #: Outcomes that mean something was altered.
 TAMPERED_OUTCOMES = frozenset(
     {
@@ -215,8 +220,11 @@ TAMPERED_OUTCOMES = frozenset(
         SealOutcome.OPEN_EDITED,
         SealOutcome.SIDE_EDITED,
         SealOutcome.SEAL_EDITED,
+        SealOutcome.CLIENT_DIFFERS,
     }
 )
+#: Outcomes that leave the chain's verdict alone, unless the caller requires a seal.
+UNSEALED_OUTCOMES = frozenset({SealOutcome.UNSEALED, SealOutcome.UNKNOWN_VERSION})
 
 
 @dataclass(frozen=True)
@@ -290,7 +298,26 @@ def check_seal(seal: Mapping[str, Any] | None, facts: SessionFacts) -> SealCheck
             SealOutcome.SIDE_EDITED,
             "a decision, an approval, or an action's authorization_status or decision_id was edited",
         )
-    return SealCheck(SealOutcome.SEALED, f"sealed at {final} record(s)")
+    return SealCheck(SealOutcome.SEALED, f"sealed at record {final}")
+
+
+def check_client_seal(client: Mapping[str, Any] | None, facts: SessionFacts) -> SealCheck | None:
+    """Compare the seal a client sent with what its store holds (ADR-016 Decision 4).
+
+    Called after the store's own seal has checked. None when there is no
+    client seal kept beside it (the two agreed, or the client sent none).
+    """
+    if not client:
+        return None
+    final = client.get("final_sequence")
+    length = facts.chain_length
+    if isinstance(final, int) and final > length:
+        return SealCheck(
+            SealOutcome.MISSING_AT_END,
+            f"the client recorded {final} action(s); the store holds {length}",
+            missing=(length + 1, final),
+        )
+    return SealCheck(SealOutcome.CLIENT_DIFFERS, "the store's seal differs from the client's")
 
 
 #: The fields an action record contributes to a seal: its side-entry fields and

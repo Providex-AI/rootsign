@@ -55,6 +55,7 @@ Run `rootsign verify 7e1c2a3b-...` to confirm the chain.
 ```
 VALID ✓  —  3 records, chain intact
   Session:  7e1c2a3b-...
+  Seal:     sealed at record 3
 ```
 
 ## What's happening under the hood
