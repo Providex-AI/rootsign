@@ -231,6 +231,11 @@ a choice:
   boolean cannot. The key is absent rather than null, as ADR-015 does for
   `replay`, so an unsealed session exports exactly as 0.4.0 did. The report's
   line reads "Seal: none" when the key is absent.
+- **The schema stays `1.1`** (founder, 2026-11-28). The seal and #117's
+  `decision_id` are additive, which spec §9.1 makes a MINOR bump. But no store
+  branches on the minor number, and a bump would change the bytes of the
+  published sync-receipt vectors (ADR-015). The spec records the exception in
+  §2 and §9.1.
 - **The CLI shows the seal on a line of its own** (#119): `Seal:     sealed
   at record N` under the verdict, or `Seal:     none (...)`, with the headline
   unchanged unless the seal decides the verdict.

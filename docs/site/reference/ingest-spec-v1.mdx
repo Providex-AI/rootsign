@@ -51,7 +51,7 @@ unknown top-level key is a `VALIDATION_ERROR`, not a warning.
 
 | Field | Type | Constraint | Meaning |
 |---|---|---|---|
-| `schema_version` | string | matches `^\d+\.\d+$` | Wire-format version of this envelope. Emitted as `"1.1"` by the current SDK (`rootsign.ingest.schemas.SCHEMA_VERSION`); `1.0` differs only in lacking the optional fields of §8.2. |
+| `schema_version` | string | matches `^\d+\.\d+$` | Wire-format version of this envelope. Emitted as `"1.1"` by the current SDK (`rootsign.ingest.schemas.SCHEMA_VERSION`); `1.0` differs only in lacking the optional fields of §8.2. `1.1` envelopes from later SDKs may also carry `DECISION_RECORD.decision_id` (§3.3) and the `SESSION_CLOSE` seal (§8.5); see §9.1. |
 | `sdk_version` | string | 1 to 64 chars | Emitting SDK's version, from package metadata. Diagnostic only; the store MUST NOT branch on it. |
 | `event_type` | enum | one of the five in §3 | Selects the payload schema. |
 | `event_id` | UUID | none | Idempotency key. Unique per emitted event; a retry of the *same* event reuses it (§6). |
@@ -680,6 +680,13 @@ NOT be used for compatibility branching.
 Anything not clearly on the left is on the right. The asymmetry is
 deliberate: a wrong MINOR bump silently breaks a fielded client, while a
 conservative MAJOR bump costs one coordinated release.
+
+One exception so far: `DECISION_RECORD.decision_id` (§3.3) and the
+`SESSION_CLOSE` seal (§8.5) were added within `1.1`, without a bump
+(ADR-016). No store branches on the minor number, and a bump would change
+the bytes of the published sync-receipt vectors. A store therefore MUST NOT
+read a `1.1` envelope's version as saying whether those optional fields are
+present.
 
 ### 9.2 Upgrade ordering: stores first
 
