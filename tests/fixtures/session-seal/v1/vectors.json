@@ -1,0 +1,210 @@
+{
+  "seal_version": 1,
+  "vectors": [
+    {
+      "description": "a session with no actions and no side records",
+      "facts": {
+        "session_id": "6f1d0c62-2c4b-4c8e-9a51-0d6c7f3b2a10",
+        "agent_id": "1b7e9f40-5a8d-4e2b-b3c1-9e0f6d4a8c27",
+        "objective": "nothing to do",
+        "user_id": null,
+        "status": "completed"
+      },
+      "expected": {
+        "version": 1,
+        "final_sequence": 0,
+        "tail_hash": null,
+        "open_hash": "310cd03159992b7eaf913047e2d8e9a65f920a63ca37bd3ffe217410eb7bd1af",
+        "side_digest": "1a39485eb9ea27b847c7cd20f366cf9ec5246f92143e9849e585435ce08dcc98",
+        "seal_hash": "00e94634e0a7d62cf125946893c2a815fd3bd3af261afe0dd809d610e4e3c8d8"
+      }
+    },
+    {
+      "description": "two actions; the first follows a decision",
+      "facts": {
+        "session_id": "6f1d0c62-2c4b-4c8e-9a51-0d6c7f3b2a10",
+        "agent_id": "1b7e9f40-5a8d-4e2b-b3c1-9e0f6d4a8c27",
+        "objective": "invoice ACME",
+        "user_id": "finance-bot",
+        "status": "completed",
+        "decisions": [
+          {
+            "decision_id": "d1000000-0000-4000-8000-000000000001",
+            "selected_action": "send_invoice",
+            "confidence": 0.97,
+            "reasoning_depth": "summary",
+            "reasoning_summary": "Amount within policy; recipient verified.",
+            "alternatives_considered": [],
+            "inputs_summary": null
+          }
+        ],
+        "actions": [
+          {
+            "action_id": "a1000000-0000-4000-8000-000000000001",
+            "sequence_number": 1,
+            "authorization_status": "auto_authorized",
+            "decision_id": "d1000000-0000-4000-8000-000000000001",
+            "self_hash": "3745dbde0686b4fb8fb8c37b254990ead28001ca63ecfcfa804473307a2ef61a"
+          },
+          {
+            "action_id": "a1000000-0000-4000-8000-000000000002",
+            "sequence_number": 2,
+            "authorization_status": "auto_authorized",
+            "decision_id": null,
+            "self_hash": "2bbb2d12194daa3ace9f7e9ced7974e534100990e001bae43a372c5c8fc7367b"
+          }
+        ]
+      },
+      "expected": {
+        "version": 1,
+        "final_sequence": 2,
+        "tail_hash": "2bbb2d12194daa3ace9f7e9ced7974e534100990e001bae43a372c5c8fc7367b",
+        "open_hash": "c08b4f7361900c9ef01ff877134cdacddaf55d6318aabf282e354ce7a7018017",
+        "side_digest": "2c6dd37bb7dfae287ccf463d6860f75f0145b91ea11804400ce1956d82162221",
+        "seal_hash": "010e25a1a3f9bd314dde1563ebd6719a05674f2549d5672e6ef29a7b58969bb6"
+      }
+    },
+    {
+      "description": "a held call a person rejected, with the context they were shown",
+      "facts": {
+        "session_id": "6f1d0c62-2c4b-4c8e-9a51-0d6c7f3b2a10",
+        "agent_id": "1b7e9f40-5a8d-4e2b-b3c1-9e0f6d4a8c27",
+        "objective": "pay supplier",
+        "user_id": null,
+        "status": "completed",
+        "approvals": [
+          {
+            "approval_id": "e1000000-0000-4000-8000-000000000001",
+            "action_id": "a1000000-0000-4000-8000-000000000001",
+            "decision": "rejected",
+            "decision_reason": "Above the unattended mandate",
+            "approver_id": "cli:operator",
+            "approver_type": "human",
+            "context_presented": {
+              "tool_name": "wire_transfer",
+              "input": {
+                "account": "[REDACTED]",
+                "amount": 250000.0
+              }
+            },
+            "response_latency_ms": 4210,
+            "parent_approval_id": null
+          },
+          {
+            "approval_id": "e1000000-0000-4000-8000-000000000000",
+            "action_id": "a1000000-0000-4000-8000-000000000002",
+            "decision": "approved",
+            "decision_reason": "Verified with the supplier by phone",
+            "approver_id": "cli:operator",
+            "approver_type": "human",
+            "context_presented": {
+              "tool_name": "wire_transfer"
+            },
+            "response_latency_ms": 980,
+            "parent_approval_id": null
+          }
+        ],
+        "actions": [
+          {
+            "action_id": "a1000000-0000-4000-8000-000000000001",
+            "sequence_number": 1,
+            "authorization_status": "human_rejected",
+            "decision_id": null,
+            "self_hash": "3745dbde0686b4fb8fb8c37b254990ead28001ca63ecfcfa804473307a2ef61a"
+          },
+          {
+            "action_id": "a1000000-0000-4000-8000-000000000002",
+            "sequence_number": 2,
+            "authorization_status": "human_approved",
+            "decision_id": null,
+            "self_hash": "2bbb2d12194daa3ace9f7e9ced7974e534100990e001bae43a372c5c8fc7367b"
+          }
+        ]
+      },
+      "expected": {
+        "version": 1,
+        "final_sequence": 2,
+        "tail_hash": "2bbb2d12194daa3ace9f7e9ced7974e534100990e001bae43a372c5c8fc7367b",
+        "open_hash": "8fbfb3914b1d0cf02b756eb46197d171b5fc9d3c22794e281be30a470d8fe32d",
+        "side_digest": "6a41f8aa44525c16dd6976d7f9cb6d0276d5e60cd1c59933a92577f521c8289b",
+        "seal_hash": "72985492196211cceaecab8be295b0d8a444a4ce2bc02eef3e58fc4d0d913edd"
+      }
+    },
+    {
+      "description": "the SDK counted more actions than the writer holds",
+      "facts": {
+        "session_id": "6f1d0c62-2c4b-4c8e-9a51-0d6c7f3b2a10",
+        "agent_id": "1b7e9f40-5a8d-4e2b-b3c1-9e0f6d4a8c27",
+        "objective": "batch run",
+        "user_id": null,
+        "status": "failed",
+        "actions": [
+          {
+            "action_id": "a1000000-0000-4000-8000-000000000002",
+            "sequence_number": 1,
+            "authorization_status": "auto_authorized",
+            "decision_id": null,
+            "self_hash": "3745dbde0686b4fb8fb8c37b254990ead28001ca63ecfcfa804473307a2ef61a"
+          },
+          {
+            "action_id": "a1000000-0000-4000-8000-000000000001",
+            "sequence_number": 2,
+            "authorization_status": "auto_authorized",
+            "decision_id": null,
+            "self_hash": "2bbb2d12194daa3ace9f7e9ced7974e534100990e001bae43a372c5c8fc7367b"
+          }
+        ]
+      },
+      "final_sequence": 3,
+      "expected": {
+        "version": 1,
+        "final_sequence": 3,
+        "tail_hash": "2bbb2d12194daa3ace9f7e9ced7974e534100990e001bae43a372c5c8fc7367b",
+        "open_hash": "8c29bf79301891fc8150a67568efc3c47b5cd08ec9d7518cf8beb1a8aa9994e5",
+        "side_digest": "16466566f23fff8646de6354b44dfcbb2eabe503ee46287173d31a09bb4644d0",
+        "seal_hash": "e545a24fc9892d38eb9215eec74776ea910a85d6e812f80923ea8c5396d3e626"
+      }
+    },
+    {
+      "description": "non-ASCII objective and the float forms a second implementation must match",
+      "facts": {
+        "session_id": "6f1d0c62-2c4b-4c8e-9a51-0d6c7f3b2a10",
+        "agent_id": "1b7e9f40-5a8d-4e2b-b3c1-9e0f6d4a8c27",
+        "objective": "Rechnung für ACME, Q3 ✓",
+        "user_id": null,
+        "status": "completed",
+        "decisions": [
+          {
+            "decision_id": "d1000000-0000-4000-8000-000000000002",
+            "selected_action": "hold",
+            "confidence": 1.0,
+            "reasoning_depth": "full",
+            "reasoning_summary": "Zahlung zurückgestellt",
+            "alternatives_considered": [
+              "pay",
+              "escalate"
+            ],
+            "inputs_summary": "amount 1e-05 below the noise floor"
+          },
+          {
+            "decision_id": "d1000000-0000-4000-8000-000000000001",
+            "selected_action": "pay",
+            "confidence": 1e-05,
+            "reasoning_depth": "minimal",
+            "reasoning_summary": null,
+            "alternatives_considered": null,
+            "inputs_summary": null
+          }
+        ]
+      },
+      "expected": {
+        "version": 1,
+        "final_sequence": 0,
+        "tail_hash": null,
+        "open_hash": "043fc552c752ea287f29f4bdd0f445566444396f55c2a040a07c829af1c42c65",
+        "side_digest": "1039bd1272197d749d660a9b7e4fc84024ed80c454829bd809e3e815feea96ec",
+        "seal_hash": "5253e465ab94a813e78443dadb1c31773c89985183b6bee45f5b7e48c9092389"
+      }
+    }
+  ]
+}

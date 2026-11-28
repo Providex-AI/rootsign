@@ -65,12 +65,12 @@ and writes it on the `SESSION_CLOSE` record:
   `SessionContext`), not the store's. It is the independent statement of how
   long the chain should be; the store does not get to decide it.
 - `tail_hash` is the store's own chain tail at close.
-- `open_hash` covers `session_id`, `agent_id`, `objective`, `user_id` and the
-  open time.
+- `open_hash` covers `session_id`, `agent_id`, `objective` and `user_id`.
 - `seal_hash` covers `version`, `session_id`, `final_sequence`, `tail_hash`,
-  `open_hash`, `side_digest`, `status` and `error_message`, canonicalised the
-  way ADR-001 canonicalises an action (sorted keys, compact separators,
-  UTF-8).
+  `open_hash`, `side_digest` and the close `status`.
+- Every digest is the SHA-256 of `json.dumps(value, sort_keys=True,
+  ensure_ascii=True)`, the form ADR-001 hashes an action with (keys sorted,
+  Python's default separators, non-ASCII escaped).
 
 The formula lives in one module, `rootsign/seal.py`, under the same rule as
 ADR-001: every writer and every verifier imports it, none re-implements it,
@@ -166,6 +166,35 @@ a "Sealed" line beside the verdict.
   `SESSION_CLOSE` leaves an unsealed session, reported as such.
 - **It covers what existed at close.** An approval or decision written after
   `SESSION_CLOSE` (none are today) would fall outside it.
+
+## Amendments during implementation (2026-11-27)
+
+Writing `rootsign/seal.py` against the stores as they are changed four details
+of Decisions 1 and 2. None changes what a reviewer can detect that matters;
+each removes a way for two honest stores to disagree.
+
+- **The canonical form is ADR-001's actual form**, `json.dumps(sort_keys=True,
+  ensure_ascii=True)` with Python's default separators. The accepted text said
+  "compact separators", which is not what ADR-001's code does.
+- **The open time is not sealed.** PostgreSQL stamps `start_time` with server
+  time; the JSONL file keeps the SDK's `emitted_at`. A client's seal and a
+  store's would never agree on it.
+- **`error_message` is not sealed.** The PostgreSQL store does not keep it, so
+  no PostgreSQL verifier could recompute it. The close `status` is sealed.
+- **Side-record timestamps are not sealed**, for the same reason as the open
+  time. The side entries are, exactly: decisions by `decision_id`,
+  `selected_action`, `confidence`, `reasoning_depth`, `reasoning_summary`,
+  `alternatives_considered`, `inputs_summary`; approvals by `approval_id`,
+  `action_id`, `decision`, `decision_reason`, `approver_id`, `approver_type`,
+  `context_presented`, `response_latency_ms`, `parent_approval_id`; actions by
+  `action_id`, `sequence_number`, `authorization_status`, `decision_id`. They
+  sort by `decision_id`, `approval_id` and `sequence_number`.
+
+The side records carry floats (`confidence`, numbers inside
+`context_presented`), which ADR-001's action hash never does. Floats follow
+Python's `float.__repr__` (`1.0`, `1e-05`); an implementation in another
+language must match it. The golden vectors include these cases, and their
+README states every rule above for a second implementation.
 
 ## Alternatives considered
 
