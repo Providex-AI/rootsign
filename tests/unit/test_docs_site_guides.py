@@ -330,3 +330,48 @@ class TestEvidenceBundleGuide:
 def _first_hash(page: str) -> str:
     """The first manifest hash the page shows: the one from its export step."""
     return re.search(r"manifest\.json SHA-256:\s+([0-9a-f]{64})", page_text(page)).group(1)
+
+
+class TestTheSeal:
+    """The "Check the seal" section of the verify guide (ADR-016)."""
+
+    def _edited(self, session: Path, tmp_path: Path, change) -> Path:
+        records = [json.loads(line) for line in session.read_text().splitlines() if line.strip()]
+        out = tmp_path / "edited.jsonl"
+        out.write_text("".join(json.dumps(r) + "\n" for r in change(records)))
+        return out
+
+    def _check(self, path: Path, title: str, code: int, *flags: str) -> None:
+        result = runner.invoke(app, ["verify", "--local", str(path), *flags])
+        assert result.exit_code == code, result.output
+        session_id = json.loads(path.read_text().splitlines()[0])["session_id"]
+        assert_lines_match(result.output, _block(VERIFY, title), {PAGE_SESSION_ID: session_id})
+
+    def test_records_cut_from_the_end(self, session, tmp_path):
+        def drop_last_action(records):
+            return [r for r in records if r.get("sequence_number") != 2]
+
+        edited = self._edited(session, tmp_path, drop_last_action)
+        self._check(edited, "Records cut from the end (exit 2)", 2)
+
+    def test_an_edited_objective(self, session, tmp_path):
+        def edit(records):
+            for r in records:
+                if r["event_type"] == "SESSION_OPEN":
+                    r["payload"]["objective"] = "invoice someone else"
+            return records
+
+        self._check(self._edited(session, tmp_path, edit), "An edited objective (exit 1)", 1)
+
+    def test_no_seal_with_require_seal(self, session, tmp_path):
+        def unseal(records):
+            for r in records:
+                if r["event_type"] == "SESSION_CLOSE":
+                    r["payload"].pop("seal")
+            return records
+
+        edited = self._edited(session, tmp_path, unseal)
+        self._check(edited, "No seal, with --require-seal (exit 2)", 2, "--require-seal")
+        assert "rootsign verify --local ~/.rootsign/sessions/<session_id>.jsonl --require-seal" in (
+            page_text(VERIFY)
+        )

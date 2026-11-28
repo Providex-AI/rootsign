@@ -50,7 +50,7 @@ Before writing any of them, RootSign writes every tool call record it is holding
 
 ## What it does not do
 
-- **It cannot save records from a crash.** Records still in memory when the process dies are lost: every tool call since the last completed write. Because the lost calls are the last ones, the session still verifies as `VALID`. [How it works](/how-it-works#what-verify-does-not-check) explains why a chain cannot tell it was cut short.
+- **It cannot save records from a crash.** Records still in memory when the process dies are lost: every tool call since the last completed write. Because the lost calls are the last ones, and a process that crashed never closed the session, there is no seal to say so: the session still verifies as `VALID`, with `Seal: none`. `rootsign verify --require-seal` reports it as `INCOMPLETE`. [How it works](/how-it-works#what-verify-does-not-check) explains why a chain cannot tell it was cut short.
 - **It cannot stop a call whose record is lost.** The tool call has already returned when its record is written, so `ROOTSIGN_ON_RECORD_LOSS=fail` cannot raise into it.
 - **It reports a failed write late.** A record that cannot be written is tried again at the next write, and each failure is logged as an error. Records still not written when the session's client closes are lost:
 

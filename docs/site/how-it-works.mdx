@@ -77,8 +77,8 @@ This formula is frozen. Every backend and every future SDK uses the same eight f
 | Verdict | Exit code | Meaning | Example cause |
 | --- | --- | --- | --- |
 | `VALID` | `0` | Every record is present and every hash matches | Nothing was changed |
-| `TAMPERED` | `1` | A record was altered | An argument, result, tool name or timestamp was edited |
-| `INCOMPLETE` | `2` | The records present are intact, but one is missing | A deleted row, or a spool never synced |
+| `TAMPERED` | `1` | A record was altered | An argument, result, tool name or timestamp was edited, or, in a sealed session, the objective, close status, a decision or an approval |
+| `INCOMPLETE` | `2` | The records present are intact, but one is missing | A deleted row, a spool never synced, or the last records of a sealed session |
 
 When a session has both an altered record and a gap, the verdict is `TAMPERED`, and the missing ranges are still reported. An altered session is never reported as merely incomplete.
 
@@ -86,17 +86,36 @@ The separate exit codes let a CI job or a scheduled audit tell the two failures 
 
 Exit code `3` is not a verdict. It means there was nothing to verify: a session ID the database has never seen, a session file that is missing, unreadable or empty, or bad arguments. In 0.3.1 and earlier, an unknown session ID reported `VALID` with 0 records and exit code `0`.
 
+## The session seal
+
+The chain proves every record it holds, but not how many it was meant to hold. So when a session closes, the store writes a **seal** on the close record: a SHA-256 over the session's length and its last record, how it was opened and how it ended, and the records that sit outside the chain. `rootsign verify` checks it and prints a `Seal:` line:
+
+```text
+VALID ✓  —  2 records, chain intact
+  Session:  88f15492-3be7-4f7e-af16-3f247b1134a9
+  Seal:     sealed at record 2
+```
+
+| The seal covers | So `verify` reports |
+| --- | --- |
+| The number of actions the SDK recorded, and the `self_hash` of the last one | Records cut from the end as `INCOMPLETE` |
+| The session's `objective`, `user_id` and agent, and its close status | An edit to either as `TAMPERED` |
+| Each decision record, each approval record, and each action's `authorization_status` and `decision_id` | An edit, a deletion or a re-pointed action as `TAMPERED` |
+
+The JSONL backend writes the seal on the `SESSION_CLOSE` line, PostgreSQL in the session's row, and the cloud transport sends it with the close. The design, and why some fields are left out, is in [ADR-016](https://github.com/Providex-AI/rootsign/blob/main/docs/adr/ADR-016-session-seal.md).
+
+<Info>
+  The seal was added after RootSign 0.4.0. Sessions recorded by 0.4.0 and earlier have none, and on PostgreSQL the seal needs migration 0007 (`rootsign-admin init`).
+</Info>
+
 ## What verify does not check
 
-The chain protects the eight fields above and, through the payload hashes, the stored arguments and results. Some data sits outside it:
-
-- **Records deleted from the end of a session.** A chain cannot tell how long it was meant to be, so removing the last tool calls leaves a shorter chain that still verifies as `VALID`. `SESSION_CLOSE` records a `total_actions` count, but `SESSION_CLOSE` is not hashed and `verify` does not compare against it.
-- **Session events.** `SESSION_OPEN` and `SESSION_CLOSE`, including the session's `objective`, are not part of the chain.
-- **Fields that change after the call.** `authorization_status` is excluded because it legitimately changes when a human approves or rejects a pending action. `duration_ms` is excluded too. Approval decisions are stored as separate approval records, not in the chain.
-- **Captured decisions.** [Decision records](/guides/decision-capture) and an action's `decision_id` are outside the chain, so an edited reasoning summary, or an action pointed at a different decision, still verifies as `VALID`.
+- **The end of an unsealed session.** A session recorded by RootSign 0.4.0 or earlier, or one that never closed, has no seal. Its verdict stands with `Seal: none`, so removing its last tool calls, or deleting the close record along with them, still verifies as `VALID`. Where every session should be sealed, run `rootsign verify --require-seal`, which reports an unsealed session as `INCOMPLETE`.
+- **A rewrite of everything.** The chain and the seal are SHA-256 hashes with no key. Someone who can write to the store, edits a record, and recomputes every hash and the seal produces a session that verifies. Keep an anchor outside the store.
+- **Fields the seal leaves out.** The session's open and close times, `SESSION_CLOSE.error_message`, the timestamps on decisions and approvals, and an action's `duration_ms`. The stores record times differently, so a client's seal and a store's would never agree on them.
 
 <Warning>
-  If you need to prove that a session was not cut short, keep the record count somewhere outside the session file. For example, record the `manifest.json` hash that `rootsign export` prints in a ticket or a chain-of-custody log.
+  To prove a session was not rewritten wholesale, keep something about it outside the store: for example, the `manifest.json` hash that `rootsign export` prints, recorded in a ticket or a chain-of-custody log.
 </Warning>
 
 ## Recording never breaks your agent

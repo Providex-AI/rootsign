@@ -51,7 +51,7 @@ unknown top-level key is a `VALIDATION_ERROR`, not a warning.
 
 | Field | Type | Constraint | Meaning |
 |---|---|---|---|
-| `schema_version` | string | matches `^\d+\.\d+$` | Wire-format version of this envelope. Emitted as `"1.1"` by the current SDK (`rootsign.ingest.schemas.SCHEMA_VERSION`); `1.0` differs only in lacking the optional fields of §8.2. |
+| `schema_version` | string | matches `^\d+\.\d+$` | Wire-format version of this envelope. Emitted as `"1.1"` by the current SDK (`rootsign.ingest.schemas.SCHEMA_VERSION`); `1.0` differs only in lacking the optional fields of §8.2. `1.1` envelopes from later SDKs may also carry `DECISION_RECORD.decision_id` (§3.3) and the `SESSION_CLOSE` seal (§8.5); see §9.1. |
 | `sdk_version` | string | 1 to 64 chars | Emitting SDK's version, from package metadata. Diagnostic only; the store MUST NOT branch on it. |
 | `event_type` | enum | one of the five in §3 | Selects the payload schema. |
 | `event_id` | UUID | none | Idempotency key. Unique per emitted event; a retry of the *same* event reuses it (§6). |
@@ -217,6 +217,12 @@ Terminal record for a session.
 `end_time` are set. If `metadata.total_actions` is present and disagrees
 with the store's own `action_count`, the store MUST log a warning and
 still accept. The count is a reconciliation signal, not an assertion.
+
+The cloud transport also sends `seal`, the session seal of §8.5. It is a
+session-level key on an `extra="allow"` payload rather than a declared field,
+so it is additive (§9.1) and a store that predates it ignores it. A store that
+supports seals computes its own at close and never trusts the client's
+(§8.5). It MUST NOT reject a close because the two disagree.
 
 ### 3.6 Why two payloads allow extras and three forbid them
 
@@ -571,6 +577,75 @@ Both conditions in one session → **`TAMPERED` wins** (worst verdict), with
 the incomplete ranges still reported in the detail. A tampered session that
 also has gaps must never be downgraded to "just incomplete".
 
+A sealed session adds the seal's findings to the same three verdicts (§8.5).
+A verdict the chain already decided as `TAMPERED` is never changed by the
+seal.
+
+### 8.5 The session seal
+
+The chain proves each record it holds, but not how many it should hold, and
+it does not cover the session's open and close records or the records beside
+it. The **seal** (ADR-016) is written on `SESSION_CLOSE` and covers all three:
+
+| Field | Value |
+|---|---|
+| `version` | `1` |
+| `final_sequence` | the number of actions the SDK recorded (`metadata.total_actions`), not the store's count |
+| `tail_hash` | the `self_hash` of the action with the highest `sequence_number`, or `null` for none |
+| `open_hash` | SHA-256 over the session's `session_id`, `agent_id`, `objective` and `user_id` |
+| `side_digest` | SHA-256 over the session's decision records, approval records, and each action's `action_id`, `sequence_number`, `authorization_status` and `decision_id` |
+| `seal_hash` | SHA-256 over `version`, `session_id`, `final_sequence`, `tail_hash`, `open_hash`, `side_digest` and the close `status` |
+
+Every digest is the SHA-256 of `json.dumps(value, sort_keys=True,
+ensure_ascii=True)`, the form of §8.1, with floats as Python's
+`float.__repr__` writes them. No timestamp is sealed, and neither is
+`error_message`: the stores record times differently, and PostgreSQL does not
+keep the message, so a client's seal and a store's could never agree on them.
+The exact fields of each side entry, and their sort keys, are in
+[`rootsign/seal.py`](https://github.com/Providex-AI/rootsign/blob/main/rootsign/seal.py).
+The golden vectors in `tests/fixtures/session-seal/v1/` pin them, and a second
+implementation MUST reproduce those vectors before it writes or checks a seal.
+
+**What each party does:**
+
+- **The writer seals once, at close.** The JSONL writer, the PostgreSQL store
+  and the cloud transport each compute the seal over what they hold when the
+  session closes. The cloud transport sends it on the close, or spools it
+  with the close when the backend is unreachable. A replay of the spool
+  (`rootsign-admin sync`) sends the spooled close unchanged.
+- **A store recomputes and keeps both.** A store that supports seals computes
+  its own from what it holds and stores it. When the client's differs, the
+  store keeps the client's beside its own, under `client`, and accepts the
+  close. A rejected close would leave the session `running` forever, and a
+  disagreement is evidence to report, not a reason to refuse (§8.3:
+  discontinuity is data).
+- **Nothing changes a sealed session.** After `SESSION_CLOSE` the store
+  refuses every further record for the session with `SESSION_CLOSED`, and an
+  approval written outside ingest (`rootsign approve`) is refused the same
+  way, because it would change records the seal covers.
+
+**How a verifier reads it**, after the chain:
+
+| The seal shows | Verdict |
+|---|---|
+| Everything recomputes and the chain ends at `final_sequence` with `tail_hash` | the chain's verdict, sealed |
+| The chain is shorter than `final_sequence` | `INCOMPLETE`, with the range missing at the end |
+| `seal_hash`, `open_hash`, `tail_hash` or `side_digest` does not recompute, or the chain is longer than `final_sequence` | `TAMPERED`, naming the part that failed |
+| A client seal that counted more actions than the store holds | `INCOMPLETE` |
+| A client seal that differs in any other way | `TAMPERED` |
+| A file with a seal but no `SESSION_OPEN` record, such as a spool file that starts mid-session | `INCOMPLETE`: the seal cannot be checked |
+| No seal, or an unknown `version` | the chain's verdict, marked unsealed |
+
+The parts are checked in the order `seal_hash`, `open_hash`, then the length
+and `tail_hash`, then `side_digest`, and the first failure decides. A verifier
+SHOULD offer a strict mode (`rootsign verify --require-seal`) that reports an
+unsealed session as `INCOMPLETE`. Without it, deleting a session's last
+records together with its close record leaves a session that reads like one
+that crashed before closing.
+
+The seal is an unkeyed hash, like the chain. It detects an edit made by
+someone who did not also recompute it; it does not stop someone who did.
+
 ---
 
 ## 9. Schema versioning
@@ -605,6 +680,13 @@ NOT be used for compatibility branching.
 Anything not clearly on the left is on the right. The asymmetry is
 deliberate: a wrong MINOR bump silently breaks a fielded client, while a
 conservative MAJOR bump costs one coordinated release.
+
+One exception so far: `DECISION_RECORD.decision_id` (§3.3) and the
+`SESSION_CLOSE` seal (§8.5) were added within `1.1`, without a bump
+(ADR-016). No store branches on the minor number, and a bump would change
+the bytes of the published sync-receipt vectors. A store therefore MUST NOT
+read a `1.1` envelope's version as saying whether those optional fields are
+present.
 
 ### 9.2 Upgrade ordering: stores first
 
@@ -712,6 +794,12 @@ A hosted backend conforms to ingest spec v1 when:
 - [ ] It accepts records with sequence gaps and dangling `prev_action_hash`,
       surfacing them as `INCOMPLETE` at verification rather than rejecting
       them at ingest (§8.3 and §8.4).
+- [ ] It computes its own seal on every `SESSION_CLOSE` with
+      `rootsign.seal` or an implementation that reproduces the golden vectors,
+      keeps a client seal that differs beside its own, and never rejects a
+      close over a seal (§3.5 and §8.5).
+- [ ] It refuses every record for a closed session with `SESSION_CLOSED`, so
+      a sealed session cannot change (§8.5).
 - [ ] It returns `429` with `RATE_LIMITED` and `5xx` with
       `STORE_UNAVAILABLE`/`INTERNAL_ERROR` rather than inventing codes (§5).
 
@@ -738,6 +826,9 @@ answers, listed for review:
 5. **Servers must not reject gaps or dangling `prev_action_hash`** (§8.3).
    The consequence of ADR-013 Decision 4a that is easiest to implement
    backwards, and the most destructive to get wrong.
+6. **A seal disagreement is kept, not rejected** (§8.5). The store stores its
+   own seal and the client's beside it, and the verifier reports the
+   difference: the same rule as item 5, applied to the end of a session.
 6. **Cloud-mode chain fields are optional additive payload fields** (§8.2),
    not a new event type or a separate header, with the `extra="forbid"`
    forward-compatibility caveat stated in §3.6.

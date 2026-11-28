@@ -129,3 +129,16 @@ class TestQuickstartPage:
             _page_output_after("rootsign verify --local gap.jsonl"),
             session_file.stem,
         )
+
+
+def test_deleting_the_last_record_is_incomplete_too(session_file, tmp_path):
+    """The note under the steps: the seal catches what the chain alone cannot."""
+    lines = session_file.read_text().splitlines(keepends=True)
+    assert '"SESSION_CLOSE"' in lines[-1] and '"ACTION_RECORD"' in lines[-2]
+    del lines[-2]  # the last tool call, just before the close
+    cut = tmp_path / "cut.jsonl"
+    cut.write_text("".join(lines))
+
+    result = _verify(cut)
+    assert result.exit_code == 2 and "missing at the end" in result.output
+    assert "Delete the **last** line before the session close instead" in _page()

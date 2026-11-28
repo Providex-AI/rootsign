@@ -1,8 +1,8 @@
 # ADR-016: Session seal — making a session's length and its bounds verifiable
 
 - **Date**: 2026-11 (accepted 2026-11-27; implementation follows v0.4.0)
-- **Status**: Accepted. Not yet implemented: the seal ships in a release after
-  0.4.0.
+- **Status**: Accepted and implemented (#116, #118, #119, #120); ships in the
+  first release after 0.4.0.
 - **Decider**: Founder
 - **Related**: ADR-001 (canonical action hash, unchanged by this ADR),
   ADR-008 (decision capture), ADR-007 (HiTL approvals), ADR-013 (client-side
@@ -195,6 +195,50 @@ The side records carry floats (`confidence`, numbers inside
 Python's `float.__repr__` (`1.0`, `1e-05`); an implementation in another
 language must match it. The golden vectors include these cases, and their
 README states every rule above for a second implementation.
+
+Building the writers and verifiers changed these, each approved where it was
+a choice:
+
+- **Decision ids are minted by the client on the cloud transport** (#117).
+  The spool minted one id and the store another, so a synced action pointed
+  at a decision the store had never issued, and a client seal could never
+  match the store's. `DECISION_RECORD` gains an optional `decision_id` the
+  store keeps (spec §3.3).
+- **A closed session cannot be approved** (#118). Decision 7 said no approval
+  is written after `SESSION_CLOSE`; one could be: a held call cancelled inside
+  its session leaves a pending action, and `rootsign approve` would still
+  approve it. `CRUDApproval.create_with_chain_link` now raises
+  `SessionClosedError` for a session that is not running.
+- **The spool never seals, and sync never re-seals** (#118). The cloud
+  transport seals the close before it sends or spools it, so a spooled close
+  carries the client's seal (Decision 5). The JSONL writer, used as the
+  spool, adopts that seal and adds none, and `rootsign-admin sync` replays
+  the close unchanged. This also keeps the published sync-receipt vectors
+  (ADR-015) byte-for-byte reproducible.
+- **`SESSION_CLOSE` is fsynced under the default `chain` policy** (#118),
+  like an action record, because a close that is lost takes its seal with it.
+- **The order of checks** (#119): `seal_hash`, then `open_hash`, then the
+  length and `tail_hash`, then `side_digest`; the first failure decides. When
+  records are missing at the end, `side_digest` cannot be checked, and the
+  detail says so.
+- **Two file shapes the table in Decision 3 did not cover** (#119). More than
+  one `SESSION_CLOSE` line is `TAMPERED`. A file with a seal but no
+  `SESSION_OPEN` line, such as a spool file that starts mid-session, is
+  `INCOMPLETE` ("cannot be checked"): records are missing, not altered.
+- **The bundle block is `{outcome, detail}`, and absent for an unsealed
+  session** (#119), in place of Decision 6's `present`, `valid`,
+  `final_sequence`, `detail`. `outcome` names what the check found, which a
+  boolean cannot. The key is absent rather than null, as ADR-015 does for
+  `replay`, so an unsealed session exports exactly as 0.4.0 did. The report's
+  line reads "Seal: none" when the key is absent.
+- **The schema stays `1.1`** (founder, 2026-11-28). The seal and #117's
+  `decision_id` are additive, which spec §9.1 makes a MINOR bump. But no store
+  branches on the minor number, and a bump would change the bytes of the
+  published sync-receipt vectors (ADR-015). The spec records the exception in
+  §2 and §9.1.
+- **The CLI shows the seal on a line of its own** (#119): `Seal:     sealed
+  at record N` under the verdict, or `Seal:     none (...)`, with the headline
+  unchanged unless the seal decides the verdict.
 
 ## Alternatives considered
 
