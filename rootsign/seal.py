@@ -291,3 +291,65 @@ def check_seal(seal: Mapping[str, Any] | None, facts: SessionFacts) -> SealCheck
             "a decision, an approval, or an action's authorization_status or decision_id was edited",
         )
     return SealCheck(SealOutcome.SEALED, f"sealed at {final} record(s)")
+
+
+#: The fields an action record contributes to a seal: its side-entry fields and
+#: the `self_hash` the tail is read from.
+ACTION_SEAL_FIELDS = (*ACTION_FIELDS, "self_hash")
+
+
+def jsonl_session_facts(
+    records: Iterable[Mapping[str, Any]], *, status: str | None
+) -> SessionFacts:
+    """Facts from session-file records, the shape the JSONL writer appends.
+
+    The JSONL writer, the cloud transport (which keeps the same shape for what
+    it sends) and the offline verifier all read a session through this one
+    function, so a seal one of them writes is a seal another can check.
+
+    `SESSION_OPEN`, `DECISION_RECORD` and `APPROVAL_RECORD` lines are envelopes
+    with a nested `payload` (the decision or approval id sits beside it); an
+    `ACTION_RECORD` line is flat. A line with no `event_type` is an action, as
+    in store exports. `status` is the close status, passed separately because a
+    writer seals before its close line exists.
+    """
+    session_id: Any = None
+    agent_id: Any = None
+    objective: str | None = None
+    user_id: str | None = None
+    decisions: list[dict[str, Any]] = []
+    approvals: list[dict[str, Any]] = []
+    actions: list[dict[str, Any]] = []
+    opened = False
+    for record in records:
+        event_type = record.get("event_type", "ACTION_RECORD")
+        session_id = session_id or record.get("session_id")
+        payload = record.get("payload") or {}
+        if event_type == "SESSION_OPEN" and not opened:
+            opened = True
+            agent_id = record.get("agent_id")
+            objective = payload.get("objective")
+            user_id = payload.get("user_id")
+        elif event_type == "ACTION_RECORD":
+            actions.append({name: record.get(name) for name in ACTION_SEAL_FIELDS})
+        elif event_type == "DECISION_RECORD":
+            decisions.append({**payload, "decision_id": record.get("decision_id")})
+        elif event_type == "APPROVAL_RECORD":
+            approvals.append({**payload, "approval_id": record.get("approval_id")})
+    return SessionFacts(
+        session_id=session_id,
+        agent_id=agent_id,
+        objective=objective,
+        user_id=user_id,
+        status=status,
+        decisions=tuple(decisions),
+        approvals=tuple(approvals),
+        actions=tuple(actions),
+    )
+
+
+def total_actions(close_payload: Mapping[str, Any]) -> int | None:
+    """The SDK's own count from a `SESSION_CLOSE` payload, when it sent one."""
+    metadata = close_payload.get("metadata") or {}
+    count = metadata.get("total_actions") if isinstance(metadata, Mapping) else None
+    return count if isinstance(count, int) and not isinstance(count, bool) else None

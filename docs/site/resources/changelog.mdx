@@ -8,6 +8,11 @@ keywords: ["changelog", "release notes", "rootsign releases", "upgrade", "v0.4.0
 Every RootSign release, newest first, with the changes that matter when you upgrade. Each entry links to the full release notes on GitHub. When changes are merged on `main` but not yet released, an Unreleased entry at the top lists them, and the pages on this site already describe that behaviour with a note naming the release that changed it.
 
 <Update label="Unreleased" description="Merged since v0.4.0">
+  **Session seal (ADR-016)**
+
+  - Every session is sealed when it closes: the close record carries a SHA-256 seal over the chain's length and last record, the session's opening fields and close status, and its decisions, approvals and action statuses. JSONL writes it on the `SESSION_CLOSE` line, PostgreSQL in a new `sessions.seal` column, and the cloud transport sends it with the close. **On PostgreSQL, run `rootsign-admin init` after upgrading** to add the column (migration 0007). `rootsign verify` starts checking seals in a later change. ([#118](https://github.com/Providex-AI/rootsign/pull/118))
+  - `rootsign approve` refuses an action whose session has already closed: no call is waiting for it, and the approval would change records the seal covers. ([#118](https://github.com/Providex-AI/rootsign/pull/118))
+
   **Cloud transport (preview)**
 
   - After an outage and `rootsign-admin sync`, a synced action pointed at a decision id the store had never issued: the spool minted one, and sync dropped it so the store minted another. The transport now mints each decision's id, the spool keeps it, and sync sends it; a store keeps the id it is given. ([#117](https://github.com/Providex-AI/rootsign/pull/117))

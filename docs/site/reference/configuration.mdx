@@ -63,7 +63,7 @@ BACKEND
 
   | Value | `fsync` after |
   | --- | --- |
-  | `chain` | Each action and approval record, the records the hash chain depends on |
+  | `chain` | Each action and approval record, the records the hash chain depends on, and the session close, which carries the session's seal |
   | `always` | Every record, including session open and close |
   | `never` | No record. The operating system writes them when it chooses, so a power loss can lose the last records. |
 </ResponseField>

@@ -164,8 +164,9 @@ def test_allowed_values_match(field):
 def test_the_fsync_table_matches_the_chain_critical_records():
     from rootsign.sdk.jsonl_client import _CHAIN_CRITICAL
 
-    assert _CHAIN_CRITICAL == {"ACTION_RECORD", "APPROVAL_RECORD"}
+    assert _CHAIN_CRITICAL == {"ACTION_RECORD", "APPROVAL_RECORD", "SESSION_CLOSE"}
     assert "| `chain` | Each action and approval record," in page_text(CONFIG)
+    assert "and the session close, which carries the session's seal |" in page_text(CONFIG)
 
 
 # ---------------------------------------------------------------------------

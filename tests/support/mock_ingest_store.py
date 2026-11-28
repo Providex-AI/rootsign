@@ -21,6 +21,7 @@ from uuid import uuid4
 import httpx
 
 from rootsign.hashing import compute_action_self_hash
+from rootsign.seal import ACTION_SEAL_FIELDS, compute_seal, jsonl_session_facts, total_actions
 from rootsign.ingest.schemas import (
     PAYLOAD_SCHEMAS,
     ErrorCode,
@@ -74,8 +75,12 @@ class MockIngestStore:
         #: shape, without scripting every reply.
         self.first_status: int | None = None
         self.raise_timeout: bool = False
-        #: The id the store answered with, by event_id.
+        #: The id the store answered with, by event_id: decisions and approvals
+        #: are sealed under it (ADR-016).
         self.entity_ids: dict[str, str] = {}
+        #: The store's own seal per closed session, with the client's beside it
+        #: under `client` when the two differ (ADR-016 Decision 4).
+        self.seals: dict[str, dict[str, Any]] = {}
 
     # -- transport --------------------------------------------------------
 
@@ -126,6 +131,8 @@ class MockIngestStore:
         # (spec §3.3). Anything else gets one minted here.
         entity_id = payload.get("action_id") or payload.get("decision_id") or str(uuid4())
         self.entity_ids[event_id] = entity_id
+        if validated.event_type is EventType.SESSION_CLOSE:
+            self._seal_session(envelope)
         return {
             "status": "accepted",
             "event_id": event_id,
@@ -133,6 +140,39 @@ class MockIngestStore:
             "sequence_number": payload.get("sequence_number"),
             "self_hash": payload.get("self_hash"),
         }
+
+    def _seal_session(self, close: dict[str, Any]) -> None:
+        """Seal from what this store holds; never trust the client's (spec §8.3).
+
+        A client seal that differs is kept beside the store's, and the close
+        is still accepted: a refused close would leave the session open
+        forever, and the disagreement is what `verify` reports.
+        """
+        session_id = str(close["session_id"])
+        records = []
+        for envelope in self.accepted:
+            if str(envelope["session_id"]) != session_id:
+                continue
+            event_type = envelope["event_type"]
+            if event_type == EventType.ACTION_RECORD.value:
+                payload = envelope["payload"]
+                records.append(
+                    {
+                        "event_type": event_type,
+                        **{f: payload.get(f) for f in ACTION_SEAL_FIELDS},
+                        "authorization_status": payload.get(
+                            "authorization_status", "auto_authorized"
+                        ),
+                    }
+                )
+            else:
+                entity = self.entity_ids.get(envelope["event_id"])
+                records.append({**envelope, "decision_id": entity, "approval_id": entity})
+        payload = close["payload"]
+        facts = jsonl_session_facts(records, status=payload.get("status"))
+        own = compute_seal(facts, final_sequence=total_actions(payload))
+        client = payload.get("seal")
+        self.seals[session_id] = own if client in (None, own) else {**own, "client": client}
 
     def _verify_seal(self, envelope: dict[str, Any]) -> str | None:
         """The server verifies; it does not compute (ADR-013 Decision 1).
