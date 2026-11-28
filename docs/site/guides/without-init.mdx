@@ -125,7 +125,7 @@ rootsign.errors.RecordPersistenceError: session could not be opened (the store r
 ```
 
 <Info>
-  The clear errors for registering an agent twice and for an unknown agent ID were added after RootSign 0.3.1. In 0.3.1 and earlier, a second `register_agent()` failed with a raw `IntegrityError`, and a session for an unknown agent ran with every record refused.
+  The clear errors for registering an agent twice and for an unknown agent ID were added in RootSign 0.4.0. In 0.3.1 and earlier, a second `register_agent()` failed with a raw `IntegrityError`, and a session for an unknown agent ran with every record refused.
 </Info>
 
 ## Write records inside your own transaction
@@ -169,7 +169,7 @@ Three rules follow from owning the transaction:
 - **Calls cannot be held for approval.** A held call's pending record would stay uncommitted, so nobody could see it to approve it. `require_approval=True` with this client raises [`HiTLUnsupportedBackendError`](/reference/errors#hitlunsupportedbackenderror) before anything is written. Use `ManagedLocalIngestClient` for held calls.
 
 <Info>
-  The approval error with your own transaction was added after RootSign 0.3.1. In 0.3.1 and earlier, the held call waited for an approval nobody could see, then failed with `ActionNotFoundError`.
+  The approval error with your own transaction was added in RootSign 0.4.0. In 0.3.1 and earlier, the held call waited for an approval nobody could see, then failed with `ActionNotFoundError`.
 </Info>
 
 ## Which client to use

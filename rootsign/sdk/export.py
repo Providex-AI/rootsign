@@ -423,6 +423,10 @@ def _build_timeline(
                 "decision_id": decision.get("decision_id"),
                 "selected_action": decision.get("selected_action"),
                 "confidence": decision.get("confidence"),
+                # The depth the reasoning was captured at (ADR-008): what tells a
+                # reviewer whether a summary or the alternatives were cut by it.
+                # None for records written before the SDK recorded one.
+                "reasoning_depth": decision.get("reasoning_depth"),
                 "alternatives_considered": decision.get("alternatives_considered"),
                 "reasoning_summary": decision.get("reasoning_summary"),
                 "inputs_summary": decision.get("inputs_summary"),
@@ -681,12 +685,52 @@ def load_local_session(jsonl_path: str | os.PathLike[str]) -> SessionEvidence:
         verify=verify_session_local(str(path)),
         receipt=_load_receipt_for(resolved_id, path),
         session=session,
-        agent={"agent_id": session.get("agent_id")} if session.get("agent_id") else None,
+        agent=_local_agent(path, session.get("agent_id")),
         actions=actions,
         decisions=decisions,
         approvals=approvals,
         losses=losses,
     )
+
+
+def _local_agent(path: Path, agent_id: str | None) -> dict[str, Any] | None:
+    """The agent block for a session file: its registry row when one is beside it.
+
+    `init()` registers agents in `<data_dir>/agents.jsonl` and writes sessions to
+    `<data_dir>/sessions/`, so a session still in its data folder can be named
+    with the same fields a PostgreSQL bundle takes from its registration row. A
+    file copied anywhere else, an agent the registry does not list, or a
+    registry that cannot be read leaves the id alone, which the report states
+    (ADR-014 Decision 4). Like the PostgreSQL row, the registry is not covered
+    by the hash chain, and `registry.in_hash_chain` says so.
+    """
+    if not agent_id:
+        return None
+    registry = path.parent.parent / "agents.jsonl"
+    if path.parent.name != "sessions" or not registry.is_file():
+        return {"agent_id": agent_id}
+    try:
+        lines = registry.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError):
+        return {"agent_id": agent_id}
+    for line in lines:
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(row, dict) and str(row.get("agent_id")) == str(agent_id):
+            return {
+                "agent_id": str(agent_id),
+                "name": row.get("name"),
+                "owner": row.get("owner"),
+                "environment": row.get("environment"),
+                "risk_tier": row.get("risk_tier"),
+                "framework": row.get("framework"),
+                "model_version": row.get("model_version"),
+                "regulatory_categories": list(row.get("regulatory_categories") or []),
+                "registry": {"backend": "jsonl", "location": str(registry), "in_hash_chain": False},
+            }
+    return {"agent_id": agent_id}
 
 
 def export_local(
@@ -781,6 +825,7 @@ def _agent_block(agent: Any) -> dict[str, Any] | None:
         "framework": agent.framework,
         "model_version": agent.model_version,
         "regulatory_categories": list(agent.regulatory_categories or []),
+        "registry": {"backend": "postgres", "in_hash_chain": False},
     }
 
 
@@ -808,6 +853,7 @@ def _decision_dict(decision: Any) -> dict[str, Any]:
         "timestamp": _iso(decision.timestamp),
         "selected_action": decision.selected_action,
         "confidence": decision.confidence,
+        "reasoning_depth": decision.reasoning_depth,
         "alternatives_considered": list(decision.alternatives_considered or []),
         "reasoning_summary": decision.reasoning_summary,
         "inputs_summary": decision.inputs_summary,

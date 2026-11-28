@@ -29,7 +29,7 @@ rootsign.init(agent="invoice-agent")
 Without `init()`, for example when you build a `SessionContext` and client yourself, each setting is read when it is used. The database settings are read the first time RootSign connects to PostgreSQL. The CLIs read everything when they start.
 
 <Info>
-  Before the release after RootSign 0.3.1, `ROOTSIGN_CAPTURE_DECISIONS` and `ROOTSIGN_REASONING_DEPTH` were read when `rootsign` was imported, so setting them in code after the import was ignored.
+  Before RootSign 0.4.0, `ROOTSIGN_CAPTURE_DECISIONS` and `ROOTSIGN_REASONING_DEPTH` were read when `rootsign` was imported, so setting them in code after the import was ignored.
 </Info>
 
 **Invalid values.** A `ROOTSIGN_` variable with a value outside its allowed list stops `import rootsign` with a pydantic `ValidationError` that names the setting:

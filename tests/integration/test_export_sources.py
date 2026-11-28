@@ -43,6 +43,7 @@ def _scripted(agent_id, session_id):
                 "selected_action": "proceed",
                 "confidence": 0.9,
                 "reasoning_summary": "within policy",
+                "reasoning_depth": "full",
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             },
         ),
@@ -154,6 +155,16 @@ class TestExportSourceParity:
         ]
 
 
+class TestDecisionDepthParity:
+    async def test_both_sources_carry_the_decision_depth(self, both_sources, clean_db):
+        """PostgreSQL keeps `reasoning_depth` since migration 0006; the bundle shows it on both."""
+        session_id, path = both_sources
+
+        for bundle in (export_local(path), await export_session(session_id, clean_db)):
+            (decision,) = [e for e in bundle.timeline["events"] if e["type"] == "DECISION"]
+            assert decision["reasoning_depth"] == "full"
+
+
 class TestPostgresSource:
     async def test_the_manifest_carries_the_registered_agent(
         self, both_sources, clean_db, seeded_agent
@@ -174,6 +185,8 @@ class TestPostgresSource:
         assert from_db["agent"]["name"] == seeded_agent.name
         assert from_db["agent"]["owner"] == seeded_agent.owner
         assert from_db["agent"]["risk_tier"] == seeded_agent.risk_tier
+        # The registration row is not covered by the hash chain, and says so.
+        assert from_db["agent"]["registry"] == {"backend": "postgres", "in_hash_chain": False}
 
         # The file source knows the id and admits the rest is not there.
         assert set(from_file["agent"]) == {"agent_id"}

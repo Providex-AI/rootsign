@@ -1,13 +1,15 @@
 ---
-title: "RootSign changelog: releases and unreleased changes"
+title: "RootSign changelog: every release and how to upgrade"
 sidebarTitle: "Changelog"
-description: "What changed in each RootSign release from v0.1.0 to v0.3.1, and the changes merged since v0.3.1 that the next release will ship, with links to the full notes."
-keywords: ["changelog", "release notes", "rootsign releases", "upgrade", "unreleased"]
+description: "What changed in each RootSign release from v0.1.0 to v0.4.0, with the steps to take when you upgrade and a link to the full release notes for each."
+keywords: ["changelog", "release notes", "rootsign releases", "upgrade", "v0.4.0"]
 ---
 
-Every RootSign release, newest first, with the changes that matter when you upgrade. Each entry links to the full release notes on GitHub. The Unreleased entry lists what is merged on `main` and ships in the next release; the pages on this site already describe that behaviour, with a note wherever it differs from 0.3.1.
+Every RootSign release, newest first, with the changes that matter when you upgrade. Each entry links to the full release notes on GitHub. When changes are merged on `main` but not yet released, an Unreleased entry at the top lists them, and the pages on this site already describe that behaviour with a note naming the release that changed it.
 
-<Update label="Unreleased" description="Merged since v0.3.1">
+<Update label="v0.4.0" description="November 27, 2026">
+  **The release the docs site found.** Writing [docs.getprovidex.com](https://docs.getprovidex.com), with every sample run in CI, turned up the bugs fixed below, two of them security fixes. **When you upgrade:** on PostgreSQL, run `rootsign-admin init` to apply migration 0006; scripts that read `rootsign verify` exit codes should expect `3` for "nothing to verify"; and code that caught a raw `OSError`, `RuntimeError`, `IntegrityError` or `AttributeError` from RootSign now gets the RootSign errors listed below. 0.3.x is no longer supported.
+
   **Records that were lost**
 
   - With `ROOTSIGN_BUFFERED=true` on PostgreSQL, the last tool calls of a session could be lost without an error while the session verified as `VALID`. A write now waits for one already in progress. ([#88](https://github.com/Providex-AI/rootsign/pull/88))
@@ -28,7 +30,10 @@ Every RootSign release, newest first, with the changes that matter when you upgr
   - `rootsign-admin start-db` keeps its data in a Docker volume named `rootsign_pgdata`, so removing the container keeps the data. ([#72](https://github.com/Providex-AI/rootsign/pull/72))
   - `rootsign-admin sync` reports an unreachable endpoint as `FAILED`, not `REJECTED`. ([#74](https://github.com/Providex-AI/rootsign/pull/74))
   - The inline approval prompt reads the first word: typing `yes` approves with no note. It recorded the note `es`. ([#69](https://github.com/Providex-AI/rootsign/pull/69))
+  - `rootsign export` of a cleanly synced session keeps its `sync-receipt.json` when the spool tree was copied, and a synced file is paired with its own receipt. ([#52](https://github.com/Providex-AI/rootsign/pull/52))
   - An evidence bundle's `report.html` fits a phone screen: long values wrap inside their card and a wide table scrolls inside it. Timestamps, paths and the chain table ran off the screen. ([#107](https://github.com/Providex-AI/rootsign/pull/107))
+  - Each `DECISION` in an evidence bundle carries its `reasoning_depth`, so a reviewer can tell reasoning the depth cut from reasoning never given. The bundle format stays `1.0`. ([#111](https://github.com/Providex-AI/rootsign/pull/111))
+  - A bundle exported from a JSONL session file names the agent (name, owner, risk tier and the rest) from `agents.jsonl` in the same data folder, as a PostgreSQL bundle does from its registration row. Both now say the identity came from a registry that the hash chain does not cover. ([#112](https://github.com/Providex-AI/rootsign/pull/112))
 
   **SDK**
 
@@ -53,7 +58,10 @@ Every RootSign release, newest first, with the changes that matter when you upgr
 
   - The MCP proxy works with real streamable-HTTP MCP servers; it answered every request with 406. ([#64](https://github.com/Providex-AI/rootsign/pull/64))
   - The extras require what CI tests: `langgraph>=0.2` and `crewai>=0.95`. ([#61](https://github.com/Providex-AI/rootsign/pull/61))
+  - The `mcp` extra requires `mcp>=1.22`: every earlier 1.x release fails to import next to Pydantic 2.14 or later. CI tests 1.22.x as well as the newest 1.x. ([#110](https://github.com/Providex-AI/rootsign/pull/110))
   - The `autogen` extra is removed; AutoGen support is planned for v1.0. ([#60](https://github.com/Providex-AI/rootsign/pull/60))
+
+  [Full release notes](https://github.com/Providex-AI/rootsign/releases/tag/v0.4.0)
 </Update>
 
 <Update label="v0.3.1" description="October 20, 2026">

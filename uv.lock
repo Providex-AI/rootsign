@@ -3398,7 +3398,7 @@ wheels = [
 
 [[package]]
 name = "rootsign"
-version = "0.3.1"
+version = "0.4.0"
 source = { editable = "." }
 dependencies = [
     { name = "pydantic" },
@@ -3468,7 +3468,7 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'cloud'", specifier = ">=0.27,<1.0" },
     { name = "httpx", marker = "extra == 'mcp'", specifier = ">=0.27" },
     { name = "langgraph", marker = "extra == 'langgraph'", specifier = ">=0.2" },
-    { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.9,<2.0" },
+    { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.22,<2.0" },
     { name = "psycopg2-binary", marker = "extra == 'postgres'", specifier = ">=2.9,<3.0" },
     { name = "pydantic", specifier = ">=2.7,<3.0" },
     { name = "pydantic-settings", specifier = ">=2.2,<3.0" },

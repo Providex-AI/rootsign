@@ -57,7 +57,7 @@ Each export has its own manifest hash, because the manifest records when it was 
   "verdict": "VALID",
   "files": {
     "redaction.json": "d1ba7b041838a3e45d3a10512f5dd962533432ca734057699aa5cdd94dfe2d3b",
-    "timeline.json": "4428f0ed48979e74438cb34486942a5d3039d5b1eb8ce2a05b1a52a334df09a2",
+    "timeline.json": "fbfc324601dc6495952039a42d75c00d6d5b6a77a9a7ca540a28b46293ba2a20",
     "verification.json": "1e6f930ca44f9c8d069c55a3079d0c8081a6cd06bd505785a38d2cd2588776a7"
   },
   "compliance": {}
@@ -69,7 +69,7 @@ Each export has its own manifest hash, because the manifest records when it was 
 </ResponseField>
 
 <ResponseField name="generator" type="string">
-  The RootSign that wrote the bundle, such as `rootsign 0.3.1`.
+  The RootSign that wrote the bundle, such as `rootsign 0.4.0`.
 </ResponseField>
 
 <ResponseField name="generated_at" type="string">
@@ -81,7 +81,7 @@ Each export has its own manifest hash, because the manifest records when it was 
 </ResponseField>
 
 <ResponseField name="agent" type="object">
-  The agent that recorded the session. From a JSONL file it holds only `agent_id`. From PostgreSQL it also holds `name`, `owner`, `environment`, `risk_tier`, `framework`, `model_version` and `regulatory_categories`. When the source records no agent, it holds a `detail` string saying so.
+  The agent that recorded the session. From PostgreSQL, and from a JSONL file that is still in its data folder with `agents.jsonl` beside it, it holds `agent_id`, `name`, `owner`, `environment`, `risk_tier`, `framework`, `model_version`, `regulatory_categories`, and a `registry` object: `backend` (`jsonl` or `postgres`), `location` (the `agents.jsonl` path, JSONL only) and `in_hash_chain`, which is `false` because neither registry is covered by the hash chain. From a JSONL file copied out of its data folder, or an agent the registry does not list, it holds only `agent_id`. When the source records no agent, it holds a `detail` string saying so.
 </ResponseField>
 
 <ResponseField name="source" type="object">
@@ -180,11 +180,17 @@ The session as it happened, in three parts: `session`, `previews` and `events`.
 | `type` | Further fields |
 | --- | --- |
 | `SESSION_OPEN` | `objective`, `user_id` |
-| `DECISION` | `decision_id`, `selected_action`, `confidence`, `alternatives_considered`, `reasoning_summary`, `inputs_summary` |
+| `DECISION` | `decision_id`, `selected_action`, `confidence`, `reasoning_depth`, `alternatives_considered`, `reasoning_summary`, `inputs_summary` |
 | `ACTION` | `sequence_number`, `action_id`, `tool_name`, `authorization_status`, `duration_ms`, `decision_id`, `input_hash`, `output_hash`, `input_preview`, `output_preview` |
 | `APPROVAL` | `approval_id`, `action_id`, `approver_id`, `approver_type`, `decision`, `decision_reason`, `response_latency_ms`, `context_presented` |
 | `RECORD_LOSS` | `lost_count`, `first_sequence`, `last_sequence`, `reasons`: records the cloud transport could neither send nor spool |
 | `SESSION_CLOSE` | `status` |
+
+On a `DECISION`, `reasoning_depth` is the depth the decision was captured at: `minimal`, `summary` or `full`. It tells a reader whether a short `reasoning_summary` or an empty `alternatives_considered` was cut by the depth or was never given. It is `null` for a decision recorded without one, such as a PostgreSQL decision stored before migration 0006.
+
+<Info>
+  `reasoning_depth` is in bundles exported by RootSign 0.4.0 and later. Bundles exported by 0.3.1 and earlier have no such field, and their format version is the same, `1.0`.
+</Info>
 
 An action that a person rejected:
 
@@ -212,7 +218,7 @@ An action that a person rejected:
 With `--redact-previews`, six fields are removed from every event: `input_preview`, `output_preview`, `context_presented`, `reasoning_summary`, `inputs_summary` and `alternatives_considered`. Hashes, IDs, timings and statuses stay.
 
 <Info>
-  `alternatives_considered` was added to the withheld fields after RootSign 0.3.1. In 0.3.1 and earlier, `--redact-previews` kept it.
+  `alternatives_considered` was added to the withheld fields in RootSign 0.4.0. In 0.3.1 and earlier, `--redact-previews` kept it.
 </Info>
 
 ## redaction.json

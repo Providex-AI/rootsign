@@ -88,7 +88,7 @@ HiTL not available for tool 'wire_transfer' with a client bound to your own tran
 ```
 
 <Info>
-  The cloud and own-transaction cases were added after RootSign 0.3.1. In 0.3.1 and earlier, a held call with your own transaction waited for an approval nobody could see, then failed with `ActionNotFoundError`. A held call on the cloud transport tried to reach a local PostgreSQL database and failed with `OSError`, or with `ActionNotFoundError` if one was running. In neither case did the tool run.
+  The cloud and own-transaction cases were added in RootSign 0.4.0. In 0.3.1 and earlier, a held call with your own transaction waited for an approval nobody could see, then failed with `ActionNotFoundError`. A held call on the cloud transport tried to reach a local PostgreSQL database and failed with `OSError`, or with `ActionNotFoundError` if one was running. In neither case did the tool run.
 </Info>
 
 <ResponseField name="tool_name" type="str | None">The tool that was called.</ResponseField>
@@ -106,7 +106,7 @@ HiTL record for tool 'pay' could not be persisted: the pending action record was
 It is a subclass of `RecordPersistenceError`, so `except RecordPersistenceError` catches both.
 
 <Info>
-  Before the release after RootSign 0.3.1, the JSONL backend ran an approved tool even when the approval record could not be written, and the JSONL and PostgreSQL backends raised `RuntimeError` when the pending record could not be written.
+  Before RootSign 0.4.0, the JSONL backend ran an approved tool even when the approval record could not be written, and the JSONL and PostgreSQL backends raised `RuntimeError` when the pending record could not be written.
 </Info>
 
 ## Recording
@@ -136,11 +136,11 @@ session could not be opened (the store refused SESSION_OPEN: UNKNOWN_AGENT: agen
 ```
 
 <Info>
-  Failing on a refused session open was added after RootSign 0.3.1. Until then the session body ran, and the store refused every record in it.
+  Failing on a refused session open was added in RootSign 0.4.0. Until then the session body ran, and the store refused every record in it.
 </Info>
 
 <Info>
-  Before the release after RootSign 0.3.1, a session that could not be opened raised the underlying `PermissionError` or `OSError` instead.
+  Before RootSign 0.4.0, a session that could not be opened raised the underlying `PermissionError` or `OSError` instead.
 </Info>
 
 ## Setup

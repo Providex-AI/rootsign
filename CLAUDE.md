@@ -24,7 +24,7 @@ CONTRIBUTING.md has the full setup. The non-obvious bits:
 
 - **Always run `python -m pytest`, never bare `pytest`.** A brew-installed `pytest` shadows the venv binary and silently runs under the system interpreter — produces `ModuleNotFoundError: sqlalchemy` and similar.
 - **Even unit tests need a running database.** `tests/conftest.py` has a session-scoped `_bootstrap_test_db` fixture that runs alembic before any test collection. Start the DB first: `rootsign-admin start-db` (or `docker-compose up -d db` in-repo).
-- **Schema bootstrap:** `rootsign-admin init` applies migrations. Idempotent. `--reset` drops and recreates the public schema (no confirmation prompt — be careful).
+- **Schema bootstrap:** `rootsign-admin init` applies migrations. Idempotent. `--reset` drops and recreates the public schema after a confirmation prompt; `--yes` skips the prompt (CI, scripts), so be careful with it.
 - **Single test:** `python -m pytest tests/integration/test_show_hn_quickstart.py::TestShowHNQuickstart::test_readme_quickstart_end_to_end -v`
 - **Test markers:** `integration` and `benchmark` are declared in `pyproject.toml`. Performance suite at `tests/performance/` is opt-in via `-m benchmark`.
 - **Coverage gate:** `fail_under = 85` in `pyproject.toml`. CI enforces it. New code expected at ≥90% per CONTRIBUTING.
@@ -66,11 +66,11 @@ These were locked in the Sprint 3/4 plans because each one traces to a specific 
 5. **Hypertable-safe Action lookups.** Single-column `action_id` lookups are forbidden. Two valid two-column forms:
    - `(action_id, action_timestamp)` — canonical chain-link form (`CRUDApproval.create_with_chain_link`, HiTL CLI / poll-loop paths). Prunes chunks on the partition column.
    - `(session_id, action_id)` — `CRUDApproval.create_with_action_status_update` (ingest path). `ApprovalRecordPayload` doesn't carry `action_timestamp`; switching would require an envelope-schema bump.
-6. **`tests/integration/test_show_hn_quickstart.py` is the launch gate.** It mirrors the README's LangGraph quickstart end-to-end (register → instrument → verify) and must stay green.
+6. **`tests/integration/test_show_hn_quickstart.py` is the launch gate.** It runs the quickstart (README and `docs/site/quickstart.mdx`) end-to-end on the default JSONL backend (instrument → verify → export, then tamper), and the same flow on PostgreSQL verified by session ID. It must stay green.
 
-## What's deliberately orphaned
+## Two approval-record write paths
 
-- **`_emit_approval_record`** in `rootsign/sdk/decorator.py` has zero call sites in `rootsign/`. It's a Phase 2 hook for when `HttpIngestClient` lands — the v0.1.0 HiTL CLI writes APPROVAL_RECORD rows directly via `CRUDApproval.create_with_chain_link` (single source of truth). Re-emitting via the IngestClient path would hit the terminal-state guard and warn for no semantic gain. The marker comment above the def points at this; don't delete the helper or its tests.
+- **`_emit_approval_record`** in `rootsign/sdk/decorator.py` has one call site: the JSONL backend's inline approval prompt (`_emit_hitl_action_sync`), which writes the APPROVAL_RECORD through the IngestClient with `required=True`, so a held tool never runs if the record is not stored (#77). The PostgreSQL HiTL path (`rootsign approve`, the poll loop) writes APPROVAL_RECORD rows directly via `CRUDApproval.create_with_chain_link` (single source of truth there); re-emitting via the IngestClient would hit the terminal-state guard and warn for no semantic gain. The helper is also the hook Phase 2's `HttpIngestClient` will use; don't delete it or its tests.
 
 ## Authoritative context
 

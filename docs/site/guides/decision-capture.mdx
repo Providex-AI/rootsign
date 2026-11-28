@@ -97,7 +97,7 @@ A tool call record says what the agent did. A decision record says why: the acti
 Each decision stores the depth it was captured at as `reasoning_depth`, so a reader can tell a summary that `minimal` dropped from one that was never given. `reasoning_captured` is `true` when a summary was kept.
 
 <Info>
-  The PostgreSQL backend stores `reasoning_depth` after RootSign 0.3.1. Run `rootsign-admin init` after upgrading to add the column; decisions recorded earlier have no depth. In 0.3.1 and earlier, only the JSONL backend kept it.
+  The PostgreSQL backend stores `reasoning_depth` since RootSign 0.4.0. Run `rootsign-admin init` after upgrading to add the column; decisions recorded earlier have no depth. In 0.3.1 and earlier, only the JSONL backend kept it.
 </Info>
 
 ## Values that are not recorded
@@ -116,7 +116,7 @@ rootsign: decision not recorded (confidence: Input should be less than or equal 
 ```
 
 <Info>
-  Checking decisions on every backend was added after RootSign 0.3.1. In 0.3.1 and earlier, the JSONL backend stored values such as `confidence=1.5`, and PostgreSQL refused them with a longer warning.
+  Checking decisions on every backend was added in RootSign 0.4.0. In 0.3.1 and earlier, the JSONL backend stored values such as `confidence=1.5`, and PostgreSQL refused them with a longer warning.
 </Info>
 
 ## When capture is off
@@ -129,7 +129,7 @@ rootsign: decision not recorded (confidence: Input should be less than or equal 
 | --- | --- |
 | Decision record | `decision_id`, `selected_action`, `reasoning_summary`, `confidence`, `alternatives_considered`, `reasoning_depth`, `reasoning_captured`, `timestamp` |
 | The next action | `decision_id`, the link to the decision |
-| [Evidence bundle](/reference/evidence-bundle#timeline-json) | A `DECISION` entry in `timeline.json` and the report, before the action it explains |
+| [Evidence bundle](/reference/evidence-bundle#timeline-json) | A `DECISION` entry in `timeline.json` and the report, with its `reasoning_depth`, before the action it explains |
 
 When you export with `--redact-previews`, the bundle leaves out `reasoning_summary` and `alternatives_considered`, and keeps the chosen action and the confidence.
 
