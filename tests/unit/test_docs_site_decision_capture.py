@@ -283,19 +283,35 @@ class TestWhatGetsRecorded:
 
 
 class TestLimits:
-    def test_editing_a_decision_still_verifies(self, refund, tmp_path):
+    @pytest.mark.parametrize("edit", ["reasoning", "pointer"])
+    def test_editing_a_decision_in_a_sealed_session_is_tampered(self, refund, tmp_path, edit):
         records = _records(refund)
         for record in records:
-            if record["event_type"] == "DECISION_RECORD":
+            if edit == "reasoning" and record["event_type"] == "DECISION_RECORD":
                 record["payload"]["reasoning_summary"] = "Customer threatened a chargeback."
-            if record["event_type"] == "ACTION_RECORD":
+            if edit == "pointer" and record["event_type"] == "ACTION_RECORD":
                 record["decision_id"] = str(uuid4())
         edited = tmp_path / "edited.jsonl"
         edited.write_text("".join(json.dumps(r) + "\n" for r in records))
 
         result = CliRunner().invoke(app, ["verify", "--local", str(edited)])
+        assert result.exit_code == 1
+        assert "TAMPERED" in result.output and "decision" in result.output
+
+    def test_without_a_seal_the_same_edit_still_verifies(self, refund, tmp_path):
+        """What the page says about sessions recorded before the seal."""
+        records = _records(refund)
+        for record in records:
+            if record["event_type"] == "DECISION_RECORD":
+                record["payload"]["reasoning_summary"] = "Customer threatened a chargeback."
+            if record["event_type"] == "SESSION_CLOSE":
+                record["payload"].pop("seal")
+        edited = tmp_path / "edited.jsonl"
+        edited.write_text("".join(json.dumps(r) + "\n" for r in records))
+
+        result = CliRunner().invoke(app, ["verify", "--local", str(edited)])
         assert result.exit_code == 0
-        assert "VALID" in result.output
+        assert "VALID" in result.output and "Seal:     none" in result.output
 
     def test_redaction_does_not_reach_decisions(self, tmp_path):
         run = _variant(

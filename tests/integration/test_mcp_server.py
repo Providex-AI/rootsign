@@ -33,6 +33,7 @@ from rootsign.mcp.server import (  # noqa: E402
     _verify_session_chain,
 )
 from rootsign.models.approval import Approval  # noqa: E402
+from rootsign.sdk.chain import verify_session  # noqa: E402
 from tests.conftest import make_envelope  # noqa: E402
 
 
@@ -104,9 +105,15 @@ class TestMCPServerIntegration:
         result = await _verify_session_chain(audit_session_factory, session_id=str(session_id))
         assert result["valid"] is True
         assert result["record_count"] == 3
-        # Identical to the CLI/CRUD verify path.
+        # Identical to `rootsign verify`: the chain, and then the seal (ADR-016).
+        cli_result = await verify_session(session_id, clean_db)
+        assert result["verdict"] == cli_result.verdict.value
+        assert result["seal"] == {
+            "outcome": cli_result.seal.outcome.value,
+            "detail": cli_result.seal.detail,
+        }
         crud_result = await action_crud.verify_chain(clean_db, session_id=session_id)
-        assert result == crud_result
+        assert {k: result[k] for k in crud_result} == crud_result
 
     async def test_get_approval_records_returns_seeded_approval(
         self, clean_db, seeded_agent, audit_session_factory

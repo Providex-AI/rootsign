@@ -15,7 +15,7 @@
     "files": {
       "redaction.json": "d1ba7b041838a3e45d3a10512f5dd962533432ca734057699aa5cdd94dfe2d3b",
       "timeline.json": "fbfc324601dc6495952039a42d75c00d6d5b6a77a9a7ca540a28b46293ba2a20",
-      "verification.json": "1e6f930ca44f9c8d069c55a3079d0c8081a6cd06bd505785a38d2cd2588776a7"
+      "verification.json": "dd5f2328f129908abc0173eb6bc306722c4d6c1a3098a6dd3987ff42f20bacd9"
     },
     "compliance": {}
   },
@@ -27,6 +27,10 @@
     "first_invalid_sequence": null,
     "missing_ranges": [],
     "error": null,
+    "seal": {
+      "outcome": "sealed",
+      "detail": "sealed at record 2"
+    },
     "hash": {
       "algorithm": "sha256",
       "canonical_spec": "ADR-001",

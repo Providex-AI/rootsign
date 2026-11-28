@@ -135,7 +135,7 @@ When you export with `--redact-previews`, the bundle leaves out `reasoning_summa
 
 ## What it does not do
 
-- **It is not in the hash chain.** Decision records and an action's `decision_id` sit outside the chain, by design ([ADR-008](https://github.com/Providex-AI/rootsign/blob/main/docs/adr/ADR-008-decision-capture.md)). Editing a decision's reasoning, or which decision an action points to, still verifies as `VALID`. Verification proves the actions; treat decisions as the narrative around them.
+- **It is outside the hash chain, but inside the session's seal.** Decision records and an action's `decision_id` are not in the chain ([ADR-008](https://github.com/Providex-AI/rootsign/blob/main/docs/adr/ADR-008-decision-capture.md)), but the seal written when the session closes covers them ([ADR-016](https://github.com/Providex-AI/rootsign/blob/main/docs/adr/ADR-016-session-seal.md)). In a sealed session, editing a decision's reasoning, or which decision an action points to, verifies as `TAMPERED`. In a session with no seal, recorded by RootSign 0.4.0 or earlier or never closed, such an edit still verifies as `VALID`.
 - **It does not redact.** [Redaction configs](/guides/redaction) apply to tool inputs and outputs, not to decision text. Keep personal data out of `reasoning_summary`, or leave capture off.
 - **It does not read the model's reasoning for you.** You pass the summary. RootSign does not extract it from a model response, and it does not store the prompt.
 
