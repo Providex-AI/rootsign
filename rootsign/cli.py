@@ -433,6 +433,9 @@ def _sync_client(root: Path | None) -> "Iterator[Any]":
       it is reading back into the same file it is uploading (same session id,
       same writer), duplicating sequence numbers and corrupting the evidence it
       was sent to rescue.
+    * `seal_sessions=False` — a replay sends each spooled record as written.
+      A close that was spooled sealed keeps its seal; one spooled unsealed
+      stays unsealed rather than being sealed by the replay (ADR-016).
     * a private `ChainRegistry` is irrelevant here — every spooled record is
       already sealed, and `_seal` adopts rather than re-mints.
     """
@@ -457,6 +460,7 @@ def _sync_client(root: Path | None) -> "Iterator[Any]":
             timeout_seconds=s.HTTP_TIMEOUT_SECONDS,
             max_retries=s.HTTP_MAX_RETRIES,
             enable_spool=False,
+            seal_sessions=False,
         )
     except RootSignCloudExtraRequired as exc:
         typer.echo(f"Error: {exc}", err=True)

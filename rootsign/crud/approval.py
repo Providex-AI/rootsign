@@ -35,8 +35,10 @@ from rootsign.errors import (
     ActionNotFoundError,
     ApprovalParentNotFoundError,
     IngestValidationError,
+    SessionClosedError,
 )
 from rootsign.models.action import Action
+from rootsign.models.session import AgentSession
 from rootsign.models.approval import Approval
 from rootsign.schemas.approval import ApprovalCreate, ApprovalDecision
 
@@ -260,6 +262,19 @@ class CRUDApproval(CRUDBase[Approval, ApprovalCreate]):
             raise ActionAlreadyResolvedError(
                 f"action_id={action_id} is already "
                 f"{action.authorization_status}; cannot record further approvals"
+            )
+
+        # 2b. A closed session is sealed (ADR-016), and its seal covers its
+        #     approvals and action statuses. An approval written after the
+        #     close would change sealed records, so `verify` would call an
+        #     honest session TAMPERED. No held call is waiting by then: the
+        #     session closed while its action was still pending (a cancelled
+        #     or crashed call), so there is nothing to approve.
+        session = await db.get(AgentSession, action.session_id)
+        if session is not None and session.status != "running":
+            raise SessionClosedError(
+                f"session {action.session_id} is {session.status}, so no call is waiting "
+                f"for this approval; a closed session's records are sealed"
             )
 
         # 3. Compute the new authorization_status. The timeout sentinel

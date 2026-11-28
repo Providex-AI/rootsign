@@ -33,6 +33,7 @@ from rootsign._version import SDK_VERSION
 from rootsign.chain_state import ChainRegistry, is_sealed, new_record_id
 from rootsign.ingest.idempotency import IdempotencyStore
 from rootsign.ingest.schemas import ErrorCode, EventType, IngestResponse
+from rootsign.seal import ACTION_SEAL_FIELDS, compute_seal, jsonl_session_facts, total_actions
 from rootsign.sdk.loss_ledger import LossLedger
 from rootsign.sdk.spool import SYNC_BREADCRUMB as _SYNC_BREADCRUMB
 
@@ -347,6 +348,7 @@ class HttpIngestClient(IngestClient):
         spool: Any | None = None,
         on_record_loss: str | None = None,
         enable_spool: bool = True,
+        seal_sessions: bool = True,
     ) -> None:
         # Probe rather than import: constructing on a bare install must fail
         # with the install command, not a ModuleNotFoundError from httpx's
@@ -387,6 +389,15 @@ class HttpIngestClient(IngestClient):
         self._spool_reason: ErrorCode | None = None
         self._on_record_loss = on_record_loss
         self._ledgers: dict[str, LossLedger] = {}
+        # Per open session, what this client sent, in the session-file shape
+        # `rootsign.seal.jsonl_session_facts` reads: what it seals the session
+        # with at close (ADR-016). The chain is sealed here, so the session is.
+        self._sealing: dict[str, list[dict[str, Any]]] = {}
+        # `rootsign-admin sync` sets this False: a replay sends the spooled
+        # records as they were written, and a close spooled without a seal
+        # (by 0.4.0 or earlier) must reach the store unsealed, not sealed by
+        # the replay after the fact.
+        self._seal_sessions_enabled = bool(seal_sessions)
 
     @property
     def chains(self) -> ChainRegistry:
@@ -482,6 +493,13 @@ class HttpIngestClient(IngestClient):
             return []
 
         self._seal(envelopes)
+        self._seal_sessions(envelopes)
+        results = await self._deliver(envelopes)
+        self._track_side_records(envelopes, results)
+        return results
+
+    async def _deliver(self, envelopes: list[dict[str, Any]]) -> list[IngestResponse]:
+        """Send sealed envelopes, retrying and spooling as ADR-013 sets out."""
         if not self._spooling and self._spool_enabled and not self._api_key.strip():
             self._spool_without_key()
         if self._spooling:
@@ -571,7 +589,11 @@ class HttpIngestClient(IngestClient):
             # The same ChainRegistry the wire path seals with, so a record
             # spooled after a failure links onto the ones already uploaded
             # rather than starting a second chain (T2.3 adoption).
-            self._spool = JsonlIngestClient(data_dir=self.spool_dir, chains=self._chains)
+            # The spool adopts the seal this client puts on each close: only
+            # this client saw the whole session (ADR-016).
+            self._spool = JsonlIngestClient(
+                data_dir=self.spool_dir, chains=self._chains, seal_sessions=False
+            )
         return self._spool
 
     async def _write_to_spool(self, envelopes: list[dict[str, Any]]) -> list[IngestResponse]:
@@ -702,6 +724,66 @@ class HttpIngestClient(IngestClient):
                 continue
             sealed = self._chains.seal(envelope.get("session_id"), payload)
             payload.update(sealed.as_payload_fields())
+
+    def _seal_sessions(self, envelopes: list[dict[str, Any]]) -> None:
+        """Track what is being sent, and seal each session as its close goes out.
+
+        A close is sealed before it is sent or spooled, so the store and the
+        spool file receive the same seal: one computed over the whole session,
+        including records that went over the wire before an outage. Actions are
+        tracked as sealed, which is this client's claim even if the store later
+        refuses one; decisions and approvals are tracked once a response gives
+        them an id (`_track_side_records`). A close that already carries a seal
+        (a replayed spool file) keeps it.
+        """
+        if not self._seal_sessions_enabled:
+            return
+        for envelope in envelopes:
+            event_type = envelope.get("event_type")
+            session_id = str(envelope.get("session_id"))
+            payload = envelope.get("payload")
+            if not isinstance(payload, dict):
+                continue
+            if event_type == EventType.SESSION_OPEN.value:
+                self._sealing[session_id] = [
+                    {
+                        k: envelope.get(k)
+                        for k in ("event_type", "session_id", "agent_id", "payload")
+                    }
+                ]
+            elif event_type == EventType.ACTION_RECORD.value and session_id in self._sealing:
+                action = {f: payload.get(f) for f in ACTION_SEAL_FIELDS}
+                # The stores' default, so a payload that omits it seals alike.
+                action["authorization_status"] = action["authorization_status"] or "auto_authorized"
+                self._sealing[session_id].append({"event_type": event_type, **action})
+            elif event_type == EventType.SESSION_CLOSE.value:
+                tracked = self._sealing.pop(session_id, None)
+                if tracked is not None and payload.get("seal") is None:
+                    facts = jsonl_session_facts(tracked, status=payload.get("status"))
+                    payload["seal"] = compute_seal(facts, final_sequence=total_actions(payload))
+
+    def _track_side_records(
+        self, envelopes: list[dict[str, Any]], results: list[IngestResponse]
+    ) -> None:
+        """Add the decisions and approvals that were stored, under the id they got."""
+        id_field = {
+            EventType.DECISION_RECORD.value: "decision_id",
+            EventType.APPROVAL_RECORD.value: "approval_id",
+        }
+        for envelope, response in zip(envelopes, results):
+            field = id_field.get(envelope.get("event_type"))
+            tracked = self._sealing.get(str(envelope.get("session_id")))
+            if field is None or tracked is None or response.status != "accepted":
+                continue
+            if response.entity_id is None:
+                continue
+            tracked.append(
+                {
+                    "event_type": envelope.get("event_type"),
+                    "payload": envelope.get("payload"),
+                    field: str(response.entity_id),
+                }
+            )
 
     async def _post_once(
         self, batch: list[dict[str, Any]]

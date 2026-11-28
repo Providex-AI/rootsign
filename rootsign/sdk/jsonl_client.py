@@ -27,9 +27,19 @@ directly (that is also the legacy store-export shape). All five event types are
 appended, so a session file is a complete replay artifact; `verify` filters to
 ACTION_RECORD lines when rebuilding the chain.
 
+**The session seal (ADR-016).** When a session this client opened closes, the
+close line carries a seal computed by `rootsign.seal` from the lines this
+client wrote for it: the chain's length and tail, the open fields, and a
+digest of the decisions, approvals and action statuses. A close that arrives
+already sealed (a spooled cloud close, sealed by the transport over the whole
+session) keeps that seal, as a spooled action keeps its chain fields. A close
+for a session this client never saw open is written unsealed: sealing part of
+a session would vouch for records it never held. As the cloud transport's
+spool (`seal_sessions=False`) it never seals: the transport does.
+
 **Durability (Decision 4).** `O_APPEND`, one JSON object per line, `fsync` per
-`ROOTSIGN_JSONL_FSYNC` (`chain` = after ACTION/APPROVAL records, the default;
-`always`; `never`). Single-writer-per-session-file is the documented contract —
+`ROOTSIGN_JSONL_FSYNC` (`chain` = after ACTION/APPROVAL records and the sealed
+SESSION_CLOSE, the default; `always`; `never`). Single-writer-per-session-file is the documented contract —
 an in-process `asyncio.Lock` serializes sequence assignment and file writes;
 there is no cross-process file locking (that's the graduation to `postgres`).
 """
@@ -47,6 +57,7 @@ from uuid import UUID
 import json
 
 from rootsign.chain_state import ChainRegistry, new_record_id
+from rootsign.seal import ACTION_SEAL_FIELDS, compute_seal, jsonl_session_facts, total_actions
 from rootsign.ingest.idempotency import IdempotencyStore
 from rootsign.ingest.schemas import ErrorCode, EventType, IngestResponse
 from rootsign.sdk.client import IngestClient
@@ -56,8 +67,12 @@ logger = logging.getLogger("rootsign.sdk.jsonl_client")
 DEFAULT_DATA_DIR = "~/.rootsign"
 _FSYNC_MODES = ("chain", "always", "never")
 # Event types whose durability we guarantee under the default `chain` policy —
-# they carry the tamper-evidence (the chain and its approvals).
-_CHAIN_CRITICAL = {EventType.ACTION_RECORD.value, EventType.APPROVAL_RECORD.value}
+# they carry the tamper-evidence (the chain, its approvals, and the seal).
+_CHAIN_CRITICAL = {
+    EventType.ACTION_RECORD.value,
+    EventType.APPROVAL_RECORD.value,
+    EventType.SESSION_CLOSE.value,
+}
 
 
 class JsonlIngestClient(IngestClient):
@@ -70,6 +85,7 @@ class JsonlIngestClient(IngestClient):
         fsync: str = "chain",
         idempotency: IdempotencyStore | None = None,
         chains: ChainRegistry | None = None,
+        seal_sessions: bool = True,
     ) -> None:
         if fsync not in _FSYNC_MODES:
             raise ValueError(f"ROOTSIGN_JSONL_FSYNC must be one of {_FSYNC_MODES}, got {fsync!r}")
@@ -82,6 +98,13 @@ class JsonlIngestClient(IngestClient):
         # Serializes sequence assignment + file writes (mirrors
         # LocalIngestClient._handle_lock). Single writer per session file.
         self._lock = asyncio.Lock()
+        # Per open session, the lines written so far, as read back: what the
+        # seal is computed from at close (ADR-016). Actions keep only the
+        # fields the seal reads.
+        self._sealing: dict[str, list[dict[str, Any]]] = {}
+        # False when this writer is the cloud transport's spool: the transport
+        # saw the whole session and seals its close; the spool adopts that.
+        self._seal_sessions = bool(seal_sessions)
 
     @property
     def idempotency(self) -> IdempotencyStore:
@@ -114,7 +137,10 @@ class JsonlIngestClient(IngestClient):
                 response, record = self._build_non_action(
                     envelope, event_id, event_type, session_id
                 )
-            self._append_line(session_id, record, do_fsync=self._should_fsync(event_type))
+                if event_type == EventType.SESSION_CLOSE.value:
+                    record = self._sealed_close(session_id, record)
+            line = self._append_line(session_id, record, do_fsync=self._should_fsync(event_type))
+            self._track_for_seal(session_id, event_type, line)
 
         await self._idempotency.set(event_id, response, emitted_at)
         return response
@@ -193,6 +219,30 @@ class JsonlIngestClient(IngestClient):
         response = IngestResponse.accepted(event_id=event_id, entity_id=entity_id)
         return response, record
 
+    def _track_for_seal(self, session_id: str, event_type: str, line: str) -> None:
+        """Keep what was written for a session this client opened, as written."""
+        if event_type == EventType.SESSION_OPEN.value and self._seal_sessions:
+            self._sealing[session_id] = []
+        written = self._sealing.get(session_id)
+        if written is None:
+            return
+        if event_type == EventType.SESSION_CLOSE.value:
+            del self._sealing[session_id]
+            return
+        record = json.loads(line)
+        if event_type == EventType.ACTION_RECORD.value:
+            record = {"event_type": event_type, **{f: record.get(f) for f in ACTION_SEAL_FIELDS}}
+        written.append(record)
+
+    def _sealed_close(self, session_id: str, record: dict[str, Any]) -> dict[str, Any]:
+        """The close line with its seal: adopted if it has one, computed if this client can."""
+        payload = record.get("payload") or {}
+        if payload.get("seal") is not None or session_id not in self._sealing:
+            return record
+        facts = jsonl_session_facts(self._sealing[session_id], status=payload.get("status"))
+        seal = compute_seal(facts, final_sequence=total_actions(payload))
+        return {**record, "payload": {**payload, "seal": seal}}
+
     def append_annotation(self, session_id: str, record: dict[str, Any]) -> None:
         """Append a non-envelope line to a session file.
 
@@ -213,7 +263,7 @@ class JsonlIngestClient(IngestClient):
             return False
         return event_type in _CHAIN_CRITICAL  # "chain"
 
-    def _append_line(self, session_id: str, record: dict[str, Any], *, do_fsync: bool) -> None:
+    def _append_line(self, session_id: str, record: dict[str, Any], *, do_fsync: bool) -> str:
         path = self._session_path(session_id)
         path.parent.mkdir(parents=True, exist_ok=True)
         line = json.dumps(record, ensure_ascii=True, separators=(",", ":")) + "\n"
@@ -226,6 +276,7 @@ class JsonlIngestClient(IngestClient):
                 os.fsync(fd)
         finally:
             os.close(fd)
+        return line
 
 
 def _parse_dt(value: Any) -> datetime:

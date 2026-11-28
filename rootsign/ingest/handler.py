@@ -311,10 +311,35 @@ class IngestHandler:
 
         session.status = payload.status
         session.end_time = datetime.now(timezone.utc)
+        session.seal = await self._seal(session, payload)
         self.db.add(session)
         await self.db.flush()
 
         return IngestResponse.accepted(event_id=env.event_id, entity_id=session.session_id)
+
+    async def _seal(self, session: AgentSession, payload: SessionClosePayload) -> dict:
+        """Seal the session from what this store holds (ADR-016 Decision 1).
+
+        The store computes its own seal and never trusts one a client sends
+        (spec §8.3). When a client's seal differs, the close is still accepted
+        and the client's seal is kept beside the store's under `client`
+        (Decision 4): rejecting would leave the session running forever, and
+        the disagreement is evidence `verify` reports.
+        """
+        from rootsign.crud.seal import session_facts
+        from rootsign.seal import compute_seal, total_actions
+
+        await self.db.flush()
+        facts = await session_facts(self.db, session, status=payload.status)
+        seal = compute_seal(facts, final_sequence=total_actions(payload.model_dump()))
+        client_seal = (payload.model_extra or {}).get("seal")
+        if client_seal is not None and client_seal != seal:
+            logger.warning(
+                "session_close seal differs from the client's",
+                extra={"session_id": str(session.session_id)},
+            )
+            seal = {**seal, "client": client_seal}
+        return seal
 
     # -----------------------------------------------------------------------
     # Helpers

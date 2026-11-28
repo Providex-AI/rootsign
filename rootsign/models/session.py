@@ -38,6 +38,10 @@ class AgentSession(Base):
     chain_head_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     chain_tail_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     extra_metadata: Mapped[dict | None] = mapped_column("metadata", JSONB, nullable=True)
+    #: The session seal (ADR-016), set when the session closes. A store that
+    #: recomputed a seal different from the client's keeps the client's under
+    #: `client`, beside its own.
+    seal: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     __table_args__ = (
         Index("ix_sessions_agent_id_status", "agent_id", "status"),

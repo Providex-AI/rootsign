@@ -39,10 +39,13 @@ from rootsign.errors import (
 )
 
 
-def _mock_db_with_action(authorization_status: str | None) -> tuple[MagicMock, MagicMock | None]:
+def _mock_db_with_action(
+    authorization_status: str | None, *, session_status: str = "running"
+) -> tuple[MagicMock, MagicMock | None]:
     """Build a mock AsyncSession that returns an Action with the given status.
 
-    Pass `authorization_status=None` to simulate "action not found".
+    Pass `authorization_status=None` to simulate "action not found", and
+    `session_status` for the action's session (`db.get` returns it).
 
     Mock layout:
       * `db.execute` is an AsyncMock — code does `await db.execute(...)`.
@@ -62,8 +65,11 @@ def _mock_db_with_action(authorization_status: str | None) -> tuple[MagicMock, M
         action.session_id = uuid4()
     result_mock = MagicMock()
     result_mock.scalar_one_or_none.return_value = action
+    session = MagicMock()
+    session.status = session_status
     db = MagicMock()
     db.execute = AsyncMock(return_value=result_mock)
+    db.get = AsyncMock(return_value=session)
     db.add = MagicMock()
     db.flush = AsyncMock()
     return db, action
@@ -133,6 +139,27 @@ class TestActionLookup:
         compiled = str(select_stmt.compile(compile_kwargs={"literal_binds": False}))
         assert "actions.action_id" in compiled
         assert "actions.timestamp" in compiled
+
+
+class TestClosedSessionGuard:
+    @pytest.mark.parametrize("session_status", ["completed", "failed", "abandoned"])
+    async def test_an_action_of_a_closed_session_cannot_be_approved(self, session_status):
+        """ADR-016: a closed session is sealed, approvals included. An approval
+        written afterwards would make an honest session verify TAMPERED."""
+        from rootsign.errors import SessionClosedError
+
+        db, _ = _mock_db_with_action(authorization_status="pending", session_status=session_status)
+        with pytest.raises(SessionClosedError, match=f"is {session_status}, so no call is waiting"):
+            await approval_crud.create_with_chain_link(
+                db,
+                action_id=uuid4(),
+                action_timestamp=datetime.now(timezone.utc),
+                approver_id="cli:operator",
+                approver_type="human",
+                context_presented={},
+                decision="approved",
+            )
+        db.add.assert_not_called()
 
 
 class TestTerminalStateGuard:
