@@ -71,12 +71,13 @@ docs(adr): add ADR-004 for retry strategy
 
 ### Golden fixtures
 
-Three fixtures in `tests/fixtures/` freeze contracts that other people's code
+Four fixtures in `tests/fixtures/` freeze contracts that other people's code
 depends on. A failure against one is a decision, not a bug:
 
 | Fixture | Freezes | If it fails |
 | --- | --- | --- |
 | `hash_vectors.json` | the canonical Action hash (ADR-001) | stop: a new ADR is required, see below |
+| `session-seal/v1/vectors.json` | the session seal (ADR-016) | stop: a new ADR is required; regenerate only with `scripts/generate_seal_vectors.py` after one |
 | `redaction_vectors.json` | the PII rule-set mappings (ADR-006) | confirm the mapping change is intended |
 | `evidence_bundle_v1.json` | the `rootsign export` bundle schema (ADR-014) | see below |
 
