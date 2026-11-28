@@ -240,13 +240,24 @@ def _envelope_from_record(record: dict[str, Any], source: Path, line: int) -> di
     envelope itself — but the writer stamps `decision_id` / `approval_id` at
     the top level of the line so the id it minted survives. `IngestEnvelope`
     forbids extras, so those have to come back off.
+
+    A decision's id goes into its payload instead (spec §3.3), so the store
+    keeps the id the spooled actions point at. Files written before the
+    transport minted decision ids carry it only at the top level of the line.
     """
     payload = record.get("payload")
     if not isinstance(payload, dict):
         raise SpoolFormatError(
             f"{source}: {record.get('event_type')} at line {line} has no payload object"
         )
-    return _envelope_shell(record, dict(payload))
+    payload = dict(payload)
+    if (
+        record.get("event_type") == EventType.DECISION_RECORD.value
+        and payload.get("decision_id") is None
+        and record.get("decision_id") is not None
+    ):
+        payload["decision_id"] = record["decision_id"]
+    return _envelope_shell(record, payload)
 
 
 def _envelope_shell(record: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:

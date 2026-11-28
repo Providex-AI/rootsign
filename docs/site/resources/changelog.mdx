@@ -7,6 +7,12 @@ keywords: ["changelog", "release notes", "rootsign releases", "upgrade", "v0.4.0
 
 Every RootSign release, newest first, with the changes that matter when you upgrade. Each entry links to the full release notes on GitHub. When changes are merged on `main` but not yet released, an Unreleased entry at the top lists them, and the pages on this site already describe that behaviour with a note naming the release that changed it.
 
+<Update label="Unreleased" description="Merged since v0.4.0">
+  **Cloud transport (preview)**
+
+  - After an outage and `rootsign-admin sync`, a synced action pointed at a decision id the store had never issued: the spool minted one, and sync dropped it so the store minted another. The transport now mints each decision's id, the spool keeps it, and sync sends it; a store keeps the id it is given. ([#117](https://github.com/Providex-AI/rootsign/pull/117))
+</Update>
+
 <Update label="v0.4.0" description="November 27, 2026">
   **The release the docs site found.** Writing [docs.getprovidex.com](https://docs.getprovidex.com), with every sample run in CI, turned up the bugs fixed below, two of them security fixes. **When you upgrade:** on PostgreSQL, run `rootsign-admin init` to apply migration 0006; scripts that read `rootsign verify` exit codes should expect `3` for "nothing to verify"; and code that caught a raw `OSError`, `RuntimeError`, `IntegrityError` or `AttributeError` from RootSign now gets the RootSign errors listed below. 0.3.x is no longer supported.
 

@@ -44,6 +44,7 @@ from rootsign.ingest.schemas import (
     SessionOpenPayload,
 )
 from rootsign.models.agent import Agent
+from rootsign.models.decision import Decision
 from rootsign.models.session import AgentSession
 from rootsign.schemas.action import ActionCreate
 from rootsign.schemas.approval import ApprovalCreate
@@ -231,6 +232,17 @@ class IngestHandler:
             else payload.reasoning_summary is not None
         )
 
+        # A client-minted id (the cloud transport, spec §3.3) is kept, so the
+        # action that points at it resolves. Reusing one for another event is
+        # a client bug, refused rather than overwriting the first decision.
+        adopted: dict[str, Any] = {}
+        if payload.decision_id is not None:
+            if await self.db.get(Decision, payload.decision_id) is not None:
+                raise IngestValidationError(
+                    f"decision_id={payload.decision_id} is already stored for another event"
+                )
+            adopted["decision_id"] = payload.decision_id
+
         decision = await crud.decision.create(
             self.db,
             obj_in=DecisionCreate(
@@ -244,6 +256,7 @@ class IngestHandler:
                 reasoning_captured=reasoning_captured,
                 reasoning_depth=payload.reasoning_depth,
             ),
+            **adopted,
         )
         # AC-3.6: increment session.decision_count atomically with the insert.
         # We're inside the same AsyncSession so it's already in the same

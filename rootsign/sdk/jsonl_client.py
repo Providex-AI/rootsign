@@ -182,7 +182,10 @@ class JsonlIngestClient(IngestClient):
         record = dict(envelope)
         entity_id: UUID | None = None
         if event_type == EventType.DECISION_RECORD.value:
-            entity_id = new_record_id()
+            # Keep an id the cloud transport minted (spec §3.3): as its spool,
+            # this file must hold the decision under the id the store gets.
+            given = (envelope.get("payload") or {}).get("decision_id")
+            entity_id = UUID(str(given)) if given is not None else new_record_id()
             record = {**record, "decision_id": str(entity_id)}
         elif event_type == EventType.APPROVAL_RECORD.value:
             entity_id = new_record_id()
