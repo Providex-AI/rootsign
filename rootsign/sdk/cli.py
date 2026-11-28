@@ -740,7 +740,7 @@ def _submit_approval(*, action_id: UUID, decision: str, reason: str | None) -> N
     from sqlalchemy import select
 
     from rootsign.crud.approval import approval as approval_crud
-    from rootsign.errors import ActionAlreadyResolvedError, ActionNotFoundError
+    from rootsign.errors import ActionAlreadyResolvedError, ActionNotFoundError, SessionClosedError
     from rootsign.models.action import Action
 
     # audit #7a: attribute the approval to the actual OS operator instead of a
@@ -789,7 +789,7 @@ def _submit_approval(*, action_id: UUID, decision: str, reason: str | None) -> N
                     err=True,
                 )
                 raise typer.Exit(code=1) from exc
-            except ActionNotFoundError as exc:
+            except (ActionNotFoundError, SessionClosedError) as exc:
                 typer.echo(f"Error: {exc}", err=True)
                 raise typer.Exit(code=1) from exc
 

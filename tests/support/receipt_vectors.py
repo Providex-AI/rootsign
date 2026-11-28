@@ -236,7 +236,15 @@ def _session_envelopes(lane: Lane) -> list[dict[str, Any]]:
 
 
 def _spool(lane: Lane, spool_dir: Path) -> Path:
-    """Record the session while the endpoint is down — the production spool path."""
+    """Record the session while the endpoint is down — the production spool path.
+
+    `seal_sessions=False`: these vectors were published, and independently
+    verified, before the session seal (ADR-016) existed, so their spool files
+    end with an unsealed close. The receipt schema does not cover the seal, and
+    seals have vectors of their own (`tests/fixtures/session-seal/`). Keeping
+    the published bytes means nothing an outside implementer checked against
+    has changed.
+    """
 
     async def _run() -> None:
         client = HttpIngestClient(
@@ -245,6 +253,7 @@ def _spool(lane: Lane, spool_dir: Path) -> Path:
             max_retries=1,
             transport=httpx.MockTransport(dead_endpoint),
             spool_dir=str(spool_dir),
+            seal_sessions=False,
         )
         for envelope in _session_envelopes(lane):
             await client.handle(envelope)
