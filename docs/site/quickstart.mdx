@@ -142,7 +142,7 @@ Nothing here needs a database, Docker, an API key or a network connection. Recor
 </Steps>
 
 <Note>
-  The verifier cannot detect a record deleted from the **end** of a session, because the chain alone does not say how long it was meant to be. [How it works](/how-it-works#what-verify-does-not-check) lists this and the other limits.
+  Delete the **last** line before the session close instead, and `verify` reports `INCOMPLETE` too: the chain alone cannot say how long the session was meant to be, but the seal written when it closed can. [How it works](/how-it-works#the-session-seal) explains the seal and its limits.
 </Note>
 
 ## Hand the session to someone else

@@ -82,6 +82,45 @@ Error: no session file at missing.jsonl
 
 A session in which no tools ran is not an error. It verifies as `VALID` with 0 records.
 
+## Check the seal
+
+When a session closes, the store seals it, and `verify` checks the seal ([How it works](/how-it-works#the-session-seal) lists what it covers). That catches two things the chain alone cannot see.
+
+Deleting the last record of a sealed session reads as INCOMPLETE, because the seal says how long the session was:
+
+```text Records cut from the end (exit 2)
+INCOMPLETE ⚠  —  1 records present and intact, but the chain is missing records
+  Detail:   1 record(s) missing at the end (sealed at 2, 1 present); decisions and approvals could not be checked
+  Session:  f7feef27-a9ff-452b-a9a7-a373219914ea
+The records present verify cleanly; the session's seal proves records are missing from the end. Check for a spooled session that was never synced (`rootsign-admin sync`) or a deleted row.
+```
+
+An edit to the session's objective, its close status, a decision or an approval reads as TAMPERED, with a detail line that names what changed:
+
+```text An edited objective (exit 1)
+TAMPERED ✗  —  the session's seal does not match its records
+  Detail:   the session open record was edited
+  Session:  f7feef27-a9ff-452b-a9a7-a373219914ea
+WARNING: This session log may have been tampered with.
+```
+
+A session with no seal, recorded by RootSign 0.4.0 or earlier or one that never closed, keeps its verdict and prints `Seal:     none`. Where every session should be sealed, add `--require-seal`, so that deleting a session's close record along with its last records does not pass as a clean audit:
+
+```bash
+rootsign verify --local ~/.rootsign/sessions/<session_id>.jsonl --require-seal
+```
+
+```text No seal, with --require-seal (exit 2)
+INCOMPLETE ⚠  —  2 records present and intact, but the session is not sealed
+  Detail:   not sealed: its end cannot be verified
+  Session:  f7feef27-a9ff-452b-a9a7-a373219914ea
+The records present verify cleanly, but without a seal records cut from the end cannot be ruled out.
+```
+
+<Info>
+  The seal was added after RootSign 0.4.0. In Python, pass `require_seal=True` to `verify_session_local()` or `verify_session()`.
+</Info>
+
 ## See each record's hashes
 
 Add `--verbose` to list every action with the two hashes that link it to the chain:
@@ -108,14 +147,14 @@ Each record's `prev_action_hash` is the `self_hash` of the record before it. [Ho
 
 ## Verify every session in CI or cron
 
-This script verifies every session file in the sessions folder and fails if any of them is not VALID:
+This script verifies every session file in the sessions folder and fails if any of them is not VALID. `--require-seal` makes an unsealed session fail too; leave it out if the folder holds sessions recorded by RootSign 0.4.0 or earlier, which have no seal:
 
 ```bash verify-all.sh
 #!/usr/bin/env bash
 # Verify every RootSign session file; exit non-zero unless all are VALID.
 status=0
 for f in "${ROOTSIGN_DATA_DIR:-$HOME/.rootsign}"/sessions/*.jsonl; do
-  rootsign verify --local "$f" > /dev/null
+  rootsign verify --local "$f" --require-seal > /dev/null
   case $? in
     0) ;;
     1) echo "TAMPERED:   $f"; status=1 ;;
@@ -195,7 +234,7 @@ VALID — 2 records, chain intact
 
 ## What it does not check
 
-Verification proves that the action records present are unaltered and that none are missing from the middle of the chain. It does not detect records deleted from the end of a session, edits to the session open and close events, or changes to `authorization_status`. [How it works](/how-it-works#what-verify-does-not-check) explains each limit.
+Verification proves that the action records present are unaltered and that none are missing from the chain. For a sealed session it also proves that none were cut from the end and that the session's open and close records, decisions, approvals and action statuses are as written. It cannot see the end of an unsealed session (use `--require-seal`), or an edit made by someone who also recomputed every hash and the seal. [How it works](/how-it-works#what-verify-does-not-check) explains each limit.
 
 ## Related
 

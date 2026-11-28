@@ -267,6 +267,7 @@ Each prints one line to stderr and exits `1`:
 | `Error: provide an action_id, or use --list to see pending approvals.` | No action ID and no `--list`. |
 | `Error: '<value>' is not a valid UUID.` | The action ID is not a UUID. |
 | `Error: no pending action found with ID <action_id>.` | No such action, or it was already decided or timed out. |
+| `Error: session <session_id> is <status>, so no call is waiting for this approval; a closed session's records are sealed` | The session closed while the action was still pending, for example after the agent was cancelled. Approving it would change the records the session's [seal](/how-it-works#the-session-seal) covers. |
 | `Error: action <action_id> was already resolved between selection and write (...)` | The agent's timeout fired while you were approving. Your decision was not recorded. |
 | `Error: cannot use the database at <url>: ...` | As for [`verify`](#rootsign-verify), with exit code `1`. |
 

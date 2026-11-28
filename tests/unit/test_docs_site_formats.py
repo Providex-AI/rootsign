@@ -27,6 +27,7 @@ from typer.testing import CliRunner
 
 from rootsign import errors
 from rootsign.ingest import schemas
+from rootsign.seal import SEAL_FIELDS
 from rootsign.ingest.handler import SUPPORTED_SCHEMA_MAJOR
 from rootsign.sdk import export, receipt
 from rootsign.sdk.cli import app
@@ -304,6 +305,17 @@ def test_each_spec_table_matches_its_schema(heading, model):
         for field in SEALED:
             assert f"`{field}`" in sealing, field
     assert documented == real
+
+
+def test_the_seal_table_lists_the_seal_fields():
+    """§8.5 lists the keys `compute_seal` writes, in order, and the rules it follows."""
+    section = _section(SPEC, "### 8.5 The session seal")
+    fields = section.split("**What each party does:**")[0]
+    documented = re.findall(r"^\| `([a-z_]+)` \|", fields, re.M)
+    assert documented == list(SEAL_FIELDS)
+    assert "seal" not in schemas.SessionClosePayload.model_fields
+    assert "`tests/fixtures/session-seal/v1/`" in section
+    assert (REPO / "tests/fixtures/session-seal/v1/vectors.json").is_file()
 
 
 def test_extra_fields_policy():

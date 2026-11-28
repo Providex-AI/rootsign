@@ -156,7 +156,7 @@ For the three runs above, the approval records read:
 | `human_rejected` | `cli:<os user>` | `human` | `rejected` | Above the unattended mandate |
 | `timed_out` | `system:timeout` | `timeout_auto_rejected` | `rejected` | No response within 300s |
 
-Approval records are not part of the hash chain, so a session with pending, rejected or timed-out actions still verifies as `VALID`. An [evidence bundle](/guides/evidence-bundles) shows each approval next to the action it decided.
+Approval records are not part of the hash chain, so a session with pending, rejected or timed-out actions still verifies as `VALID`. They are covered by the session's [seal](/how-it-works#the-session-seal), though: once the session has closed, editing an approval or an action's `authorization_status` verifies as `TAMPERED`. An [evidence bundle](/guides/evidence-bundles) shows each approval next to the action it decided.
 
 <Warning>
   **`approver_id` is the operating-system login of whoever ran `rootsign approve`**, written as `cli:<user>`. RootSign does not authenticate the approver: anyone who can run the CLI against the database can approve or reject, and `authorization_status` is not covered by the hash chain. Control who can reach the database, and treat `approver_id` as a label, not proof of identity.

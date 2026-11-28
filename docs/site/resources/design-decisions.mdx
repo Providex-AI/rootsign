@@ -26,4 +26,4 @@ RootSign's design decisions are written down as architecture decision records (A
 | [ADR-015](https://github.com/Providex-AI/rootsign/blob/main/docs/adr/ADR-015-sync-receipts.md) | Every upload attempt leaves a receipt of what the endpoint accepted and refused |
 | [ADR-016](https://github.com/Providex-AI/rootsign/blob/main/docs/adr/ADR-016-session-seal.md) | A seal on each session's close record makes a cut tail, an edited session event and an edited approval or decision detectable. Not yet in a release |
 
-All sixteen are accepted. ADR-016 is not implemented yet: the seal ships in a release after 0.4.0, and until then the limits in [How it works](/how-it-works#what-verify-does-not-check) still apply. The [`docs/adr` folder](https://github.com/Providex-AI/rootsign/tree/main/docs/adr) on GitHub has the full text.
+All sixteen are accepted. ADR-016, the [session seal](/how-it-works#the-session-seal), is implemented on `main` and ships in the release after 0.4.0; sessions recorded by 0.4.0 and earlier have no seal. The [`docs/adr` folder](https://github.com/Providex-AI/rootsign/tree/main/docs/adr) on GitHub has the full text.
